@@ -1,0 +1,5 @@
+USER:                              # Пользователь (если пусто - из cloud-init)
+URL: "http://192.168.202.78"       # URL для отображения в киоске
+DISPLAY: ":0"                      # X Display для Chromium
+KEYBOARD_ENABLED: true             # Включить onboard экранную клавиатуру (auto-show)
+CHROMIUM_FLAGS: "--disable-pinch --overscroll-history-navigation=0"

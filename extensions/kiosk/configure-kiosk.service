@@ -1,0 +1,20 @@
+[Unit]
+Description=Configure kiosk mode after graphical session is ready
+After=graphical.target gdm.service gdm3.service lightdm.service display-manager.service
+Wants=graphical.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/vmsetup/kiosk/configure.sh
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/root
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=configure-kiosk
+TimeoutStartSec=300
+
+[Install]
+WantedBy=graphical.target

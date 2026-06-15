@@ -1,0 +1,16 @@
+[Unit]
+Description=Configure Docker access for cloud-init user
+After=network.target network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/vmsetup/docker/configure.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=configure-docker
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

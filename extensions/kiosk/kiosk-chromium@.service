@@ -1,0 +1,33 @@
+[Unit]
+Description=Chromium kiosk mode for user %i
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=%i
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/%i/.Xauthority"
+EnvironmentFile=-/var/lib/kiosk/config
+
+# Wait for X server to be ready (retry up to 10 seconds)
+ExecStartPre=/bin/bash -c 'for i in {1..10}; do if xdpyinfo -display ${DISPLAY} >/dev/null 2>&1; then exit 0; fi; sleep 1; done; exit 1'
+
+# Launch Chromium in kiosk mode with configured URL and flags
+ExecStart=/bin/bash -c ' \
+  BASE_FLAGS="--kiosk --noerrdialogs --disable-infobars --no-first-run --disable-translate --disable-session-crashed-bubble --disable-features=TranslateUI"; \
+  EXTRA_FLAGS="${CHROMIUM_FLAGS:-}"; \
+  URL="${URL:-https://github.com/iamletenkov/bisquite}"; \
+  exec chromium $BASE_FLAGS $EXTRA_FLAGS "$URL" \
+'
+
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kiosk-chromium-%i
+
+[Install]
+WantedBy=graphical.target

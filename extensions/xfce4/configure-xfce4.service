@@ -1,0 +1,17 @@
+[Unit]
+Description=Configure Xfce4/LightDM autologin from cloud-init user
+DefaultDependencies=no
+After=local-fs.target network-online.target
+Before=lightdm.service display-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/vmsetup/xfce4/configure.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=configure-xfce4
+TimeoutStartSec=300
+
+[Install]
+WantedBy=lightdm.service display-manager.service

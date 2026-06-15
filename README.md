@@ -2,87 +2,94 @@
 
 Переиспользуемые «расширения» провизии для образов, собираемых
 [bisquite](https://github.com/iamletenkov/bisquite). Каждое расширение — папка
-со скриптом установки и (опционально) конфигами/юнитами. Подключаются в сборку
-через `COPY_IN` + `RUN_COMMAND`.
-
-Это «задача минимум»: общие версионируемые файлы без отдельного пакетного
-менеджера. Метаданные (`extension.yml`) пока документирующие, не enforced.
+со скриптами установки и конфигурации. Подключаются в сборку через `COPY_IN`
++ запуск `install.sh`.
 
 ## Структура
 
+Все расширения лежат под `extensions/`:
+
 ```
-bisquite-extensions/
-├── docker/          # Docker CE (engine + compose)
-├── portainer/       # Portainer CE (зависит от docker)
+extensions/
+├── docker/          # Docker CE + добавление cloud-init пользователя в группу docker
 ├── code-server/     # VS Code в браузере
-└── chromium-kiosk/  # полноэкранный Chromium (cage/wayland)
+├── chromium-kiosk/  # полноэкранный Chromium (kiosk)
+├── kiosk/           # kiosk-вариант (chromium через шаблонный unit)
+├── gnome/           # GNOME-десктоп
+├── xfce4/           # XFCE-десктоп
+├── lxde/            # LXDE-десктоп
+├── x11vnc/          # VNC-сервер поверх X
+└── nvidia/          # драйверы NVIDIA
 ```
 
-Каждое расширение:
+## Конвенция расширения
+
 ```
-<name>/
-├── install.sh       # ставится во время сборки, внутри образа, от root, идемпотентно
-├── extension.yml    # метаданные: версия, ОС, зависимости, параметры
-└── README.md        # что делает и какие параметры
+extensions/<name>/
+├── install.sh                  # этап сборки: ставит софт, регистрирует configure-сервис
+├── configure.sh                # первый запуск: до-настройка под конкретную ВМ
+├── configure-<name>.service    # systemd-oneshot, гоняет configure.sh на загрузке
+├── get_cloud_user.sh           # резолв cloud-init пользователя (общий помощник)
+├── config.yaml                 # опциональный конфиг расширения
+└── README.md
 ```
 
-## Конвенция
+Двухфазная модель:
+1. **Сборка (`install.sh`)** — ставит софт (apt/официальные скрипты, с ретраями),
+   копирует/включает `configure-<name>.service`. Запускается внутри образа.
+2. **Первый запуск (`configure.sh` через systemd-oneshot)** — доделывает то, что
+   зависит от конкретной ВМ: например, резолвит cloud-init пользователя через
+   `cloud-init query userdata | yq` и добавляет его в нужные группы. Идемпотентно.
 
-- **install.sh** запускается на этапе сборки внутри гостя (через `RUN_COMMAND`),
-  от root, идемпотентно. Параметры читает из переменных окружения с дефолтами.
-- **Сервисы рантайма** ставятся как systemd-юниты с `systemctl enable` (само
-  включение работает offline в virt-customize; сервис стартует на реальной
-  загрузке). Поэтому отдельный `FIRSTBOOT` обычно не нужен.
-- **Параметры** — env-переменные, передаются перед вызовом install.sh.
-- **Зависимости** — по соглашению: ставь зависимые расширения раньше (например
-  `docker` перед `portainer`).
+Поэтому в образе должны быть `cloud-init` и `yq` (их ставит базовый VMFILE).
 
-## Как подключить в образе
+## Как подключить в VMFILE
 
-В CI-пайплайне image-проекта клонируй этот публичный репозиторий в контекст
-сборки (см. шаблон bisquite `examples/ci/`):
+Расширение копируется в `/opt/vmsetup/`, скрипты делаются исполняемыми, затем
+запускается `install.sh` (некоторые принимают аргументы):
+
+```dockerfile
+COPY_IN extensions/docker:/opt/vmsetup/
+RUN_COMMAND chmod +x /opt/vmsetup/docker/*.sh
+RUN_COMMAND /opt/vmsetup/docker/install.sh
+
+COPY_IN extensions/code-server:/opt/vmsetup/
+RUN_COMMAND chmod +x /opt/vmsetup/code-server/*.sh
+RUN_COMMAND /opt/vmsetup/code-server/install.sh --version 4.104.3
+```
+
+## Как доставить расширения в сборку (CI)
+
+Это публичный репозиторий — клонируй его в контекст сборки image-проекта по тегу
+(тег = версия набора расширений):
 
 ```yaml
 variables:
   EXT_REPO: https://github.com/iamletenkov/bisquite-extensions.git
-  EXT_VERSION: v1.0.0          # тег = версия набора расширений
+  EXT_VERSION: v1.0.0
 before_script:
-  - rm -rf extensions
-  - git clone --depth 1 --branch "$EXT_VERSION" "$EXT_REPO" extensions
+  - rm -rf bisquite-extensions
+  - git clone --depth 1 --branch "$EXT_VERSION" "$EXT_REPO"
 ```
 
-В VMFILE ссылайся на пути внутри контекста и передавай параметры:
+Тогда в VMFILE путь — `bisquite-extensions/extensions/<name>`:
 
 ```dockerfile
-FROM debian:12
-LABEL os=linux
-
-# docker
-COPY_IN extensions/docker:/opt/ext/docker
-RUN_COMMAND DOCKER_USERS=debian bash /opt/ext/docker/install.sh
-
-# portainer (после docker)
-COPY_IN extensions/portainer:/opt/ext/portainer
-RUN_COMMAND PORTAINER_PORT=9443 bash /opt/ext/portainer/install.sh
+COPY_IN bisquite-extensions/extensions/docker:/opt/vmsetup/
+RUN_COMMAND chmod +x /opt/vmsetup/docker/*.sh
+RUN_COMMAND /opt/vmsetup/docker/install.sh
 ```
-
-Финальный образ загрузится с docker и автозапуском Portainer на `:9443`.
 
 ## Версионирование
 
-Версия набора расширений — это **git-тег этого репозитория**. Image-проект
-пинит её через `EXT_VERSION`. Тегай по semver (`v1.0.0`, `v1.1.0`).
+Версия набора расширений — это git-тег этого репозитория; image-проект пинит её
+через `EXT_VERSION`. Тегай по semver (`v1.0.0`, `v1.1.0`).
 
-## Как добавить расширение
+## Зависимости и применимость
 
-1. Создай папку `<name>/` с `install.sh` (идемпотентный, читает env-параметры),
-   `extension.yml` (метаданные) и `README.md`.
-2. Если есть рантайм-сервис — ставь systemd-юнит и `systemctl enable`.
-3. Поставь новый тег.
+Пока — по соглашению (в README конкретных расширений):
+- десктопы (`gnome`/`xfce4`/`lxde`) обычно идут в паре с `x11vnc`;
+- графические расширения требуют графической базы и (для `nvidia`) GPU.
 
-## Оговорки
-
-- Большие бинари в git не клади — качай в install.sh (`curl`) или пеки в базовый образ.
-- `chromium-kiosk` требует графической базы/GPU-seat и тюнинга под железо.
-- `extension.yml` пока не парсится bisquite — это документация и задел на будущий
-  OCI-«магазин расширений».
+Структурированные метаданные (ОС/версии/зависимости/параметры) — задел на будущий
+OCI-«магазин расширений»; сейчас их нет.

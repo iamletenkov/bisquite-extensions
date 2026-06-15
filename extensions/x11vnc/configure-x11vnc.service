@@ -1,0 +1,17 @@
+[Unit]
+Description=Configure x11vnc from cloud-init user
+DefaultDependencies=no
+After=graphical.target display-manager.service lightdm.service
+Requires=display-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/vmsetup/x11vnc/configure.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=configure-x11vnc
+TimeoutStartSec=300
+
+[Install]
+WantedBy=graphical.target

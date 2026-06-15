@@ -1,0 +1,17 @@
+[Unit]
+Description=Configure chromium-kiosk before config watcher starts
+DefaultDependencies=no
+After=local-fs.target network-online.target
+Before=chromium-kiosk_configwatcher.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/vmsetup/chromium-kiosk/configure.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=configure-chromium-kiosk
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

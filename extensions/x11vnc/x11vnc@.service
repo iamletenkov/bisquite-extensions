@@ -1,0 +1,17 @@
+[Unit]
+Description=x11vnc VNC server for display :0 (user %i)
+After=graphical.target display-manager.service
+Requires=display-manager.service
+
+[Service]
+Type=simple
+User=%i
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/var/run/lightdm/%i/:0
+ExecStartPre=/bin/bash -c 'for i in {1..30}; do [ -S /tmp/.X11-unix/X0 ] && break || sleep 2; done'
+ExecStart=/usr/bin/x11vnc -display :0 -auth /var/run/lightdm/%i/:0 -forever -loop -noxdamage -repeat -rfbport 5900 -shared -nopw
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target

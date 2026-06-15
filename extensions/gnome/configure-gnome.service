@@ -1,0 +1,17 @@
+[Unit]
+Description=Configure GNOME/GDM autologin from cloud-init user
+DefaultDependencies=no
+After=local-fs.target network-online.target
+Before=gdm.service gdm3.service display-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/vmsetup/gnome/configure.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=configure-gnome
+TimeoutStartSec=300
+
+[Install]
+WantedBy=gdm.service gdm3.service display-manager.service
