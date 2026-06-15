@@ -1,0 +1,14 @@
+name: chromium-kiosk
+version: 1.0.0
+description: Полноэкранный Chromium в режиме kiosk через cage (wayland).
+os:
+  - debian: ">=12"
+depends: []
+params:
+  KIOSK_URL:
+    default: https://example.com
+    description: Стартовый URL киоска.
+  KIOSK_USER:
+    default: kiosk
+    description: Пользователь kiosk-сессии.
+notes: Требует графической базы и GPU/DRM seat; тюнингуйте под железо.
