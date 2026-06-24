@@ -351,6 +351,10 @@ purge_package() {                # $1 = network | dhcp | firewall
 apply_network_config() {
 	local nf="$CIDATA/network-config"
 	[ -f "$nf" ] || return 0
+	if ! validate_netcfg "$nf"; then
+		logger -t "$PROG" "network-config невалиден (нет WAN) — пропуск, текущая сеть сохранена"
+		return 1
+	fi
 	logger -t "$PROG" "applying network-config"
 
 	# ---------- DNS ---------------------------------------------------
@@ -498,6 +502,7 @@ EOF
 	/etc/init.d/dnsmasq restart
 	/etc/init.d/firewall restart
 	[ -x /etc/init.d/uhttpd ] && /etc/init.d/uhttpd restart
+	return 0
 }
 
 # --------------------------------------------------------------- main --
