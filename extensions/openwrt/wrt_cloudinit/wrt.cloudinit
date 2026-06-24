@@ -13,6 +13,20 @@ PROG="wrt.cloudinit"
 CIDATA=/mnt/cidata
 CLOUDINIT_READY_FLAG=/run/wrt-cloudinit.ready
 FIRSTBOOT_SCRIPT=/usr/libexec/bisquite-firstboot.sh
+WRT_LIBDIR=/usr/lib/wrt-cloudinit
+
+# Подъём чистых функций из lib (парсеры, state). FATAL, если их нет.
+load_libs() {
+	[ -d "$WRT_LIBDIR" ] || return 1
+	found=0
+	for f in "$WRT_LIBDIR"/*.sh; do
+		[ -f "$f" ] || continue
+		# shellcheck disable=SC1090
+		. "$f" || return 1
+		found=1
+	done
+	[ "$found" = 1 ]
+}
 
 # ---------------------------------------------------------------- cidata
 command -v mountpoint >/dev/null 2>&1 || alias mountpoint='busybox mountpoint'
@@ -43,45 +57,6 @@ run_firstboot_commands() {
 		logger -t "$PROG" "firstboot commands failed"
 	fi
 	rm -f "$script"
-}
-
-# ---------------- YAML → iface|proto|ip|mask|gw ------------------------
-parse_netcfg() {
-	awk '
-		function ind(s){match(s,/^[ ]*/);return RLENGTH}
-		function flush(){
-			if(iface){
-				p = proto ? proto : "dhcp"
-				printf "%s|%s|%s|%s|%s\n", iface, p, ip, mask, gw
-			}
-			in_phys = 0; iface = proto = ip = mask = gw = ""; phys_ind = -1
-		}
-		/^[ ]*-[ ]*type:[ ]*physical/          { flush(); in_phys=1; phys_ind=ind($0); next }
-		in_phys && /^[ ]*-[ ]*type:/ && ind($0) <= phys_ind { flush(); next }
-
-		in_phys {
-			if($0~/^[ ]*name:/)                iface = $2
-			if($0~/-[ ]*type:[ ]*static/)      proto = "static"
-			if($0~/-[ ]*type:[ ]*dhcp4/)       proto = "dhcp"
-			if($0~/^[ ]*address:/)             ip   = $2
-			if($0~/^[ ]*netmask:/)             mask = $2
-			if($0~/^[ ]*gateway:/)             gw   = $2
-		}
-		END{ flush() }
-	' "$1" | tr -d "\"'"
-}
-
-# nameserver-block → DNS|search
-read_dns() {
-	awk '
-		BEGIN{dns="";srch=""}
-		/type:[ ]*nameserver/ {ns=1; next}
-		ns && /address:/      {adr=1; next}
-		ns && /search:/       {adr=0; sr=1; next}
-		adr && /-[ ]*/        {gsub(/[^0-9.]/,""); dns=$0; adr=sr=ns=0}
-		sr  && /-[ ]*/        {gsub(/[^A-Za-z0-9_.-]/,""); srch=$0; adr=sr=ns=0}
-		END{print dns"|"srch}
-	' "$1"
 }
 
 # ------------------------------------------------ user-data (host/pwd) --
@@ -268,6 +243,7 @@ ensure_home() {
 }
 
 rpcd_acl_has_value() {
+	# shellcheck disable=SC2318
 	local section=$1 field=$2 value=$3 key="rpcd.$section.$field"
 	uci -q show "$key" 2>/dev/null | grep -F "$key='$value'" >/dev/null 2>&1
 }
@@ -423,12 +399,23 @@ EOF
 			# ------- LANs --------------------------------------------
 			if [ "$idx" -eq 1 ]; then
 				NAME="lan"
+				BRDEV="br-lan"
 			else
 				NAME="lan$((idx-1))"
+				BRDEV="br-lan$((idx-1))"
 			fi
 
+			# LAN всегда через мост: чтобы к нему можно было
+			# добавлять Wi-Fi AP (phy*-ap*) и доп. порты.
+			# Имя uci-секции — без дефисов (br_lan), netdev — br-lan.
+			BRSEC=$(echo "$BRDEV" | tr -- '-' '_')
+			uci set network."$BRSEC"=device
+			uci set network."$BRSEC".name="$BRDEV"
+			uci set network."$BRSEC".type='bridge'
+			uci add_list network."$BRSEC".ports="$IFACE"
+
 			uci set network."$NAME"=interface
-			uci set network."$NAME".device="$IFACE"
+			uci set network."$NAME".device="$BRDEV"
 
 			if [ "$PROTO" = "static" ]; then
 				# ---- static + DHCP-server ----------------------------
@@ -445,7 +432,7 @@ EOF
 				# ---- DHCP-client -------------------------------------
 				uci set network."$NAME".proto='dhcp'
 			fi
-			LAN_DEVS="$LAN_DEVS $IFACE"
+			LAN_DEVS="$LAN_DEVS $BRDEV"
 		fi
 		idx=$((idx+1))
 	done <<EOF

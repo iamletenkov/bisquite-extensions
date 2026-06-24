@@ -20,6 +20,13 @@ assert_eq(){ # desc expected actual
 # shellcheck disable=SC1090
 for f in "$LIB"/*.sh; do . "$f"; done
 
+# --- lint ---
+for f in "$LIB"/*.sh; do
+	shellcheck -s dash "$f" || die "shellcheck $f"
+done
+shellcheck -s dash -e SC1090,SC1091,SC2034 "$ROOT/wrt.cloudinit" || die "shellcheck wrt.cloudinit"
+sh -n "$ROOT/wrt.cloudinit" || die "sh -n wrt.cloudinit"
+
 # --- parse_netcfg ---
 assert_eq "parse_netcfg wan-dhcp-lan-static" \
 "eth0|dhcp|||
