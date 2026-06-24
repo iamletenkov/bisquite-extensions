@@ -13,10 +13,13 @@ PROG="wrt.cloudinit"
 CIDATA=/mnt/cidata
 CLOUDINIT_READY_FLAG=/run/wrt-cloudinit.ready
 FIRSTBOOT_SCRIPT=/usr/libexec/bisquite-firstboot.sh
-WRT_LIBDIR=/usr/lib/wrt-cloudinit
+# Путь должен совпадать с тем, куда COPY_IN кладёт lib/ в openwrt.vmfile
+# (virt-customize --copy-in вкладывает basename: lib → /usr/lib/wrt-cloudinit/lib).
+WRT_LIBDIR=/usr/lib/wrt-cloudinit/lib
 
 # Подъём чистых функций из lib (парсеры, state). FATAL, если их нет.
 load_libs() {
+	local found
 	[ -d "$WRT_LIBDIR" ] || return 1
 	found=0
 	for f in "$WRT_LIBDIR"/*.sh; do
@@ -507,6 +510,7 @@ EOF
 
 # --------------------------------------------------------------- main --
 start_service() {
+	local SEED_ID
 	load_libs || {
 		logger -t "$PROG" "FATAL: нет lib в $WRT_LIBDIR — abort (сеть не трогаем)"
 		mark_cloudinit_ready
