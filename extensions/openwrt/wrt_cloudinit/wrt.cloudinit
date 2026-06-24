@@ -502,15 +502,38 @@ EOF
 
 # --------------------------------------------------------------- main --
 start_service() {
+	load_libs || {
+		logger -t "$PROG" "FATAL: нет lib в $WRT_LIBDIR — abort (сеть не трогаем)"
+		mark_cloudinit_ready
+		return 1
+	}
+
 	mount_cidata || { logger -t "$PROG" "cidata not found – skip"; mark_cloudinit_ready; return 0; }
 
 	[ -f "$CIDATA/meta-data" ] && \
-		logger -t "$PROG" "instance-id: $(awk -F': *' '$1=="instance-id"{print $2}' "$CIDATA/meta-data")"
+		logger -t "$PROG" "instance-id: $(get_seed_instance_id "$CIDATA/meta-data")"
 
+	SEED_ID=$(get_seed_instance_id "$CIDATA/meta-data")
+	: "${SEED_ID:=nocloud}"
+
+	if already_provisioned "$SEED_ID"; then
+		logger -t "$PROG" "instance '$SEED_ID' already provisioned — per-boot only"
+		mark_cloudinit_ready
+		umount_cidata
+		return 0
+	fi
+
+	logger -t "$PROG" "provisioning instance '$SEED_ID'"
 	apply_user_data
 	ensure_root_rpcd_login
-	apply_network_config
-	run_firstboot_commands
+	if apply_network_config; then
+		run_firstboot_commands
+		mark_provisioned "$SEED_ID" && \
+			logger -t "$PROG" "instance '$SEED_ID' provisioned"
+	else
+		logger -t "$PROG" "network provisioning failed — retry next boot"
+	fi
+
 	mark_cloudinit_ready
 	umount_cidata
 }
