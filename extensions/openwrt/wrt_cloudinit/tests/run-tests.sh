@@ -57,4 +57,15 @@ emptyf="$(mktemp)"; printf 'version: 1\nconfig: []\n' > "$emptyf"
 if validate_netcfg "$emptyf"; then die "validate empty → fail"; else pass "validate empty → fail"; fi
 rm -f "$emptyf"
 
+# --- state.sh ---
+TMP=$(mktemp -d)
+WRT_STATE_DIR="$TMP/state"
+if already_provisioned "x1"; then die "state: empty → not provisioned"; else pass "state: empty → not provisioned"; fi
+if mark_provisioned "x1"; then pass "state: mark ok"; else die "state: mark ok"; fi
+if already_provisioned "x1"; then pass "state: same id → provisioned"; else die "state: same id → provisioned"; fi
+if already_provisioned "x2"; then die "state: diff id → not provisioned"; else pass "state: diff id → not provisioned"; fi
+if already_provisioned ""; then die "state: empty id arg → not provisioned"; else pass "state: empty id arg → not provisioned"; fi
+rm -rf "$TMP"
+unset WRT_STATE_DIR
+
 [ "$fail" = 0 ] && { echo "ALL PASS"; exit 0; } || { echo "FAILURES"; exit 1; }
