@@ -37,7 +37,28 @@ command -v mountpoint >/dev/null 2>&1 || alias mountpoint='busybox mountpoint'
 mount_cidata() {
 	[ -d "$CIDATA" ] || mkdir -p "$CIDATA"
 	mountpoint -q "$CIDATA" && return 0
-	mount -o ro /dev/sr0 "$CIDATA" 2>/dev/null
+
+	# /dev/sr0 — сид от Proxmox: адаптер вешает его как ide2 media=cdrom.
+	mount -o ro /dev/sr0 "$CIDATA" 2>/dev/null && return 0
+
+	# Раздел с меткой cidata — сид от `bs device write`: писалка создаёт
+	# FAT32-раздел в конце носителя. Раньше он не искался вовсе, и карта,
+	# записанная бисквитом, приезжала без пользователя, пароля и сети.
+	for dev in $(find_cidata_device); do
+		mount -o ro "$dev" "$CIDATA" 2>/dev/null && return 0
+	done
+	return 1
+}
+
+# find_cidata_device → пути блочных устройств с меткой cidata (0 или больше)
+find_cidata_device() {
+	# `block info` есть в OpenWrt всегда (пакет block-mount), `blkid` — не всегда.
+	if command -v block >/dev/null 2>&1; then
+		block info 2>/dev/null | sed -n 's|^\(/dev/[^:]*\):.*LABEL="cidata".*|\1|p'
+	fi
+	if command -v blkid >/dev/null 2>&1; then
+		blkid -t LABEL=cidata -o device 2>/dev/null
+	fi
 }
 
 umount_cidata() {
@@ -64,23 +85,71 @@ run_firstboot_commands() {
 
 # ------------------------------------------------ user-data (host/pwd) --
 apply_user_data() {
-	local f="$CIDATA/user-data"
-	[ -f "$f" ] || return 0
+	local ud="$CIDATA/user-data"
+	[ -f "$ud" ] || return 0
 
 	local host ci_user ci_pass
-	host=$(awk -F': *' '$1=="hostname"||$1=="fqdn"{print $2;exit}' "$f" | tr -d ' "')
-	[ -n "$host" ] && uci set system.@system[0].hostname="$host"
+	host=$(awk -F': *' '$1=="hostname"||$1=="fqdn"{print $2;exit}' "$ud" | tr -d ' "')
+	if [ -n "$host" ]; then
+		# `uci commit system` обязателен: без него имя остаётся в staging,
+		# а staging лежит в tmpfs. Образ по замыслу перезагружается дважды
+		# (70-rootpt-resize и 80-rootfs-resize), и незакоммиченное имя
+		# пропадало. Раньше оно уцелевало только по совпадению тайминга.
+		uci set system.@system[0].hostname="$host"
+		uci commit system
+	fi
 
-	ci_user=$(awk -F': *' '$1=="user"{print $2;exit}' "$f" | tr -d ' "')
-	ci_pass=$(awk -F': *' '$1=="password"{print $2;exit}' "$f" | tr -d ' "')
+	# Плоские ключи — диалект Proxmox: их пишет сам гипервизор при
+	# `bs compose up`.
+	ci_user=$(awk -F': *' '$1=="user"{print $2;exit}' "$ud" | tr -d ' "')
+	ci_pass=$(awk -F': *' '$1=="password"{print $2;exit}' "$ud" | tr -d ' "')
 
 	if [ -n "$ci_user" ] && [ -n "$ci_pass" ]; then
 		create_ci_admin "$ci_user" "$ci_pass" || \
 			logger -t "$PROG" "failed to provision user $ci_user"
+		install_ssh_keys "$ci_user" "$ud"
+		return 0
 	elif [ -n "$ci_user" ] && [ -z "$ci_pass" ]; then
 		logger -t "$PROG" "user '$ci_user' requested but password missing"
+		return 0
 	fi
 
+	# Список `users:` — стандартный cloud-config, его пишет `bs device write`.
+	# `create_ci_admin` готовый хеш пропускает как есть: `prepare_password_hash`
+	# отдаёт без изменений всё, что начинается с `$`.
+	parse_users "$ud" | while IFS='|' read -r name hash; do
+		[ -n "$name" ] || continue
+		if [ -z "$hash" ]; then
+			logger -t "$PROG" "user '$name' requested but password missing"
+			continue
+		fi
+		create_ci_admin "$name" "$hash" || \
+			logger -t "$PROG" "failed to provision user $name"
+		install_ssh_keys "$name" "$ud"
+	done
+}
+
+# ------------------------------------------------------- ssh-ключи ------
+# Раньше `ssh_authorized_keys` не обрабатывался вовсе: ключи из манифеста
+# бисквита доезжали до карты и там оставались. Ключи кладутся и пользователю,
+# и root — dropbear на OpenWrt читает authorized_keys обоих.
+install_ssh_keys() {
+	local user=$1 file=$2 home keys dir
+
+	keys=$(parse_ssh_keys "$file" "$user")
+	[ -n "$keys" ] || return 0
+
+	home=$(user_field "$user" 6)
+	[ -n "$home" ] || home="/home/$user"
+
+	for dir in "$home/.ssh" /etc/dropbear; do
+		[ -d "$dir" ] || mkdir -p "$dir" || continue
+		printf '%s\n' "$keys" >> "$dir/authorized_keys"
+		chmod 0700 "$dir" 2>/dev/null || true
+		chmod 0600 "$dir/authorized_keys" 2>/dev/null || true
+	done
+	chown -R "$user:$user" "$home/.ssh" 2>/dev/null || true
+	logger -t "$PROG" "ssh keys installed for $user"
 }
 
 # -------------------------- CI user helpers ----------------------------
@@ -160,6 +229,11 @@ prepare_password_hash() {
 }
 
 ensure_system_files() {
+	# `local` обязателен: в dash область видимости динамическая, и цикл без
+	# него затирает переменную ВЫЗЫВАЮЩЕГО. Именно так `apply_user_data`
+	# теряла путь к user-data — после create_ci_admin её `$f` становился
+	# `/etc/shadow`, и ssh-ключи искались не в том файле.
+	local f
 	for f in /etc/passwd /etc/group /etc/shadow; do
 		[ -f "$f" ] || touch "$f"
 	done
@@ -354,7 +428,8 @@ purge_package() {                # $1 = network | dhcp | firewall
 apply_network_config() {
 	local nf="$CIDATA/network-config"
 	[ -f "$nf" ] || return 0
-	if ! validate_netcfg "$nf"; then
+	# Валидация тоже по обеим версиям: v2 приезжает от `bs device write`.
+	if ! parse_netcfg_any "$nf" | grep -q '^[^|][^|]*|'; then
 		logger -t "$PROG" "network-config невалиден (нет WAN) — пропуск, текущая сеть сохранена"
 		return 1
 	fi
@@ -443,7 +518,7 @@ EOF
 		fi
 		idx=$((idx+1))
 	done <<EOF
-$(parse_netcfg "$nf")
+$(parse_netcfg_any "$nf")
 EOF
 
 	uci commit network

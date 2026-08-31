@@ -44,6 +44,48 @@ eth1|static|192.168.51.1|255.255.255.0|
 eth2|static|192.168.52.1|255.255.255.0|" \
 "$(parse_netcfg "$FIX/multi-lan/network-config")"
 
+# --- формат bisquite: стандартный cloud-init ------------------------------
+# Фикстура снята с настоящего `CloudInitGenerator`, а не написана руками:
+# иначе тест проверял бы представление автора о формате, а не сам формат.
+BSW="$FIX/bisquite-device-write"
+
+assert_eq "netcfg_version: bisquite → 2" "2" "$(netcfg_version "$BSW/network-config")"
+assert_eq "netcfg_version: proxmox → 1" "1" \
+"$(netcfg_version "$FIX/wan-static-lan-static/network-config")"
+
+assert_eq "parse_netcfg_any v2 (bisquite)" \
+"eth0|dhcp|||
+eth1|static|192.168.51.1|255.255.255.0|192.168.51.254" \
+"$(parse_netcfg_any "$BSW/network-config")"
+
+# Контроль: v1 через тот же вход разбирается по-прежнему — значит поддержка
+# Proxmox не потеряна.
+assert_eq "parse_netcfg_any v1 (proxmox, контроль)" \
+"eth0|static|192.168.31.137|255.255.255.0|192.168.31.1
+eth1|static|192.168.51.1|255.255.255.0|" \
+"$(parse_netcfg_any "$FIX/wan-static-lan-static/network-config")"
+
+assert_eq "parse_users: имя и готовый хеш" "ops" \
+"$(parse_users "$BSW/user-data" | cut -d'|' -f1)"
+
+case "$(parse_users "$BSW/user-data" | cut -d'|' -f2)" in
+	\$6\$*) pass "parse_users: хеш в формате sha512-crypt" ;;
+	*)      die  "parse_users: хеш не распознан" ;;
+esac
+
+# Контроль: у сида Proxmox списка users нет — парсер обязан молчать, а не
+# выдумывать пользователя.
+assert_eq "parse_users: proxmox → пусто" "" \
+"$(parse_users "$FIX/wan-static-lan-static/meta-data")"
+
+assert_eq "parse_ssh_keys: оба ключа" \
+"ssh-ed25519 AAAAC3Nz probe@host
+ssh-rsa AAAAB3Nza second@host" \
+"$(parse_ssh_keys "$BSW/user-data" ops)"
+
+assert_eq "parse_ssh_keys: чужой пользователь → пусто" "" \
+"$(parse_ssh_keys "$BSW/user-data" nobody)"
+
 # --- read_dns ---
 assert_eq "read_dns wan-dhcp-lan-static" "1.1.1.1|lan" \
 "$(read_dns "$FIX/wan-dhcp-lan-static/network-config")"
