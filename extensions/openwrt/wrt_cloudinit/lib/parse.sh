@@ -181,3 +181,68 @@ parse_ssh_keys() {
 		in_users && keys { keys = 0 }
 	' "$1"
 }
+
+# parse_root_password <user-data> → хеш пароля root (пусто, если не задан)
+#
+# Бисквит пишет его через `chpasswd: list: - root:$6$...`, а не в списке
+# `users:`. Раньше это не читалось вовсе, и устройство приезжало с ПУСТЫМ
+# паролем root — то есть в дефолтном состоянии OpenWrt, хотя манифест просил
+# другое. Двоеточие делится только первое: хеш sha512-crypt сам содержит `$`.
+parse_root_password() {
+	awk '
+		function ind(s){match(s,/^[ ]*/);return RLENGTH}
+		/^[ ]*chpasswd:[ ]*$/ { in_cp = 1; cp_ind = ind($0); next }
+		in_cp && /^[ ]*[a-z_]+:/ && ind($0) <= cp_ind { in_cp = 0 }
+		in_cp && /^[ ]*-[ ]*root:/ {
+			v = $0
+			sub(/^[ ]*-[ ]*root:[ ]*/, "", v)
+			gsub(/["]/, "", v)
+			print v
+			exit
+		}
+	' "$1"
+}
+
+# read_dns_v2 <network-config> → DNS|search (первый адрес и первый домен)
+read_dns_v2() {
+	awk '
+		/^[ ]*nameservers:[ ]*$/ { ns = 1; mode = ""; next }
+		ns && /^[ ]*addresses:[ ]*$/ { mode = "dns";    next }
+		ns && /^[ ]*search:[ ]*$/    { mode = "search"; next }
+		ns && /^[ ]*-/ {
+			v = $0; sub(/^[ ]*-[ ]*/, "", v)
+			gsub(/[^0-9A-Za-z.:_-]/, "", v)
+			if (mode == "dns"    && dns  == "") dns  = v
+			if (mode == "search" && srch == "") srch = v
+			next
+		}
+		ns && /^[ ]*[a-z_]+:/ { ns = 0; mode = "" }
+		END { print dns "|" srch }
+	' "$1"
+}
+
+# read_dns_any <network-config> → DNS|search независимо от версии
+read_dns_any() {
+	if [ "$(netcfg_version "$1")" = 2 ]; then
+		read_dns_v2 "$1"
+	else
+		read_dns "$1"
+	fi
+}
+
+# parse_runcmd <user-data> → построчно команды из `runcmd:`
+#
+# Бисквит кладёт firstboot-команды манифеста именно сюда. Агент читал только
+# /usr/libexec/bisquite-firstboot.sh, который наполняет Proxmox-адаптер, —
+# поэтому команды из `bs device write` не выполнялись никогда.
+parse_runcmd() {
+	awk '
+		function ind(s){match(s,/^[ ]*/);return RLENGTH}
+		/^[ ]*runcmd:[ ]*$/ { in_rc = 1; rc_ind = ind($0); next }
+		in_rc && /^[ ]*[a-z_]+:/ && ind($0) <= rc_ind { in_rc = 0 }
+		in_rc && /^[ ]*-/ {
+			v = $0; sub(/^[ ]*-[ ]*/, "", v)
+			if (v != "") print v
+		}
+	' "$1"
+}

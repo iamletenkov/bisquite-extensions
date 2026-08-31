@@ -127,6 +127,47 @@ apply_user_data() {
 			logger -t "$PROG" "failed to provision user $name"
 		install_ssh_keys "$name" "$ud"
 	done
+
+	apply_root_password "$ud"
+	stage_runcmd "$ud"
+}
+
+# --------------------------------------------------- пароль root --------
+# Бисквит пишет его через `chpasswd: list: - root:$6$…`, а не в списке
+# `users:`. Раньше это не читалось, и устройство приезжало с ПУСТЫМ паролем
+# root — то есть в дефолтном состоянии OpenWrt, хотя манифест просил другое.
+apply_root_password() {
+	local hash
+	hash=$(parse_root_password "$1")
+	[ -n "$hash" ] || return 0
+
+	ensure_system_files
+	if ! grep -q '^root:' /etc/shadow 2>/dev/null; then
+		printf 'root:!:0:0:99999:7:::\n' >> /etc/shadow
+	fi
+	update_shadow_entry root "$hash"
+	logger -t "$PROG" "root password set from seed"
+}
+
+# ------------------------------------------------ firstboot из runcmd ---
+# Команды манифеста бисквит кладёт в `runcmd:`. Отдельного механизма для них
+# не заводим: выгружаем в тот же скрипт, который наполняет Proxmox-адаптер,
+# и его выполняет уже существующий run_firstboot_commands — с логированием и
+# удалением после запуска.
+stage_runcmd() {
+	local cmds
+	[ -s "$FIRSTBOOT_SCRIPT" ] && return 0
+
+	cmds=$(parse_runcmd "$1")
+	[ -n "$cmds" ] || return 0
+
+	mkdir -p "$(dirname "$FIRSTBOOT_SCRIPT")" 2>/dev/null || return 0
+	{
+		echo '#!/bin/sh'
+		printf '%s\n' "$cmds"
+	} > "$FIRSTBOOT_SCRIPT"
+	chmod +x "$FIRSTBOOT_SCRIPT" 2>/dev/null || true
+	logger -t "$PROG" "staged $(printf '%s\n' "$cmds" | wc -l) runcmd entries"
 }
 
 # ------------------------------------------------------- ssh-ключи ------
@@ -437,7 +478,7 @@ apply_network_config() {
 
 	# ---------- DNS ---------------------------------------------------
 	IFS='|' read -r DNS SEARCH <<EOF
-$(read_dns "$nf")
+$(read_dns_any "$nf")
 EOF
 	DNS=$(echo "$DNS" | tr -d ' ')
 	: > /etc/resolv.conf.head
