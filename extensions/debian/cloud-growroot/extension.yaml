@@ -1,0 +1,12 @@
+name: cloud-growroot
+version: 1.0.0
+family: deb
+# Правка конфигурации архитектуры не касается, но фаза `build` означает
+# «выполняется код в госте», а libguestfs требует совпадения хоста и гостя.
+arch: [amd64, arm64]
+# Только `build`: на первой загрузке уже поздно — cloud-init читает
+# cloud_init_modules раньше, чем что-либо успело бы его поправить.
+phase: [build]
+provides: [cloud-growroot]
+requires: []
+conflicts: []
