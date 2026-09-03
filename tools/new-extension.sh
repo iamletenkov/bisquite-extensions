@@ -15,8 +15,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # The manifest field `family` is not the directory name: `deb` lives under
-# extensions/debian/. Renaming directories would invalidate 20 COPY_IN lines
-# in 13 VMFILEs of the main repository, so the mapping stays explicit.
+# extensions/debian/. The resolver behind `EXTENSION` finds an extension by the
+# `name` field of its manifest, not by the directory — but the older `COPY_IN`
+# form addresses the directory directly, and 22 such lines in 12 VMFILEs of the
+# main repository still do (counted 2026-09-03). So the mapping stays explicit.
 family_dir() {
     case "$1" in
         deb) echo debian ;;
@@ -92,6 +94,10 @@ if [[ "$family" == "openwrt" ]]; then
 fi
 
 arch_yaml="[$(echo "$arch" | tr -d ' ' | sed 's/,/, /g')]"
+# Префикс переменных окружения для примеров в README и install.sh: имя
+# расширения заглавными, дефисы в подчёркивания (`code-server` ->
+# `CODE_SERVER`). Так названы переменные у x11vnc и code-server.
+env_prefix="$(echo "$name" | tr 'a-z-' 'A-Z_')"
 if [[ "$want_firstboot" -eq 1 ]]; then
     phase_yaml="[build, firstboot]"
 else
@@ -139,6 +145,20 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} $*"; }
 # the TODO is filled in.
 # shellcheck disable=SC2034
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Параметры из VMFILE приезжают сюда ПЕРЕМЕННЫМИ ОКРУЖЕНИЯ как есть:
+#
+#   EXTENSION __NAME__ __ENVPREFIX___PORT=9002
+#
+# Таблицы соответствия «параметр VMFILE -> переменная скрипта» нет намеренно:
+# она устарела бы молча. Единственный источник правды о том, какие переменные
+# читает расширение, — этот файл, поэтому умолчания объявляются здесь, а README
+# их перечисляет. Файл config.yaml рядом со скриптом такой ручкой НЕ является:
+# он лежит в кеше источников, который `bs extension sync` перезаписывает
+# целиком, и правка на хосте держится до первой синхронизации.
+#
+# TODO: объявить свои параметры, если они есть.
+# __ENVPREFIX___PORT="${__ENVPREFIX___PORT:-9001}"
 
 log_info "Installing __NAME__..."
 
@@ -212,18 +232,77 @@ cat > "$ext_dir/README.md" <<EOF
 
 <одна фраза: что это расширение даёт>
 
-## Что делает
+## Зачем
 
-- **Сборка** (\`install.sh\`) — <какие пакеты, какие файлы>
-- **Первая загрузка** (\`configure.sh\`) — <что настраивается на устройстве>
+<чего не хватает без него и чем это заканчивается на устройстве. Ссылайся на
+замер, а не на общее соображение: «замерено на собранном образе <такой-то>,
+<дата>» — так написаны README расширений nocloud-cidata и docker.>
 
-## Подключение в VMFILE
+## Подключение
 
 \`\`\`vmfile
-COPY_IN ../bisquite-extensions/extensions/$dir_name/$name:/opt/vmsetup/
+EXTENSION $name
+\`\`\`
+
+Прежняя запись продолжает работать:
+
+\`\`\`vmfile
+COPY_IN <чекаут>/extensions/$dir_name/$name:/opt/vmsetup/
 RUN_COMMAND chmod +x /opt/vmsetup/$name/*.sh
 RUN_COMMAND /opt/vmsetup/$name/install.sh
 \`\`\`
+
+\`<чекаут>\` — путь до чекаута этого репозитория **относительно каталога
+VMFILE**; в примерах основного репозитория это \`../../../../bisquite-extensions\`,
+и глубина зависит от того, насколько глубоко лежит сам VMFILE.
+
+## Параметры
+
+<Если параметров нет — так и напиши: «Параметров нет», и убери таблицу.>
+
+Инструкция \`EXTENSION\` передаёт параметры переменными окружения:
+
+\`\`\`vmfile
+EXTENSION $name ${env_prefix}_PORT=9002
+\`\`\`
+
+| Переменная | Что задаёт | Умолчание |
+|---|---|---|
+| \`${env_prefix}_PORT\` | <что> | <умолчание из install.sh> |
+
+Таблицы соответствия «параметр VMFILE -> переменная скрипта» нет: VMFILE
+называет переменные их собственными именами, а единственный источник правды —
+\`install.sh\`. Значит, эта таблица обязана совпадать с ним, и правится вместе
+с ним.
+
+## Что делает
+
+- **Сборка** (\`install.sh\`) — <какие пакеты, какие файлы>
+EOF
+
+if [[ "$want_firstboot" -eq 1 ]]; then
+    cat >> "$ext_dir/README.md" <<EOF
+- **Первая загрузка** (\`configure.sh\`) — <что настраивается на устройстве>
+EOF
+fi
+
+cat >> "$ext_dir/README.md" <<EOF
+
+## Отказы
+
+<Что расширение отвергает и почему громко, а не молча. Пустой раздел здесь —
+признак, что отказов нет ни одного, а это редко правда.>
+
+## Ограничения
+
+<Чего расширение НЕ делает и что обязан дать кто-то другой. Сюда же —
+ограничение архитектуры: \`phase: build\` требует совпадения архитектур хоста
+и образа, потому что libguestfs не выполняет код в госте чужой архитектуры.>
+
+## Проверка
+
+<Как убедиться, что оно отработало: команда на собранном образе
+(\`virt-cat\`, \`virt-ls\`) и команда на устройстве после первой загрузки.>
 
 ## Проверено на
 
@@ -240,7 +319,7 @@ chmod +x "$ext_dir/install.sh"
 # ${BASH_SOURCE} at scaffold time and produce broken scripts.
 for f in "$ext_dir/install.sh" "$ext_dir/configure.sh"; do
     [[ -f "$f" ]] || continue
-    sed -i "s/__NAME__/$name/g" "$f"
+    sed -i "s/__NAME__/$name/g; s/__ENVPREFIX__/$env_prefix/g" "$f"
 done
 
 registered=0
