@@ -1,94 +1,104 @@
-# Расширение x11vnc
+# x11vnc
 
-Добавляет VNC-доступ к графической сессии Bisquite через [x11vnc](https://github.com/LibVNC/x11vnc). Сервис автоматически подстраивается под пользователя, созданного cloud-init, и стартует после входа в графическую оболочку.
+VNC-доступ к рабочему столу X11 для пользователя, созданного cloud-init.
 
-## Возможности
+## Параметры
 
-- Устанавливает `x11vnc` и вспомогательные утилиты (`yq`, `x11-xserver-utils`).
-- Определяет пользователя из cloud-init (или из `config.yaml`) и создаёт для него systemd-инстанс `x11vnc@user.service`.
-- Oneshot-сервис `configure-x11vnc` настраивает автозапуск и перезапускает сервис при изменении конфигурации.
-- Настройки (`порт`, `пароль`, `DISPLAY`) задаются через YAML.
+Задаются переменными окружения в VMFILE — `RUN_COMMAND` отдаёт строку шеллу
+гостя целиком:
 
-## Требования
+```vmfile
+RUN_COMMAND X11VNC_PORT=5901 X11VNC_PASSWORD=секрет /opt/vmsetup/x11vnc/install.sh
+```
 
-- X11-дисплей сессии (GDM, LightDM, XFCE, LXDE и т.п.).
-- Debian 12 / Ubuntu 22.04+ с `systemd`.
-- Автологин пользователя (например, через расширения GNOME/Xfce/LXDE).
+| Переменная | Умолчание | Что делает |
+|---|---|---|
+| `X11VNC_PORT` | `5900` | порт RFB |
+| `X11VNC_DISPLAY` | `:0` | дисплей X |
+| `X11VNC_PASSWORD` | пусто | пароль; без него сервер поднимается с `-nopw` |
+| `X11VNC_LISTEN` | `localhost` | `localhost` — только петля, любое другое значение — все интерфейсы |
 
-## Состав
+`install.sh` кладёт их в `/etc/default/bisquite-x11vnc`, юнит читает оттуда.
 
-- `install.sh` — установка пакетов и регистрация systemd unit.
-- `configure.sh` — настройка `x11vnc@.service` под конкретного пользователя.
-- `get_cloud_user.sh` — утилита для получения пользователя из cloud-init.
-- `configure-x11vnc.service` — oneshot unit для вызова `configure.sh`.
-- `x11vnc@.service` — шаблон пользовательского сервиса.
-- `config.yaml` — параметры (пользователь, порт, пароль, дисплей).
-
-## Интеграция в VMFILE
+**Умолчание `localhost` — смена поведения.** Раньше сервер слушал все
+интерфейсы и всегда без пароля, а compose-примеры ставят `firewall: false`.
+Позиция проекта записана в `examples/build/ubuntu1804/README.md`: только
+петля, доступ через SSH-туннель:
 
 ```bash
-UPLOAD files/x11vnc/install.sh:/opt/vmsetup/x11vnc/install.sh
-UPLOAD files/x11vnc/configure.sh:/opt/vmsetup/x11vnc/configure.sh
-UPLOAD files/x11vnc/get_cloud_user.sh:/opt/vmsetup/x11vnc/get_cloud_user.sh
-UPLOAD files/x11vnc/config.yaml:/opt/vmsetup/x11vnc/config.yaml
-UPLOAD files/x11vnc/x11vnc@.service:/opt/vmsetup/x11vnc/x11vnc@.service
-UPLOAD files/x11vnc/configure-x11vnc.service:/opt/vmsetup/x11vnc/configure-x11vnc.service
+ssh -L 5900:localhost:5900 пользователь@адрес
+```
 
+Открыть наружу можно, но это придётся написать явно, и расширение предупредит
+в журнале, если пароль при этом не задан.
+
+## Как находится X authority
+
+Путь к authority **не зашит в юните**, а ищется в рантайме обёрткой
+`run-x11vnc.sh`. Прежний хардкод
+
+```
+-auth /var/run/lightdm/%i/:0
+```
+
+не работал **ни под одним** дисплей-менеджером. Это склейка двух разных схем
+LightDM (проверено по исходникам, версии 1.2–1.32 — одинаково):
+
+- `src/x-server-local.c` пишет `<run-dir>/**root**/:0` — authority самого
+  X-сервера, владелец root, права 0600, пользователю недоступен. Отсюда
+  и взялось имя файла `:0`;
+- `src/session.c` даёт пользователю `~/.Xauthority` (умолчание) либо
+  `<run-dir>/<user>/xauthority` при `user-authority-in-system-dir=true`.
+
+Под GDM ≥ 42 файл лежит в третьем месте — `/run/user/<uid>/gdm/Xauthority`
+(`gdm/daemon/gdm-x-session.c`).
+
+Обёртка перебирает кандидатов и проверяет каждого через `xdpyinfo`. Не подошёл
+ни один — **громкий отказ с перечислением всех проверенных путей**. Раньше на
+этом месте был немой цикл рестарта каждые 5 секунд.
+
+**`x11vnc -auth guess` не годится.** Его встроенный скрипт FINDDISPLAY
+перебирает `~/.Xauthority` и глоб `/var/run/gdm*/auth-for-*/database` —
+пути GDM ≥ 42 там нет, а `auth-for-*` это legacy-раскладка. Плюс `man x11vnc`
+предупреждает, что FINDDISPLAY зависает навсегда, если гритер держит X-сервер.
+
+## Wayland
+
+`x11vnc` обслуживает X11 и на Wayland-сессии бесполезен. Обёртка спрашивает
+у `loginctl` тип сессии и отказывает внятно.
+
+Проверять наличие сокета `/tmp/.X11-unix/X0` для этого **нельзя**: под Wayland
+его создаёт mutter для Xwayland, он там есть. Собственная защита `x11vnc`
+тоже не сработает — она смотрит на `$WAYLAND_DISPLAY`, которого в окружении
+системного юнита нет.
+
+Xorg включает расширение рабочего стола: `gnome` пишет `WaylandEnable=false`.
+Это несущая связь между двумя расширениями, и в манифестах она не выражается.
+
+## Зависимости
+
+Расширение требует `x11-server` и `display-manager` — их даёт любое из
+`gnome`, `xfce4`, `lxde`. Порядок слоёв в VMFILE: сначала десктоп, потом
+x11vnc.
+
+`xauth` и `x11-utils` ставятся **явно**: обёртке нужен `xdpyinfo`, а у пакета
+`x11vnc` он лишь в `Recommends`. Раньше они приезжали только потому, что
+десктопное расширение ставило `xorg`, — то есть работа зависела от порядка
+слоёв, а не от объявленных зависимостей.
+
+## Подключение в VMFILE
+
+```vmfile
+COPY_IN ../bisquite-extensions/extensions/debian/x11vnc:/opt/vmsetup/
 RUN_COMMAND chmod +x /opt/vmsetup/x11vnc/*.sh
 RUN_COMMAND /opt/vmsetup/x11vnc/install.sh
 ```
 
-`install.sh` копирует unit-файлы в `/etc/systemd/system`, делает `daemon-reload` и включает `configure-x11vnc`.
+## Проверено на
 
-## Конфигурация (`config.yaml`)
+| Система | Дисплей-менеджер | Дата |
+|---|---|---|
+| <не проверялось на живой ВМ> | | |
 
-```yaml
-USER: ""          # если пусто — пользователь из cloud-init
-PASSWORD: none   # задайте строку для включения VNC-пароля
-PORT: 5900       # порт RFB
-DISPLAY: ":0"    # X11 дисплей
-```
-
-При указании `PASSWORD` создаётся файл `~/.vnc/passwd`, и сервис запускается с `-rfbauth`.
-
-## Как это работает
-
-1. **Сборка** — `install.sh` ставит пакеты, клонирует unit-файлы, включает `configure-x11vnc`.
-2. **Первая загрузка** — oneshot-сервис ждёт появления пользователя (до 120 сек), подготавливает конфиги, создаёт пароль (если задан), активирует `x11vnc@user.service`.
-3. **Старт VNC** — инстанс сервиса запускает `x11vnc` на указанном дисплее (`:0`) и порту.
-4. **Повторная настройка** — обновите `/opt/vmsetup/x11vnc/config.yaml` и выполните `sudo systemctl restart configure-x11vnc`.
-
-## Подключение
-
-```bash
-vncviewer <vm-ip>:5900        # TigerVNC
-vncviewer <vm-ip>::5900       # RealVNC
-```
-
-Проверить, что сервис слушает порт:
-
-```bash
-ss -tlnp | grep 5900
-```
-
-## Диагностика
-
-```bash
-systemctl status configure-x11vnc.service
-systemctl status x11vnc@<user>.service
-
-journalctl -u configure-x11vnc -f
-journalctl -u x11vnc@<user> -f
-
-ls /tmp/.X11-unix/            # убедитесь, что DISPLAY существует
-```
-
-Распространённые проблемы:
-
-- **Нет доступа к X11** — проверьте владельца `/run/gdm3/<user>/:0` или `/run/lightdm/<user>/:0`, убедитесь, что user входит в нужные группы.
-- **Порт недоступен** — настройте firewall/Proxmox security groups, либо измените `PORT` и перезапустите сервис.
-- **Нужен пароль** — установите `PASSWORD` в `config.yaml`.
-
-## Лицензия
-
-Расширение распространяется на условиях публичной некоммерческой лицензии Bisquite (PolyForm Noncommercial 1.0.0, см. `LICENSE`). Для коммерческого использования требуется отдельная платная лицензия — см. `COMMERCIAL-LICENSE.md`.
+Сценарий проверки — в плане `docs/plans/2026-09-03-image-identity-and-extensions.md`,
+пункт 32.

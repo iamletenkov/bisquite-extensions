@@ -15,7 +15,37 @@ log_error(){ echo -e "${RED}[ERROR]${NC} $*" >&2; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE="$SCRIPT_DIR/daemon.conf"
 
-TARGET="/etc/gdm3/daemon.conf"
+# Which file GDM actually reads is decided at PACKAGE BUILD time, not at
+# runtime, and the two distributions disagree:
+#
+#   Debian 13   debian/rules passes -Dcustom-conf=/etc/gdm3/daemon.conf
+#               → the package ships /etc/gdm3/daemon.conf
+#   Ubuntu 24.04  no such flag → meson default gdmconfdir/custom.conf
+#               → the package ships /etc/gdm3/custom.conf
+#
+# Measured 2026-09-03 by unpacking both packages:
+#   ubuntu:24.04  ./etc/gdm3/custom.conf
+#   debian:13     ./etc/gdm3/daemon.conf
+#
+# `gdm_settings_reload()` reads exactly two backends — GDM_CUSTOM_CONF and
+# GDM_RUNTIME_CONF — and the first is that build-time name. Writing to the
+# other file is not an error and produces no warning: GDM simply never looks
+# at it. Hardcoding daemon.conf meant that on Ubuntu neither the autologin
+# nor `WaylandEnable=false` applied, and the VM came up on Wayland with a
+# greeter — silently.
+#
+# So pick the file the package installed, and fall back to writing both if
+# neither exists (a distribution we have not measured).
+resolve_target(){
+  local candidate
+  for candidate in /etc/gdm3/daemon.conf /etc/gdm3/custom.conf; do
+    if [[ -f "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
 
 check_prereqs(){
   if ! command -v yq >/dev/null 2>&1; then
@@ -27,7 +57,7 @@ check_prereqs(){
     exit 1
   fi
   if [[ ! -f "$TEMPLATE" ]]; then
-    log_error "Template daemon.conf not found at $TEMPLATE"
+    log_error "шаблон daemon.conf не найден: $TEMPLATE"
     exit 1
   fi
 }
@@ -39,7 +69,7 @@ resolve_user(){
 
   # Wait up to 120s for cloud user to appear to avoid racing cloud-init
   while true; do
-    if user="$($SCRIPT_DIR/get_cloud_user.sh 2>/dev/null || true)" && [[ -n "$user" ]]; then
+    if user="$("$SCRIPT_DIR/get_cloud_user.sh" 2>/dev/null || true)" && [[ -n "$user" ]]; then
       if id "$user" >/dev/null 2>&1; then
         log_info "Found user from cloud-init: $user"
         echo "$user"
@@ -71,11 +101,19 @@ write_daemon_conf(){
   # Copy template and substitute USER placeholder (using | as delimiter to avoid issues with /)
   sed "s|USER|${cloud_user}|g" "$TEMPLATE" > "$tmp"
 
-  # Install to target location
-  install -D -m 0644 "$tmp" "$TARGET"
+  local target
+  if target="$(resolve_target)"; then
+    install -D -m 0644 "$tmp" "$target"
+    log_info "Записан $target: автологин '$cloud_user', Wayland выключен"
+  else
+    # Ни одного знакомого файла нет — пишем оба. Лишний GDM просто
+    # не прочитает, а промах здесь стоит рабочего стола без автологина
+    # и сессии на Wayland, где x11vnc не работает вовсе.
+    log_warn "не нашёл ни daemon.conf, ни custom.conf — пишу оба"
+    install -D -m 0644 "$tmp" /etc/gdm3/daemon.conf
+    install -D -m 0644 "$tmp" /etc/gdm3/custom.conf
+  fi
   rm -f "$tmp"
-
-  log_info "Created $TARGET with autologin for user '$cloud_user'"
 }
 
 restart_gdm(){

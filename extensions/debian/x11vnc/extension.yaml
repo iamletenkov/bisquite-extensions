@@ -7,10 +7,16 @@ arch: [amd64, arm64]
 #             пользователя приходит из cloud-init уже на устройстве.
 phase: [build, firstboot]
 provides: [remote-desktop]
-# x11-server      — сервер прицепляется к DISPLAY=:0 (x11vnc@.service:9,12);
-# display-manager — `Requires=display-manager.service` там же (строка 4),
-#                   плюс XAUTHORITY берётся из каталога дисплей-менеджера.
-# Ровно то отношение, которое сегодня держится только порядком слоёв в
-# четырёх VMFILE: desktop, затем x11vnc.
+# x11-server      — сервер прицепляется к DISPLAY=:0;
+# display-manager — `Requires=display-manager.service` в юните.
+#
+# Требование родовое, и это верно: путь к X authority больше не зашит
+# в юните, а ищется в рантайме — под LightDM и под GDM он разный, а под
+# самим LightDM зависит от его конфига, а не от имени пакета. Различать
+# в манифесте «какой именно дисплей-менеджер» значило бы зафиксировать ось,
+# которая ответа не определяет.
+#
+# Ровно то отношение, которое сегодня держится только порядком слоёв
+# в четырёх VMFILE: desktop, затем x11vnc.
 requires: [x11-server, display-manager]
 conflicts: []

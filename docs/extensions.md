@@ -237,7 +237,7 @@ Raspberry Pi OS отвечает `<distro>debian</distro>`, потому что 
 
 | Расширение | `requires` | Откуда выведено |
 |---|---|---|
-| `x11vnc` | `x11-server`, `display-manager` | `x11vnc@.service:4` — `Requires=display-manager.service`; `:9,12` — `DISPLAY=:0`, `-auth /var/run/lightdm/%i/:0` |
+| `x11vnc` | `x11-server`, `display-manager` | `x11vnc@.service` — `Requires=display-manager.service` и `DISPLAY=:0`. Путь к X authority в юните НЕ зашит: он разный под LightDM и GDM, и обёртка ищет его в рантайме |
 | `kiosk` | `x11-server`, `display-manager` | `install.sh:33` ставит `x11-xserver-utils`, но **не** `xorg`; `kiosk-chromium@.service:9-10` — `DISPLAY=:0`, `XAUTHORITY=/home/%i/.Xauthority`; `configure-kiosk.service:3` — `After=graphical.target … display-manager.service` |
 | остальные | — | ничего не требуют по коду |
 
