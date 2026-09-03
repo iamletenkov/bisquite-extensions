@@ -11,15 +11,10 @@
 
 # Потребители, которые действительно зовут файл:
 extensions/debian/code-server   # configure.sh:81 — резолв пользователя, если USER пуст в config.yaml
-extensions/debian/docker-ce     # configure.sh:17 — добавление пользователя в группу docker
 extensions/debian/gnome         # configure.sh:25,42 — автологин GDM
 extensions/debian/kiosk         # configure.sh:27,44 — под каким пользователем поднимать kiosk-chromium@
 extensions/debian/lxde          # configure.sh:25,42 — автологин LightDM
 extensions/debian/x11vnc        # configure.sh:23,40 — под каким пользователем поднимать x11vnc@
 extensions/debian/xfce4         # configure.sh:25,42 — автологин LightDM
 
-# Копия есть, но её никто не зовёт: `docker/install.sh` и `docker/configure.sh`
-# держат ТРЕТЬЮ, инлайновую копию той же логики (`resolve_user()`). Копия
-# оставлена, чтобы вендоринг не менял содержимое образа заодно с наведением
-# порядка; сведение инлайновых копий — отдельная задача. См. docs/extensions.md.
-extensions/debian/docker
+extensions/debian/docker         # configure.sh — пользователь cloud-init

@@ -1,82 +1,99 @@
-# Расширение Docker
+# docker
 
-Устанавливает Docker CE в виртуальные машины Bisquite, добавляет пользователя из cloud-init в группу `docker` и готовит систему для запуска контейнеров без `sudo`.
+Docker CE из официального apt-репозитория Docker (`download.docker.com`).
 
-## Возможности
+## Что делает
 
-- Использует официальный convenience-скрипт Docker (`https://get.docker.com`), который подбирает репозиторий и устанавливает `docker-ce`, `docker-ce-cli`, `containerd.io`, плагины `buildx` и `compose`.
-- Oneshot-сервис `configure-docker` ждёт создания пользователя и добавляет его в группу `docker`.
-- Скрипты защищены retry-механизмом для скачивания пакетов.
+**Сборка** (`install.sh`)
 
-## Требования
+- прописывает ключ и репозиторий Docker в формате deb822;
+- ставит ровно пять пакетов: `docker-ce`, `docker-ce-cli`, `containerd.io`,
+  `docker-buildx-plugin`, `docker-compose-plugin`;
+- на Raspberry Pi добавляет `cgroup_enable=memory` в `cmdline.txt`;
+- на Jetson подключает репозиторий NVIDIA и настраивает среду выполнения.
 
-- Debian 12 / Ubuntu 22.04+ (amd64 или arm64).
-- `systemd`, `cloud-init`, интернет при сборке.
-- Минимум 1 ГБ RAM (рекомендуется ≥2 ГБ) и 1 ГБ свободного места.
+**Первая загрузка** (`configure.sh`)
 
-## Состав
+- добавляет пользователя cloud-init в группу `docker` — при сборке имя
+  пользователя ещё неизвестно;
+- на Jetson перезапускает демон, чтобы подхватилась среда выполнения NVIDIA.
 
-- `install.sh` — запускает официальный convenience-скрипт Docker, обеспечивает наличие `curl` и регистрирует unit-файлы.
-- `configure.sh` — добавление пользователя в группу `docker`, проверка `cloud-init`.
-- `get_cloud_user.sh` — утилита извлечения пользователя.
-- `configure-docker.service` — oneshot unit для запуска `configure.sh`.
+## Почему один путь, а не два
 
-## Интеграция в VMFILE
+Расширение слито с бывшим `docker-ce` 2026-09-03. Довод «на старых системах
+нужен `get.docker.com`, на новых репозиторий» оказался неверен дважды:
 
-```bash
-UPLOAD files/docker/install.sh:/opt/vmsetup/docker/install.sh
-UPLOAD files/docker/configure.sh:/opt/vmsetup/docker/configure.sh
-UPLOAD files/docker/get_cloud_user.sh:/opt/vmsetup/docker/get_cloud_user.sh
-UPLOAD files/docker/configure-docker.service:/opt/vmsetup/docker/configure-docker.service
+- **скрипт ставит из того же репозитория**, только пишет однострочный `.list`
+  вместо deb822 (`getdocker.sh:596,606`). Второго источника пакетов никогда
+  не было;
+- **на bionic скрипт ломает сборку**: `version_gte()` при пустом `VERSION`
+  возвращает истину всегда (`getdocker.sh:230-234`), поэтому в список
+  безусловно попадает `docker-model-plugin`, которого в репозитории bionic нет
+  ни для amd64, ни для arm64. При `set -e` это фатально.
 
+## Почему нет ветвления по дистрибутиву
+
+Замеры 2026-09-03:
+
+- deb822 с `Signed-By: <путь>` работает начиная с apt 1.6.17 (bionic).
+  Встроенный ключ требует apt ≥ 2.4 и нигде не нужен;
+- 64-битная Raspberry Pi OS объявляет `ID=debian` — её обслуживает
+  `linux/debian`. Репозиторий `linux/raspbian` только armhf и без trixie;
+- `${UBUNTU_CODENAME:-$VERSION_CODENAME}` покрывает оба семейства одним
+  выражением — так написано в инструкциях самого Docker;
+- пять имён пакетов одинаковы на всех целях, включая bionic.
+
+Ветвления есть, но они **по признакам железа** и ортогональны системе:
+`/boot/firmware/cmdline.txt` и `/etc/nv_tegra_release`. Pi 4 с Ubuntu и
+Jetson с JetPack 6 оба дают `ID=ubuntu`.
+
+## Гейт вместо таблицы
+
+Перед установкой скрипт спрашивает `apt-cache policy docker-ce`. Нет
+кандидата — **громкий отказ**, без отката на дистрибутивный `docker.io`.
+
+Откат был бы тихим: VMFILE один, а на флот уехали бы образы с разными
+движками (`download.docker.com` даёт 29.7.2, `docker.io` — 26.1.5 на
+Debian 13 и 20.10.12 на Ubuntu 22.04). Это та же подмена гарантии надеждой,
+из-за которой запрещён перенос `INSTALL` в фазу первой загрузки. Нужен
+`docker.io` — заводите отдельное расширение под своим именем.
+
+## Замороженные сюиты
+
+Наличие пакета и его свежесть — разные вопросы. Репозиторий для bionic
+существует и работает, но заморожен:
+
+```
+dists/bionic/Release   Date: 13 Jun 2023   docker-ce 24.0.2
+dists/noble/Release    Date: 02 Sep 2026   docker-ce 29.7.2
+```
+
+Скрипт предупреждает об этом вслух. Это потолок цели, а не выбор способа.
+
+## OpenWrt
+
+Сюда не входит: там `opkg` (24.10) или `apk` (25.12) и нет systemd, то есть
+фазы первой загрузки не существует. Вдобавок в 25.12 пакета `dockerd` нет
+вовсе для `x86_64`, `aarch64_generic`, `aarch64_cortex-a53` и
+`aarch64_cortex-a76` — проверено по шести точечным релизам.
+
+## Подключение в VMFILE
+
+```vmfile
+COPY_IN ../bisquite-extensions/extensions/debian/docker:/opt/vmsetup/
 RUN_COMMAND chmod +x /opt/vmsetup/docker/*.sh
 RUN_COMMAND /opt/vmsetup/docker/install.sh
 ```
 
-`install.sh` копирует сервис в `/etc/systemd/system`, выполняет `daemon-reload`, активирует Docker и `configure-docker`.
+## Проверено на
 
-## Как это работает
+| Система | Архитектура | Что получилось | Дата |
+|---|---|---|---|
+| Debian 13 trixie | amd64 | `docker-ce 5:29.7.2-1~debian.13~trixie`, `containerd.io 2.3.4`, плагины `buildx` и `compose` на месте | 2026-09-03 |
 
-1. **Сборка** — скачивается и выполняется скрипт `get.docker.com`, который определяет дистрибутив, устанавливает Docker CE и плагины, затем активируется `docker.service`.
-2. **Первая загрузка** — `configure-docker.service` ожидает пользователя (до 120 сек), добавляет его в `docker` и перезапускает демон при необходимости.
-3. **Дальше** — пользователь может запускать контейнеры без `sudo`; при смене пользователя в cloud-init сервис выполняется повторно.
-
-## Проверка
-
-```bash
-docker --version
-systemctl status docker
-groups <user>          # должна быть группа docker
-
-su - <user> -c "docker run --rm hello-world"
-```
-
-## Диагностика
-
-```bash
-journalctl -u configure-docker -f
-journalctl -u docker -f
-systemctl status configure-docker.service docker.service
-```
-
-Распространённые проблемы:
-
-- **Нет доступа к Docker** — пользователь ещё не добавлен в группу или не разлогинен/вошёл заново. Выполните `sudo usermod -aG docker <user>` и `sudo systemctl restart docker`.
-- **Репозиторий недоступен** — проверьте DNS/прокси: `ping download.docker.com`.
-- **Cloud-init не завершился** — `cloud-init status --wait`.
-
-## Кастомизация
-
-- Измените `/etc/docker/daemon.json` после установки и перезапустите сервис:
-
-  ```bash
-  sudo systemctl stop docker
-  sudo nano /etc/docker/daemon.json
-  sudo systemctl start docker
-  ```
-
-- Для дополнительных пользователей выполните: `sudo usermod -aG docker <user>`.
-
-## Лицензия
-
-Расширение распространяется на условиях публичной некоммерческой лицензии Bisquite (PolyForm Noncommercial 1.0.0, см. `LICENSE`). Для коммерческого использования требуется отдельная платная лицензия — см. `COMMERCIAL-LICENSE.md`.
+Проверялось не по коду возврата, а по содержимому образа: `virt-ls` нашёл
+`docker`, `dockerd`, `containerd` в `/usr/bin` и оба плагина в
+`/usr/libexec/docker/cli-plugins`, а `virt-cat` подтвердил, что
+`/etc/apt/sources.list.d/docker.sources` указывает на
+`download.docker.com/linux/debian` — то есть движок пришёл из репозитория
+Docker, а не дистрибутивный `docker.io 26.1.5`.

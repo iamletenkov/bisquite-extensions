@@ -9,7 +9,7 @@
 ```
 extensions/
 ├── debian/                  # для Debian/Ubuntu (install.sh + configure)
-│   ├── docker/  docker-ce/
+│   ├── docker/
 │   ├── code-server/
 │   ├── chromium-kiosk/  kiosk/
 │   ├── gnome/  xfce4/  lxde/
@@ -154,11 +154,10 @@ before_script:
   и взаимоисключающи;
 - `x11vnc` и `kiosk` требуют `x11-server` и `display-manager` — то самое
   отношение, которое сегодня держится только порядком слоёв в VMFILE;
-- `docker` и `docker-ce` дают один `container-runtime` разными путями и потому
-  конфликтуют. **Слияние отложено намеренно**: на `docker-ce` не ссылается ни
-  один VMFILE, а через `get.docker.com` сегодня идут три из четырёх сборок,
-  включая две базовые. Умолчанием `docker-ce` станет после того, как соберётся
-  на этих трёх базах, — разбор в `docs/extensions.md`.
+- `docker` даёт `container-runtime` и ни с чем не конфликтует: расширения
+  слиты 2026-09-03, когда замер показал, что `get.docker.com` ставит из того
+  же `download.docker.com` и вдобавок ломает сборку на bionic. Разбор —
+  в `extensions/debian/docker/README.md`.
 
 **Читателя манифестов пока нет.** Резолвер, топологическая сортировка и отказ
 по несовпадению архитектур — этап 2 спеки, и он в `bisquite`, не здесь. Сегодня

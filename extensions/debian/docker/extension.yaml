@@ -1,15 +1,19 @@
 name: docker
-version: 1.0.0
+version: 2.0.0
 family: deb
-# get.docker.com сам определяет дистрибутив и архитектуру; arm64 подтверждён
-# сборкой ubuntu1804/ubuntu_jetson_nano.vmfile.
+# Репозиторий Docker публикует binary-amd64 и binary-arm64 для всех целевых
+# сюит. binary-armhf там тоже есть, но проект его не собирает.
 arch: [amd64, arm64]
-# build     — install.sh прогоняет get.docker.com и включает юниты;
+# build     — install.sh прописывает apt-репозиторий Docker и ставит пять
+#             пакетов; на Raspberry Pi правит cmdline.txt, на Jetson
+#             подключает среду выполнения NVIDIA;
 # firstboot — configure-docker.service добавляет пользователя cloud-init
-#             в группу docker (имя пользователя при сборке неизвестно).
+#             в группу docker (имя пользователя при сборке неизвестно) и,
+#             на Jetson, перезапускает демон под NVIDIA.
 phase: [build, firstboot]
 provides: [container-runtime]
 requires: []
-# Ставит тот же движок, что и docker-ce, но другим путём. Одновременно — два
-# источника одних пакетов. Слияние отложено намеренно, см. docs/extensions.md.
-conflicts: [docker-ce]
+# Слито с бывшим docker-ce (2026-09-03): противопоставление «скрипт против
+# репозитория» оказалось мнимым — get.docker.com ставит из того же
+# download.docker.com. Конфликтовать больше не с кем.
+conflicts: []
