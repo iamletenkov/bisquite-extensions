@@ -25,6 +25,23 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} l4t-kernel-kvm: $*"; }
 JOBS="${L4T_KERNEL_JOBS:-2}"
 LOCALVERSION="${L4T_KERNEL_LOCALVERSION:--tegra-kvm}"
 KEEP_SOURCES="${L4T_KERNEL_KEEP_SOURCES:-no}"
+# Компилятор ЗАКРЕПЛЁН, и это не перестраховка.
+#
+# Исходники ядра L4T 4.9 писались под GCC 7 из bionic. На focal умолчание —
+# GCC 9, и он валит сборку: в драйвере Wi-Fi Broadcom
+#   drivers/net/wireless/bcmdhd_pcie/dhd_linux.c:5443
+#   error: argument to 'sizeof' in 'strncpy' call is the same expression
+#   as the source [-Werror=sizeof-pointer-memaccess]
+# Замерено 2026-09-03: сборка умирает ровно здесь.
+#
+# GCC 8 выбран не наугад: рабочее ядро на живой машине собрано именно им —
+#   Linux version 4.9.253-tegra-kvm (gcc version 8.4.0 (Ubuntu/Linaro 8.4.0-3ubuntu2))
+# То есть это проверенное сочетание, а не «версия постарше, авось пройдёт».
+#
+# Подавлять предупреждение через -Wno-error НЕ стали: оно указывает на
+# настоящий класс ошибок (sizeof от указателя вместо буфера), и глушить
+# его на всём ядре ради одного драйвера — менять поломку на риск.
+CC_BIN="${L4T_KERNEL_CC:-gcc-8}"
 
 RELEASE_FILE=/etc/nv_tegra_release
 EXTLINUX=/boot/extlinux/extlinux.conf
@@ -56,6 +73,20 @@ SRC_URL="https://developer.nvidia.com/embedded/l4t/r${L4T_MAJOR}_release_v${L4T_
 apt-get update -q || exit 1
 apt-get install -y -q --no-install-recommends \
     build-essential bc bison flex libssl-dev wget xz-utils bzip2 || exit 1
+
+# Компилятор ставится отдельно: он может отсутствовать, и отказ должен
+# называть причину, а не теряться среди прочих пакетов.
+if ! command -v "$CC_BIN" >/dev/null 2>&1; then
+    log_info "ставлю $CC_BIN"
+    apt-get install -y -q --no-install-recommends "$CC_BIN" || {
+        log_error "$CC_BIN не установился"
+        log_error "исходники L4T 4.9 не собираются компилятором focal по умолчанию (GCC 9):"
+        log_error "  -Werror=sizeof-pointer-memaccess в bcmdhd_pcie/dhd_linux.c"
+        log_error "задайте другой через L4T_KERNEL_CC, если знаете рабочий"
+        exit 1
+    }
+fi
+log_info "компилятор: $("$CC_BIN" --version | head -1)"
 
 rm -rf "$WORK"
 mkdir -p "$WORK"
@@ -128,7 +159,7 @@ TEGRA_KERNEL_OUT="$WORK/out"
 mkdir -p "$TEGRA_KERNEL_OUT"
 
 cd "$KERNEL_DIR"
-make O="$TEGRA_KERNEL_OUT" tegra_defconfig || exit 1
+make O="$TEGRA_KERNEL_OUT" CC="$CC_BIN" tegra_defconfig || exit 1
 
 CFG="$TEGRA_KERNEL_OUT/.config"
 set_cfg() {
@@ -138,7 +169,7 @@ set_cfg() {
 }
 set_cfg CONFIG_KVM y
 set_cfg CONFIG_VHOST_NET m
-make O="$TEGRA_KERNEL_OUT" olddefconfig || exit 1
+make O="$TEGRA_KERNEL_OUT" CC="$CC_BIN" olddefconfig || exit 1
 
 for key in CONFIG_KVM CONFIG_VHOST_NET; do
     grep -qE "^${key}=[ym]" "$CFG" || {
@@ -150,8 +181,8 @@ log_info "CONFIG_KVM и CONFIG_VHOST_NET включены"
 
 # --- 5. Сборка ---------------------------------------------------------------
 log_info "собираю ядро (-j${JOBS}); на Nano это часы"
-make O="$TEGRA_KERNEL_OUT" -j"$JOBS" Image dtbs modules || exit 1
-make O="$TEGRA_KERNEL_OUT" INSTALL_MOD_PATH=/ modules_install || exit 1
+make O="$TEGRA_KERNEL_OUT" CC="$CC_BIN" -j"$JOBS" Image dtbs modules || exit 1
+make O="$TEGRA_KERNEL_OUT" CC="$CC_BIN" INSTALL_MOD_PATH=/ modules_install || exit 1
 
 # --- 6. Установка ------------------------------------------------------------
 install -m 0644 "$TEGRA_KERNEL_OUT/arch/arm64/boot/Image" /boot/Image.kvm
