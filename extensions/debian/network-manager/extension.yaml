@@ -1,0 +1,11 @@
+name: network-manager
+version: 1.0.0
+family: deb
+arch: [amd64, arm64]
+# Только `build`. На первой загрузке донастраивать нечего: конфигурацию сети
+# пишет cloud-init из `network-config`, который кладёт на раздел cidata
+# `bs device write`, а профили NetworkManager он раскладывает сам.
+phase: [build]
+provides: [network-manager]
+requires: []
+conflicts: []

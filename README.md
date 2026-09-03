@@ -14,6 +14,7 @@ extensions/
 │   ├── chromium-kiosk/  kiosk/
 │   ├── gnome/  xfce4/  lxde/
 │   ├── x11vnc/
+│   ├── network-manager/  nocloud-cidata/
 │   └── nvidia/
 └── openwrt/                 # для OpenWrt (конфиги, UPLOAD) — не расширения, см. docs/
     ├── uci-defaults/

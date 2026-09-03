@@ -452,13 +452,15 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `remote-desktop` | `x11vnc` | `x11vnc@.service` на `rfbport` из `X11VNC_PORT` (умолчание 5900) |
 | `web-ide` | `code-server` | code-server на порту из `CODE_SERVER_PORT`, иначе из `config.yaml` |
 | `gpu-driver-nvidia` | `nvidia` | проприетарный драйвер + blacklist nouveau |
+| `nocloud-cidata-seed` | `nocloud-cidata` | `/etc/cloud/cloud.cfg.d/zz-bisquite-nocloud.cfg` с `fs_label: cidata` |
+| `network-manager` | `network-manager` | пакеты `network-manager` и `wpasupplicant`, включённый `NetworkManager.service` |
 
 Кто чего требует:
 
 | Расширение | `requires` | Откуда выведено |
 |---|---|---|
 | `x11vnc` | `x11-server`, `display-manager` | `x11vnc@.service` — `Requires=display-manager.service` и `DISPLAY=:0`. Путь к X authority в юните НЕ зашит: он разный под LightDM и GDM, и обёртка ищет его в рантайме |
-| `kiosk` | `x11-server`, `display-manager` | `install.sh:33` ставит `x11-xserver-utils`, но **не** `xorg`; `kiosk-chromium@.service:9-10` — `DISPLAY=:0`, `XAUTHORITY=/home/%i/.Xauthority`; `configure-kiosk.service:3` — `After=graphical.target … display-manager.service` |
+| `kiosk` | `x11-server`, `display-manager` | `install.sh` ставит клиентские утилиты X, но **не** `xorg`; `kiosk-chromium@.service` — `DISPLAY=:0`; `configure-kiosk.service:3` — `After=graphical.target … display-manager.service`. Путь к X authority в юните, как и у `x11vnc`, НЕ зашит — его ищет обёртка `run-kiosk.sh` |
 | остальные | — | ничего не требуют по коду |
 
 Конфликты:
