@@ -161,12 +161,30 @@ create_config() {
     mkdir -p "$config_dir"
 
     # Создаем конфигурационный файл
-    cat > "$config_dir/config.yaml" << EOF
+    # Аутентификация следует за паролем, а не игнорирует его.
+    #
+    # Раньше `auth: none` писалось БЕЗУСЛОВНО, каким бы ни был CODE_PASSWORD.
+    # Оператор задавал пароль, установка рапортовала «пароль задан», а сервер
+    # поднимался открытым — то есть громкость стояла на неверной стороне:
+    # предупреждение снималось ровно в том случае, когда защиты не было.
+    if [[ -n "$CODE_PASSWORD" && "$CODE_PASSWORD" != "none" ]]; then
+        cat > "$config_dir/config.yaml" << EOF
+bind-addr: 0.0.0.0:${CODE_PORT}
+auth: password
+password: ${CODE_PASSWORD}
+cert: /home/${CODE_USER}/.local/share/code-server/certs/localhost.crt
+cert-key: /home/${CODE_USER}/.local/share/code-server/certs/localhost.key
+EOF
+        log_info "аутентификация по паролю включена"
+    else
+        cat > "$config_dir/config.yaml" << EOF
 bind-addr: 0.0.0.0:${CODE_PORT}
 auth: none
 cert: /home/${CODE_USER}/.local/share/code-server/certs/localhost.crt
 cert-key: /home/${CODE_USER}/.local/share/code-server/certs/localhost.key
 EOF
+        log_warn "аутентификации НЕТ, сервер слушает 0.0.0.0 — шелл открыт всей сети"
+    fi
 
     # Устанавливаем правильные права доступа
     chown -R "$CODE_USER:$CODE_USER" "$config_dir"
@@ -265,10 +283,15 @@ main() {
     log_info "Configuration completed successfully!"
     log_info "code-server is now running for user '$CODE_USER' on port $CODE_PORT"
     log_info "Access URL: https://localhost:$CODE_PORT"
-    log_info "Authentication: disabled (auth: none)"
 
-    if [[ "$CODE_PASSWORD" != "none" ]]; then
-        log_warn "Note: PASSWORD is set in config but authentication is disabled"
+    # Итоговая строка следует за фактом, а не за прежним допущением.
+    # Прежде здесь безусловно печаталось «Authentication: disabled», а ниже
+    # стояла приписка «пароль задан, но аутентификация отключена» —
+    # признание дефекта вместо его починки, и читалась она уже на устройстве.
+    if [[ -n "$CODE_PASSWORD" && "$CODE_PASSWORD" != "none" ]]; then
+        log_info "Authentication: password"
+    else
+        log_warn "Authentication: НЕТ (auth: none) на 0.0.0.0 — шелл открыт всей сети"
     fi
 }
 

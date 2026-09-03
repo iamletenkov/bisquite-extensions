@@ -88,7 +88,15 @@ wget_with_retry() {
 
 # Функция получения версии из config.yaml
 get_version_from_config() {
-    local config_file="config.yaml"
+    # Путь от каталога СКРИПТА, а не от cwd.
+    #
+    # Инструкция `EXTENSION` запускает /opt/vmsetup/code-server/install.sh,
+    # НЕ меняя текущий каталог, поэтому относительное "config.yaml" не
+    # находилось никогда: закреплённая версия молча схлопывалась в latest,
+    # и два образа из одного VMFILE могли разойтись содержимым. Соседний
+    # configure.sh делает это правильно — через свой $SCRIPT_DIR.
+    local config_file
+    config_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.yaml"
     local version=""
 
     if [[ -f "$config_file" ]]; then
@@ -293,6 +301,8 @@ CSCONF
     # Пароль лежит в образе открытым текстом — и в /opt/vmsetup, и потом
     # в ~/.config/code-server. Кто получит образ, получит и пароль.
     log_warn "пароль хранится в образе открытым текстом: образ = пароль"
+    # Оговорка не лишняя: до 2026-09-03 configure.sh писал `auth: none`
+    # безусловно, и заданный пароль не включал ничего. Теперь включает.
   fi
   unset _cs_pass
 fi
