@@ -238,19 +238,36 @@ if [[ -n "${CODE_SERVER_PORT:-}${CODE_SERVER_PASSWORD:-}${CODE_SERVER_USER:-}" ]
     _cs_old_port=$(sed -n 's/^PORT:[[:space:]]*//p' "$_cs_config" | head -1)
     _cs_old_ver=$(sed -n 's/^VERSION:[[:space:]]*//p' "$_cs_config" | head -1)
   fi
+  _cs_pass="${CODE_SERVER_PASSWORD:-${_cs_old_pass:-none}}"
+  _cs_port="${CODE_SERVER_PORT:-${_cs_old_port:-9001}}"
+
+  # Права ставятся ДО записи: файл может содержать пароль, и промежутка,
+  # в котором он лежит с правами по umask, быть не должно.
+  install -m 0600 /dev/null "$_cs_config"
   cat > "$_cs_config" <<CSCONF
 USER: ${CODE_SERVER_USER:-${_cs_old_user:-}}
-PASSWORD: ${CODE_SERVER_PASSWORD:-${_cs_old_pass:-none}}
-PORT: ${CODE_SERVER_PORT:-${_cs_old_port:-9001}}
+PASSWORD: ${_cs_pass}
+PORT: ${_cs_port}
 VERSION: ${_cs_old_ver:-latest}
 CSCONF
-  log_info "config.yaml перезаписан из VMFILE: порт ${CODE_SERVER_PORT:-${_cs_old_port:-9001}}, пароль ${CODE_SERVER_PASSWORD:-${_cs_old_pass:-none}}"
-  # configure.sh поднимет сервер на 0.0.0.0 и с `auth: none`, если пароль
-  # `none`. Сказать об этом вслух обязаны здесь: в журнале сборки это
-  # единственное место, где решение видно.
-  if [[ "${CODE_SERVER_PASSWORD:-${_cs_old_pass:-none}}" == "none" ]]; then
-    log_warn "code-server будет слушать 0.0.0.0 БЕЗ ПАРОЛЯ — кто угодно в сети получит шелл"
+
+  # Пароль в журнал НЕ печатается — только факт его наличия. Журнал сборки
+  # уезжает в CI и в переписку чаще, чем сам образ.
+  if [[ "$_cs_pass" == "none" ]]; then
+    log_info "config.yaml перезаписан из VMFILE: порт ${_cs_port}, пароль не задан"
+    # configure.sh поднимет сервер как `bind-addr: 0.0.0.0` с `auth: none`.
+    # Это ЕДИНСТВЕННОЕ место, где решение видно до того, как образ уедет
+    # на устройство, поэтому формулировка прямая.
+    log_warn "code-server будет слушать 0.0.0.0 БЕЗ АУТЕНТИФИКАЦИИ:"
+    log_warn "  любой, кто достаёт до этой машины по сети, получает шелл"
+    log_warn "  от имени пользователя code-server со всеми его правами"
+  else
+    log_info "config.yaml перезаписан из VMFILE: порт ${_cs_port}, пароль задан"
+    # Пароль лежит в образе открытым текстом — и в /opt/vmsetup, и потом
+    # в ~/.config/code-server. Кто получит образ, получит и пароль.
+    log_warn "пароль хранится в образе открытым текстом: образ = пароль"
   fi
+  unset _cs_pass
 fi
 
 systemctl daemon-reload || true
