@@ -39,9 +39,44 @@ resolve_user(){
   local attempts=0
   local max_attempts=40
 
+  # Ключ USER из config.yaml ПЕРЕКРЫВАЕТ cloud-init.
+  #
+  # Раньше его не читал никто: configure.sh всегда шёл в get_cloud_user.sh,
+  # а ключ стоял в config.yaml и в README как ручка, которой нет. Это та же
+  # болезнь «мёртвых ручек», из-за которой у расширения x11vnc config.yaml
+  # удалён целиком. Здесь выбран второй исход — ключ включён, а не удалён:
+  #   * у соседнего code-server ровно этот ключ работает именно так
+  #     (configure.sh: USER из файла, иначе get_cloud_user.sh), и два
+  #     одноимённых ключа с разным поведением хуже любого из двух;
+  #   * случай, который он закрывает, реален — киоск на образе, где сессию
+  #     держит не тот пользователь, которого создал cloud-init.
+  #
+  # Молчаливого отката на cloud-init при заданном USER НЕТ: оператор назвал
+  # пользователя, и подмена его другим вернула бы ту же немоту с другой
+  # стороны. Ждём именно названного — cloud-init мог ещё не создать и его.
+  local configured
+  configured="$(read_config "USER")"
+  if [[ -n "$configured" ]]; then
+    log_info "Пользователь задан в config.yaml: $configured"
+    while true; do
+      if id "$configured" >/dev/null 2>&1; then
+        echo "$configured"
+        return 0
+      fi
+      attempts=$((attempts+1))
+      if (( attempts >= max_attempts )); then
+        log_error "пользователь '$configured' из config.yaml так и не появился"
+        log_error "уберите ключ USER, чтобы взять пользователя из cloud-init"
+        exit 1
+      fi
+      log_info "Waiting for user '$configured' (attempt $attempts/$max_attempts)..."
+      sleep 3
+    done
+  fi
+
   # Wait up to 120s for cloud user to appear to avoid racing cloud-init
   while true; do
-    if user="$($SCRIPT_DIR/get_cloud_user.sh 2>/dev/null || true)" && [[ -n "$user" ]]; then
+    if user="$("$SCRIPT_DIR"/get_cloud_user.sh 2>/dev/null || true)" && [[ -n "$user" ]]; then
       if id "$user" >/dev/null 2>&1; then
         log_info "Found user from cloud-init: $user"
         echo "$user"
@@ -67,12 +102,54 @@ read_config(){
   echo "$value"
 }
 
+# Какой рабочий стол здесь на самом деле.
+#
+# Расширение kiosk десктоп не ставит (см. README) — его даёт gnome, xfce4 или
+# lxde, и до этой правки две ветки настройки рассчитывали на РАЗНЫЕ окружения:
+# экранная клавиатура — на GNOME, а конфиги, прячущие панель, раскладывались
+# как Xfce4 безусловно, в том числе под GNOME и LXDE, где их не читает никто.
+#
+# Спрашиваем гостя о нём самом, а не объявляем таблицу «расширение десктопа ->
+# что делать»: таблица устарела бы молча — тот же довод, по которому расширение
+# docker смотрит на /boot/firmware/cmdline.txt и /etc/nv_tegra_release, а не на
+# ID дистрибутива.
+#
+# Сначала — что РАБОТАЕТ: в образе может стоять и gnome, и xfce4, а решает
+# дисплей-менеджер. Юнит стоит After=graphical.target ... display-manager.service,
+# но автологин мог ещё не довести сессию до конца, поэтому есть и запасной
+# признак — что установлено.
+detect_desktop(){
+  local user="$1"
+
+  if pgrep -u "$user" -x xfce4-session >/dev/null 2>&1; then echo xfce4; return 0; fi
+  if pgrep -u "$user" -x gnome-shell >/dev/null 2>&1 \
+     || pgrep -u "$user" -x gnome-session-binary >/dev/null 2>&1; then echo gnome; return 0; fi
+  if pgrep -u "$user" -x lxsession >/dev/null 2>&1; then echo lxde; return 0; fi
+
+  if command -v xfce4-session >/dev/null 2>&1; then echo xfce4; return 0; fi
+  if command -v gnome-shell >/dev/null 2>&1; then echo gnome; return 0; fi
+  if command -v lxsession >/dev/null 2>&1; then echo lxde; return 0; fi
+
+  echo unknown
+}
+
 enable_gnome_keyboard(){
   local cloud_user="$1"
   local keyboard_enabled="$2"
+  local desktop="$3"
 
   if [[ "$keyboard_enabled" != "true" ]]; then
     log_info "On-screen keyboard is disabled in config"
+    return 0
+  fi
+
+  # Ветка работает только под GNOME: gsettings пишет в схему
+  # org.gnome.desktop.a11y, а читает её gnome-shell. Под Xfce и LXDE запись
+  # проходила успешно и не давала НИЧЕГО — плюс в автозапуск ложился .desktop,
+  # который выглядел как включённая клавиатура. Отказ вслух вместо этого.
+  if [[ "$desktop" != "gnome" ]]; then
+    log_warn "KEYBOARD_ENABLED: true, но рабочий стол — $desktop, а клавиатура здесь только GNOME"
+    log_warn "экранной клавиатуры не будет; onboard/matchbox-keyboard расширение не ставит"
     return 0
   fi
 
@@ -108,7 +185,20 @@ EOF
 
 hide_desktop_ui(){
   local cloud_user="$1"
+  local desktop="$2"
   local user_home="/home/$cloud_user"
+
+  # Конфиги ниже — Xfce4-специфичные (xfconf-каналы xfce4-desktop и
+  # xfce4-panel). Раньше они раскладывались безусловно; под GNOME и LXDE это
+  # был мусор в ~/.config, выглядящий как настройка.
+  if [[ "$desktop" != "xfce4" ]]; then
+    log_info "рабочий стол — $desktop, Xfce4-конфиги не раскладываю"
+    # Не «недоделка»: окно киоска и так полноэкранное поверх всего, а панель
+    # под ним не видна. Прятать её у каждого окружения пришлось бы своим
+    # способом, и ни один из них не проверялся.
+    log_info "панель и иконки прячутся только под Xfce4 — см. README, раздел про окружение"
+    return 0
+  fi
 
   log_info "Hiding desktop UI for minimal kiosk experience"
 
@@ -165,8 +255,17 @@ configure_kiosk_service(){
   keyboard_enabled=$(read_config "KEYBOARD_ENABLED")
   chromium_flags=$(read_config "CHROMIUM_FLAGS")
 
-  # Set defaults if not specified
-  url="${url:-http://192.168.202.785}"
+  # Set defaults if not specified.
+  #
+  # Здесь стояло http://192.168.202.785 — адреса с октетом 785 не существует,
+  # и Chromium показывал бы ошибку разрешения имени, то есть дефект читался бы
+  # как неисправность сети. Умолчание НЕ приведено к 192.168.202.78 из
+  # config.yaml: это адрес конкретной лаборатории, и для любого другого
+  # оператора он ровно так же недостижим, просто молча. Взято то же значение,
+  # что и в обёртке, — теперь во всей цепочке (config.yaml -> configure.sh ->
+  # /var/lib/kiosk/config -> run-kiosk.sh) умолчание одно, а не три разных.
+  # Значение из config.yaml по-прежнему сильнее и никуда не делось.
+  url="${url:-https://github.com/iamletenkov/bisquite}"
   display="${display:-:0}"
   keyboard_enabled="${keyboard_enabled:-true}"
   chromium_flags="${chromium_flags:-}"
@@ -178,11 +277,15 @@ configure_kiosk_service(){
   log_info "  Keyboard enabled: $keyboard_enabled (GNOME on-screen keyboard)"
   log_info "  Chromium flags: ${chromium_flags:-<none>}"
 
+  local desktop
+  desktop="$(detect_desktop "$cloud_user")"
+  log_info "  Desktop: $desktop"
+
   # Hide desktop UI for cleaner kiosk experience
-  hide_desktop_ui "$cloud_user"
+  hide_desktop_ui "$cloud_user" "$desktop"
 
   # Enable GNOME on-screen keyboard
-  enable_gnome_keyboard "$cloud_user" "$keyboard_enabled"
+  enable_gnome_keyboard "$cloud_user" "$keyboard_enabled" "$desktop"
 
   # Create kiosk configuration file for the systemd service to read
   local kiosk_config_dir="/var/lib/kiosk"

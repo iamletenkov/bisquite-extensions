@@ -1,5 +1,9 @@
-USER:                              # Пользователь (если пусто - из cloud-init)
+# Пользователь, под которым поднимается киоск. Пусто — берётся из cloud-init.
+# Заданное здесь значение ПЕРЕКРЫВАЕТ cloud-init; если такого пользователя
+# на устройстве не появится, configure.sh отказывает вслух, а не подставляет
+# другого (см. resolve_user в configure.sh).
+USER:
 URL: "http://192.168.202.78"       # URL для отображения в киоске
 DISPLAY: ":0"                      # X Display для Chromium
-KEYBOARD_ENABLED: true             # Включить onboard экранную клавиатуру (auto-show)
+KEYBOARD_ENABLED: true             # Экранная клавиатура — ТОЛЬКО под GNOME
 CHROMIUM_FLAGS: "--disable-pinch --overscroll-history-navigation=0"

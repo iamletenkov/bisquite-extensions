@@ -1,69 +1,181 @@
-# Расширение Kiosk
+# kiosk
 
-Добавляет Chromium в режим киоска: браузер запускается в полный экран сразу после входа пользователя, поддерживает экранную клавиатуру и дополнительные флаги запуска.
+Chromium в режиме киоска: браузер разворачивается на весь экран после входа
+пользователя, которого создаёт cloud-init.
 
-## Возможности
+## Что делает
 
-- Ставит `chromium`, `dbus-x11`, `x11-xserver-utils`, `yq` и другие зависимости.
-- Настраивает автозапуск Chromium через systemd unit `kiosk-chromium@<user>.service`.
-- Определяет пользователя из cloud-init и активирует GNOME экранную клавиатуру (или иные варианты) по конфигурации.
-- Поддерживает дополнительные параметры запуска Chromium и тип клавиатуры (`onboard`, `matchbox-keyboard`, `florence`).
-- Готов к использованию с любым графическим окружением (GNOME, Xfce, LXDE).
+**Сборка** (`install.sh`)
 
-## Требования
+- ставит `curl`, `wget`, `yq`, `x11-xserver-utils`, `x11-utils`, `xauth`,
+  `dbus-x11`, `chromium`, `chromium-driver`;
+- кладёт `kiosk-chromium@.service`, `run-kiosk.sh` и
+  `configure-kiosk.service`, включает последний.
 
-- Рабочее X11-окружение с автологином (см. расширения `gnome`, `xfce4`, `lxde`).
-- Пользователь, создаваемый через cloud-init.
-- Интернет при сборке (установка пакетов).
+**Первая загрузка** (`configure.sh`)
 
-## Состав
+- резолвит пользователя: `USER` из `config.yaml`, иначе из cloud-init —
+  в обоих случаях с ожиданием до 120 секунд, 40 попыток по 3 с;
+- читает `config.yaml` рядом с собой;
+- определяет рабочий стол и настраивает **только то, что этому столу
+  подходит** (см. ниже);
+- пишет `/var/lib/kiosk/config` — его читает юнит через `EnvironmentFile`;
+- поднимает `kiosk-chromium@<пользователь>.service`.
 
-- `install.sh` — ставит зависимости, копирует systemd units.
-- `configure.sh` — читает `config.yaml`, определяет пользователя, включает сервис.
-- `config.yaml` — параметры (URL, тип клавиатуры, DISPLAY, флаги Chromium).
-- `configure-kiosk.service` — oneshot unit, вызывающий `configure.sh`.
-- `kiosk-chromium@.service` — шаблон systemd-сервиса.
+**Каждый запуск браузера** (`run-kiosk.sh`)
 
-## Интеграция в VMFILE
+- ищет X authority перебором кандидатов, проверяя каждого `xdpyinfo`;
+- ждёт дисплей до 60 секунд, при неудаче отказывает вслух со списком
+  проверенных путей;
+- запускает `chromium` с базовым набором флагов плюс `CHROMIUM_FLAGS`.
 
-```bash
-UPLOAD files/kiosk/install.sh:/opt/vmsetup/kiosk/install.sh
-UPLOAD files/kiosk/configure.sh:/opt/vmsetup/kiosk/configure.sh
-UPLOAD files/kiosk/config.yaml:/opt/vmsetup/kiosk/config.yaml
-UPLOAD files/kiosk/configure-kiosk.service:/opt/vmsetup/kiosk/configure-kiosk.service
-UPLOAD files/kiosk/kiosk-chromium@.service:/opt/vmsetup/kiosk/kiosk-chromium@.service
+## Расширение НЕ ставит X-сервер
 
-RUN_COMMAND chmod +x /opt/vmsetup/kiosk/*.sh
-RUN_COMMAND /opt/vmsetup/kiosk/install.sh
-```
+`install.sh` ставит клиентские утилиты X (`x11-xserver-utils`, `x11-utils`,
+`xauth`) и `dbus-x11`, но **не** `xorg` и не дисплей-менеджер. X-сервер
+и автологин обязан дать кто-то другой — `gnome`, `xfce4` или `lxde`. Это
+записано в манифесте (`requires: [x11-server, display-manager]`), но
+**сборкой не проверяется**: топологической сортировки у резолвера нет,
+и киоск без десктопа соберётся зелёным. На устройстве это теперь видно
+в журнале: `run-kiosk.sh` минуту ищет дисплей, а потом печатает список
+проверенных путей и прямо говорит, что десктоп ставит не он.
 
-При необходимости замените `config.yaml` на свой перед запуском `install.sh`.
+Отношение видно в юнитах: `kiosk-chromium@.service` несёт `DISPLAY=:0`,
+а `configure-kiosk.service` — `After=graphical.target … display-manager.service`.
+
+## X authority ищется в рантайме
+
+Юнит раньше нёс `XAUTHORITY=/home/%i/.Xauthority`. Путь верен под LightDM
+и **не существует под GDM ≥ 42**, где authority лежит в
+`/run/user/<uid>/gdm/Xauthority`. Отказ был немым: `ExecStartPre` проверял
+дисплей тем же неверным authority, сдавался, а `Restart=always` крутил цикл
+раз в десять секунд навсегда — в журнале только «Failed to open display».
+
+Теперь путь ищет `run-kiosk.sh`: перебирает кандидатов (`$XAUTHORITY`,
+`~/.Xauthority`, `/run/user/<uid>/gdm/Xauthority`,
+`/run/lightdm/<user>/xauthority`, `-auth` работающего `Xorg`, legacy-раскладка
+GDM), проверяя каждого `xdpyinfo`, и при неудаче печатает весь список.
+Тот же приём и по той же причине уже применён в расширении `x11vnc` —
+замеры на живой ВМ под GDM и LightDM записаны в шапке
+`extensions/debian/x11vnc/run-x11vnc.sh`.
+
+Заодно вскрылось, что `xdpyinfo` расширение не ставило вовсе:
+`x11-xserver-utils` даёт `xset`/`xrandr`/`xhost`, а `xdpyinfo` лежит
+в `x11-utils`. Проверка работала только тогда, когда пакет приезжал прицепом
+за `xorg` от расширения десктопа, то есть зависела от порядка слоёв в VMFILE.
+Теперь он объявлен явно.
+
+## Расширение рассчитано на разные рабочие столы по-разному
+
+Две ветки настройки исторически рассчитаны на разные окружения, и до правки
+это нигде не проверялось: Xfce-конфиги раскладывались **безусловно**,
+в том числе под GNOME и LXDE, а экранная клавиатура работает только под GNOME.
+
+`configure.sh` теперь спрашивает гостя о нём самом — сначала какая сессия
+**работает** (`xfce4-session`, `gnome-shell`, `lxsession` у нужного
+пользователя), потом, если сессии ещё нет, что **установлено**:
+
+| Рабочий стол | Панель и иконки | Экранная клавиатура |
+|---|---|---|
+| Xfce4 | прячутся (xfconf-каналы `xfce4-desktop`, `xfce4-panel`) | нет, в журнал уходит предупреждение |
+| GNOME | не трогаются | включается через `gsettings` |
+| LXDE | не трогаются | нет, в журнал уходит предупреждение |
+| не определился | не трогаются | нет, в журнал уходит предупреждение |
+
+Строки «не трогаются» — не недоделка. Окно киоска полноэкранное поверх всего,
+панель под ним не видна; прятать её у каждого окружения пришлось бы своим
+способом, и ни один из них не проверялся.
+
+## Параметров окружения нет
+
+Расширение читает только `config.yaml`; ни одной переменной окружения
+`install.sh` не разбирает. Это ограничение, а не решение: файл лежит
+в каталоге расширения, то есть в кеше источников, а кеш перезаписывается
+на каждом `bs extension sync`. Правка на хосте держится до первой
+синхронизации.
+
+Рабочий способ поменять параметры сегодня — положить свой `config.yaml`
+в гостя через cloud-init `write_files` по пути
+`/opt/vmsetup/kiosk/config.yaml` и перезапустить `configure-kiosk`.
 
 ## Конфигурация (`config.yaml`)
 
 ```yaml
-USER: ""                          # если пусто — имя берём из cloud-init
-URL: "https://dashboard.example"  # целевая страница
-DISPLAY: ":0"                     # X11-дисплей
-KEYBOARD_ENABLED: true            # включить экранную клавиатуру
-KEYBOARD_TYPE: "onboard"          # onboard | matchbox-keyboard | florence
+USER:                              # пусто — пользователь из cloud-init
+URL: "http://192.168.202.78"       # страница киоска
+DISPLAY: ":0"                      # X-дисплей
+KEYBOARD_ENABLED: true             # экранная клавиатура — только под GNOME
 CHROMIUM_FLAGS: "--disable-pinch --overscroll-history-navigation=0"
 ```
 
-Добавьте собственные флаги Chromium (например, `--autoplay-policy=no-user-gesture-required`) через `CHROMIUM_FLAGS`.
+| Ключ | Читает | Умолчание в коде |
+|---|---|---|
+| `USER` | `configure.sh` | пусто — из cloud-init |
+| `URL` | `configure.sh` → `/var/lib/kiosk/config` | `https://github.com/iamletenkov/bisquite` |
+| `DISPLAY` | `configure.sh` → `/var/lib/kiosk/config` | `:0` |
+| `KEYBOARD_ENABLED` | `configure.sh` | `true` |
+| `CHROMIUM_FLAGS` | `configure.sh` → `/var/lib/kiosk/config` | пусто |
 
-## Как это работает
+**`USER` перекрывает cloud-init.** Раньше ключ не читал никто — `configure.sh`
+всегда шёл в `get_cloud_user.sh`, а строка в файле выглядела как ручка,
+которой нет. Теперь заданное значение сильнее: расширение ждёт **названного**
+пользователя (те же 120 секунд) и, не дождавшись, отказывает вслух, а не
+подставляет чужого. Ровно так этот ключ работает у соседнего `code-server`.
 
-1. **Установка** — `install.sh` копирует сервисы, включает `configure-kiosk`, добавляет зависимости.
-2. **Загрузка** — `configure-kiosk` ждёт появления пользователя, переносит конфиг, настраивает автозапуск клавиатуры, включает `kiosk-chromium@user.service`.
-3. **Запуск** — сервис ожидает доступности X11 (`DISPLAY=:0`), затем запускает Chromium в kiosk-режиме.
-4. **Изменения** — обновите `/opt/vmsetup/kiosk/config.yaml` и выполните `sudo systemctl restart configure-kiosk`.
+**Умолчание `URL` было невалидным.** В `configure.sh` стояло
+`http://192.168.202.785` — октета 785 не существует, и Chromium показывал
+ошибку разрешения имени, то есть дефект читался как неисправность сети.
+Умолчание не приведено к `192.168.202.78` из `config.yaml`: это адрес
+конкретной лаборатории, и для любого другого оператора он ровно так же
+недостижим, просто молча. Теперь во всей цепочке (`config.yaml` →
+`configure.sh` → `/var/lib/kiosk/config` → `run-kiosk.sh`) умолчание одно.
+Значение из `config.yaml` по-прежнему сильнее — правьте его.
+
+Флаги из `CHROMIUM_FLAGS` добавляются **к** базовому набору юнита
+(`--kiosk --noerrdialogs --disable-infobars --no-first-run --disable-translate
+--disable-session-crashed-bubble --disable-features=TranslateUI`), а не
+заменяют его.
 
 ## Экранная клавиатура
 
-- `KEYBOARD_ENABLED: true` включает встроенную GNOME on-screen keyboard или выбранный тип.
-- Для альтернатив (`matchbox-keyboard`, `florence`) пакеты ставятся по требованию.
-- Автозапуск клавиатуры обеспечивается через `.desktop` файл в `~/.config/autostart/`.
+`KEYBOARD_ENABLED: true` включает **встроенную клавиатуру GNOME** —
+`gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled true`,
+плюс `.desktop` в `~/.config/autostart/`, чтобы настройка применилась
+и в сессии, которой на момент настройки ещё нет.
+
+Других вариантов расширение не ставит и не умеет: `onboard`,
+`matchbox-keyboard` и `florence` в `install.sh` не упоминаются. Под Xfce
+и LXDE эта ветка ничего не даёт — `gsettings` там некому прочитать, — и
+`configure.sh` больше не изображает работу: он говорит об этом
+предупреждением и не кладёт бесполезный `.desktop` в автозапуск.
+
+## Подключение в VMFILE
+
+Десктоп идёт **первым**:
+
+```vmfile
+EXTENSION gnome
+EXTENSION kiosk
+```
+
+Прежняя запись продолжает работать:
+
+```vmfile
+COPY_IN <чекаут>/extensions/debian/kiosk:/opt/vmsetup/
+RUN_COMMAND chmod +x /opt/vmsetup/kiosk/*.sh
+RUN_COMMAND /opt/vmsetup/kiosk/install.sh
+```
+
+`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
+VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
+и глубина зависит от того, насколько глубоко лежит сам VMFILE.
+
+Свой `config.yaml` при этой форме удобно положить поверх ещё на сборке —
+отдельным `UPLOAD` после `COPY_IN`, до `install.sh`.
+
+Взаимоисключающе с `chromium-kiosk`: оба автостартом на `graphical.target`
+разворачивают полноэкранный браузер на одном месте. Сборка этого **не
+проверяет**.
 
 ## Диагностика
 
@@ -78,18 +190,17 @@ cat /var/lib/kiosk/config              # итоговая конфигураци
 ls -la /home/<user>/.config/autostart  # автозапуск клавиатуры
 ```
 
-Проблемы:
-
-- **Chromium не стартует** — убедитесь, что отображение `:0` существует (`ls /tmp/.X11-unix/`), пользователь владеет файлом `.Xauthority`, а сервис успевает дождаться графики.
-- **Клавиатура не появляется** — проверьте установку выбранного пакета (`which onboard`) и содержимое `.desktop` в автозапуске.
-- **Нужно больше времени для X11** — отредактируйте unit `kiosk-chromium@.service`, увеличив таймаут в `ExecStartPre`.
-
-## Сочетание с другими расширениями
-
-- Установите одно из графических окружений (`gnome`, `xfce4`, `lxde`), затем добавьте `kiosk`.
-- Для удалённого контроля добавьте `x11vnc`.
-- Для хостов без клавиатуры используйте `KEYBOARD_ENABLED: true` и тач-драйверы.
+- **Chromium не стартует** — `run-kiosk.sh` минуту ищет X authority
+  и печатает в журнал весь список проверенных путей с пометкой, какой
+  из них есть, а какой нет. Начинайте с этого списка, а не с догадок:
+  чаще всего в образе просто нет десктопа, и дисплея не существует.
+- **Клавиатура не появилась** — в журнале сказано, какой рабочий стол
+  определился. Клавиатура есть только под GNOME.
+- **Нужно больше времени на X11** — правьте цикл ожидания
+  в `run-kiosk.sh` (30 попыток по 2 с).
 
 ## Лицензия
 
-Расширение распространяется на условиях публичной некоммерческой лицензии Bisquite (PolyForm Noncommercial 1.0.0, см. `LICENSE`). Для коммерческого использования требуется отдельная платная лицензия — см. `COMMERCIAL-LICENSE.md`.
+Расширение распространяется на условиях публичной некоммерческой лицензии
+Bisquite (PolyForm Noncommercial 1.0.0, см. `LICENSE`). Для коммерческого
+использования требуется отдельная платная лицензия — см. `COMMERCIAL-LICENSE.md`.

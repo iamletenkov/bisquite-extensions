@@ -7,19 +7,16 @@ Wants=graphical.target
 Type=simple
 User=%i
 Environment="DISPLAY=:0"
-Environment="XAUTHORITY=/home/%i/.Xauthority"
+# XAUTHORITY здесь БОЛЬШЕ НЕ ЗАДАЁТСЯ. Прибитый /home/%i/.Xauthority верен
+# только под LightDM: под GDM >= 42 файл лежит в /run/user/<uid>/gdm/Xauthority,
+# и юнит уходил в вечный цикл рестарта молча. Путь ищет обёртка — разбор
+# и замеры в её шапке.
 EnvironmentFile=-/var/lib/kiosk/config
 
-# Wait for X server to be ready (retry up to 10 seconds)
-ExecStartPre=/bin/bash -c 'for i in {1..10}; do if xdpyinfo -display ${DISPLAY} >/dev/null 2>&1; then exit 0; fi; sleep 1; done; exit 1'
-
-# Launch Chromium in kiosk mode with configured URL and flags
-ExecStart=/bin/bash -c ' \
-  BASE_FLAGS="--kiosk --noerrdialogs --disable-infobars --no-first-run --disable-translate --disable-session-crashed-bubble --disable-features=TranslateUI"; \
-  EXTRA_FLAGS="${CHROMIUM_FLAGS:-}"; \
-  URL="${URL:-https://github.com/iamletenkov/bisquite}"; \
-  exec chromium $BASE_FLAGS $EXTRA_FLAGS "$URL" \
-'
+# ExecStartPre с `xdpyinfo` убран: он проверял дисплей тем же неверным
+# authority, что и сам запуск, то есть повторял ошибку. Ожидание дисплея
+# переехало внутрь обёртки, где кандидат и проверка — одно и то же.
+ExecStart=/bin/bash /opt/vmsetup/kiosk/run-kiosk.sh %i
 
 Restart=always
 RestartSec=10
