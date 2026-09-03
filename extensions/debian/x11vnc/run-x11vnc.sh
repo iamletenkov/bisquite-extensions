@@ -24,6 +24,21 @@
 # Under GDM the file is somewhere else again — /run/user/<uid>/gdm/Xauthority
 # (gdm/daemon/gdm-x-session.c, same in gdm 43/46/48).
 #
+# ЗАМЕРЕНО НА ЖИВОЙ ВМ (debian 12, 2026-09-03), оба дисплей-менеджера подряд
+# на одной машине — сначала GDM, потом LightDM после переключения симлинка
+# display-manager.service:
+#
+#                        GDM                        LightDM
+#   Xorg -auth           /run/user/1000/gdm/…       /var/run/lightdm/root/:0
+#   authority юзера      то же                      /home/check/.Xauthority
+#   /var/run/lightdm/<user>/:0   нет                НЕТ  ← старый путь юнита
+#   выбор обёртки        кандидат 2                 кандидат 1
+#   NRestarts            0                          0
+#
+# Каталог `root` под LightDM существует — это authority X-СЕРВЕРА, 0600 root.
+# Каталога с именем пользователя нет ни под одним менеджером. Склейка
+# подтверждена: юнит был сломан и под GNOME, и под Xfce.
+#
 # WHY NOT `-auth guess`. It looks like the answer, but its FINDDISPLAY script
 # (extracted from the binary) globs only ~/.Xauthority, /tmp/.gdm*,
 # /tmp/.Xauth*, /var/run/gdm*/auth-for-*/database and auth-cookie-*. The
@@ -31,6 +46,15 @@
 # modern GDM does not use. `man x11vnc` also warns FINDDISPLAY can hang
 # forever on xdpyinfo when a greeter holds the server — exactly the broken
 # autologin case.
+#
+# Это тоже замерено, а не выведено. На той же ВМ под GDM:
+#
+#     $ sudo -u check x11vnc -findauth
+#     xauth:  file /home/check/.Xauthority does not exist
+#     XAUTHORITY=
+#
+# Пусто. `-auth guess` под GDM не находит ничего, то есть обёртка обязательна,
+# а не сделана про запас.
 set -euo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
