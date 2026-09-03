@@ -13,9 +13,9 @@ extensions/
 │   ├── code-server/
 │   ├── chromium-kiosk/  kiosk/
 │   ├── gnome/  xfce4/  lxde/
-│   ├── x11vnc/
-│   ├── network-manager/  nocloud-cidata/
-│   └── nvidia/
+│   ├── x11vnc/  vino-vnc/
+│   ├── network-manager/  nocloud-cidata/  cloud-growroot/
+│   └── nvidia/  jetson-stats/
 └── openwrt/                 # для OpenWrt (конфиги, UPLOAD) — не расширения, см. docs/
     ├── uci-defaults/
     └── wrt_cloudinit/
@@ -265,8 +265,14 @@ before_script:
 
 - `gnome`, `xfce4`, `lxde` дают `x11-server` + `display-manager` + `desktop-session`
   и взаимоисключающи;
-- `x11vnc` и `kiosk` требуют `x11-server` и `display-manager` — то самое
-  отношение, которое держится только порядком слоёв в VMFILE;
+- `x11vnc`, `vino-vnc` и `kiosk` требуют `x11-server` и `display-manager` —
+  то самое отношение, которое держится только порядком слоёв в VMFILE.
+  `x11vnc` и `vino-vnc` дают одну способность `remote-desktop`, но конфликта
+  не объявляют: мешают друг другу их умолчания (порт 5900), а это лечится
+  параметром — разбор в `extensions/debian/vino-vnc/README.md`;
+- `jetson-stats` даёт `jetson-monitor` и объявляет только `arm64`: Jetson
+  бывает только aarch64, и вдобавок расширение отказывает на образе без
+  `/etc/nv_tegra_release`;
 - `docker` даёт `container-runtime` и ни с чем не конфликтует: расширения
   слиты 2026-09-03, когда замер показал, что `get.docker.com` ставит из того
   же `download.docker.com` и вдобавок ломает сборку на bionic. Разбор —

@@ -449,11 +449,12 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `desktop-session` | `gnome`, `xfce4`, `lxde` | `task-gnome-desktop` / `xfce4 xfce4-goodies` / `lxde` |
 | `container-runtime` | `docker` | Docker CE из apt-репозитория Docker |
 | `kiosk-browser` | `kiosk`, `chromium-kiosk` | обе реализации автостартом забирают экран |
-| `remote-desktop` | `x11vnc` | `x11vnc@.service` на `rfbport` из `X11VNC_PORT` (умолчание 5900) |
+| `remote-desktop` | `x11vnc`, `vino-vnc` | `x11vnc@.service` на `rfbport` из `X11VNC_PORT`; у `vino-vnc` — `gsettings` `org.gnome.Vino` и автозапуск XDG (умолчание у обоих 5900) |
 | `web-ide` | `code-server` | code-server на порту из `CODE_SERVER_PORT`, иначе из `config.yaml` |
 | `gpu-driver-nvidia` | `nvidia` | проприетарный драйвер + blacklist nouveau |
 | `nocloud-cidata-seed` | `nocloud-cidata` | `/etc/cloud/cloud.cfg.d/zz-bisquite-nocloud.cfg` с `fs_label: cidata` |
 | `network-manager` | `network-manager` | пакеты `network-manager` и `wpasupplicant`, включённый `NetworkManager.service` |
+| `jetson-monitor` | `jetson-stats` | `jtop` из PyPI плюс `jtop.service`; данные идут из `tegrastats` и sysfs Tegra, а не из NVML |
 
 Кто чего требует:
 
@@ -461,6 +462,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 |---|---|---|
 | `x11vnc` | `x11-server`, `display-manager` | `x11vnc@.service` — `Requires=display-manager.service` и `DISPLAY=:0`. Путь к X authority в юните НЕ зашит: он разный под LightDM и GDM, и обёртка ищет его в рантайме |
 | `kiosk` | `x11-server`, `display-manager` | `install.sh` ставит клиентские утилиты X, но **не** `xorg`; `kiosk-chromium@.service` — `DISPLAY=:0`; `configure-kiosk.service:3` — `After=graphical.target … display-manager.service`. Путь к X authority в юните, как и у `x11vnc`, НЕ зашит — его ищет обёртка `run-kiosk.sh` |
+| `vino-vnc` | `x11-server`, `display-manager` | vino живёт ВНУТРИ пользовательской сессии: `configure.sh` пишет `gsettings` в dconf пользователя и кладёт автозапуск в его `~/.config/autostart`, а сессию открывает дисплей-менеджер. Системного юнита и поиска X authority здесь нет вовсе — этим он и отличается от `x11vnc` |
 | остальные | — | ничего не требуют по коду |
 
 Конфликты:
