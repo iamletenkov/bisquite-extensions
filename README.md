@@ -9,28 +9,38 @@
 ```
 extensions/
 ├── debian/                  # для Debian/Ubuntu (install.sh + configure)
-│   ├── docker/
+│   ├── docker/  docker-ce/
 │   ├── code-server/
 │   ├── chromium-kiosk/  kiosk/
 │   ├── gnome/  xfce4/  lxde/
 │   ├── x11vnc/
 │   └── nvidia/
-└── openwrt/                 # для OpenWrt (конфиги, UPLOAD)
+└── openwrt/                 # для OpenWrt (конфиги, UPLOAD) — не расширения, см. docs/
     ├── uci-defaults/
     └── wrt_cloudinit/
+lib/                         # общий код, источник истины (вендорится в расширения)
+tools/                       # sync-lib.sh, check-lib.sh, validate-extensions.py, check.sh
+docs/extensions.md           # конвенция целиком: манифест, фазы, способности
 ```
 
 Ubuntu-образы используют расширения из `debian/` (Ubuntu — Debian-совместима).
+
+**Раскладка каталогов — контракт.** На пути `extensions/debian/<имя>` ссылаются
+20 строк `COPY_IN`/`UPLOAD` в 13 VMFILE основного репозитория, и переименование
+ломает их молча на сборке и громко на устройстве: `configure.sh` запускает
+firstboot-служба, а не сборка. Поэтому каталог называется `debian/`, а семейство
+внутри манифеста — `deb`; это разные вещи, и совмещать их не надо.
 
 ## Конвенция
 
 **Debian/Ubuntu** (`extensions/debian/<name>/`) — скриптовая, двухфазная:
 ```
 <name>/
+├── extension.yaml              # манифест: name/version/family/arch/phase/deps
 ├── install.sh                  # сборка: ставит софт, регистрирует configure-сервис
 ├── configure.sh                # первый запуск: до-настройка под конкретную ВМ
 ├── configure-<name>.service    # systemd-oneshot, гоняет configure.sh на загрузке
-├── get_cloud_user.sh           # резолв cloud-init пользователя
+├── get_cloud_user.sh           # ВЕНДОРЕННАЯ копия lib/ — руками не править
 ├── config.yaml                 # опциональный конфиг
 └── README.md
 ```
@@ -41,7 +51,51 @@ Ubuntu-образы используют расширения из `debian/` (Ub
 В образе нужны `cloud-init` и `yq` (их ставит базовый VMFILE).
 
 **OpenWrt** (`extensions/openwrt/`) — конфиги, которые кладутся через `UPLOAD`
-(uci-defaults, init.d-скрипты), без install.sh.
+(uci-defaults, init.d-скрипты), без install.sh. По текущей конвенции это **не
+расширения**: другой механизм доставки, и ни одна фаза не описывает их честно.
+Манифестов у них нет намеренно — разбор в `docs/extensions.md`.
+
+### Манифест
+
+Рядом со скриптами лежит `extension.yaml` — восемь полей, набор закрыт:
+
+```yaml
+name: x11vnc
+version: 1.0.0
+family: deb                          # deb | rpm | apk | openwrt (НЕ имя каталога)
+arch: [amd64, arm64]                 # единственная объявляемая ось применимости
+phase: [build, firstboot]            # где выполняется работа
+provides: [remote-desktop]
+requires: [x11-server, display-manager]
+conflicts: []
+```
+
+Значение каждого поля, словарь способностей и то, из какого кода они выведены, —
+в `docs/extensions.md`.
+
+### Общий код
+
+`get_cloud_user.sh` нужен семи расширениям, а до гостя доезжает только каталог
+одного расширения (`COPY_IN <ext>:/opt/vmsetup/`) — соседний `lib/` не приедет
+никогда. Поэтому источник истины один (`lib/get_cloud_user.sh`), а копии рядом
+со скриптами **генерируются** `tools/sync-lib.sh` и сверяются
+`tools/check-lib.sh`. В копиях стоит шапка «сгенерировано, не править руками».
+
+Куда вендорится — в `tools/lib-targets.txt`, по строке на каталог с указанием,
+кто именно зовёт файл.
+
+## Проверки
+
+```bash
+tools/check.sh                # сверка копий lib/ + валидация манифестов
+tools/sync-lib.sh             # разложить копии из lib/
+tools/sync-lib.sh --dry-run   # только показать расхождения
+tools/validate-extensions.py  # только манифесты (нужен python3 + PyYAML)
+```
+
+Валидатор проверяет, что у каждого каталога с `install.sh` есть манифест, что
+поля заполнены и осмысленны, что каждая способность из `requires` кем-то
+предоставляется, что в графе нет циклов и что `conflicts` симметричны.
 
 ## Подключение в VMFILE
 
@@ -78,6 +132,21 @@ before_script:
 
 ## Зависимости и применимость
 
-Пока по соглашению (в README конкретных расширений): десктопы (`gnome`/`xfce4`/
-`lxde`) обычно идут с `x11vnc`; графические/`nvidia` требуют GPU. Структурированные
-метаданные — задел на будущий OCI-«магазин расширений».
+Объявлены в `extension.yaml` и проверяются `tools/validate-extensions.py`.
+Полная таблица «кто что даёт и из какого кода это выведено» —
+в `docs/extensions.md`. Коротко:
+
+- `gnome`, `xfce4`, `lxde` дают `x11-server` + `display-manager` + `desktop-session`
+  и взаимоисключающи;
+- `x11vnc` и `kiosk` требуют `x11-server` и `display-manager` — то самое
+  отношение, которое сегодня держится только порядком слоёв в VMFILE;
+- `docker` и `docker-ce` дают один `container-runtime` разными путями и потому
+  конфликтуют. **Слияние отложено намеренно**: на `docker-ce` не ссылается ни
+  один VMFILE, а через `get.docker.com` сегодня идут три из четырёх сборок,
+  включая две базовые. Умолчанием `docker-ce` станет после того, как соберётся
+  на этих трёх базах, — разбор в `docs/extensions.md`.
+
+**Читателя манифестов пока нет.** Резолвер, топологическая сортировка и отказ
+по несовпадению архитектур — этап 2 спеки, и он в `bisquite`, не здесь. Сегодня
+манифесты читает только валидатор, а порядок слоёв держится вниманием автора
+VMFILE.

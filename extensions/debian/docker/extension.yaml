@@ -1,0 +1,15 @@
+name: docker
+version: 1.0.0
+family: deb
+# get.docker.com сам определяет дистрибутив и архитектуру; arm64 подтверждён
+# сборкой ubuntu1804/ubuntu_jetson_nano.vmfile.
+arch: [amd64, arm64]
+# build     — install.sh прогоняет get.docker.com и включает юниты;
+# firstboot — configure-docker.service добавляет пользователя cloud-init
+#             в группу docker (имя пользователя при сборке неизвестно).
+phase: [build, firstboot]
+provides: [container-runtime]
+requires: []
+# Ставит тот же движок, что и docker-ce, но другим путём. Одновременно — два
+# источника одних пакетов. Слияние отложено намеренно, см. docs/extensions.md.
+conflicts: [docker-ce]

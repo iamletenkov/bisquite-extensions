@@ -1,0 +1,12 @@
+[Unit]
+Description=Configure Docker CE for the cloud-init user
+After=cloud-init.service docker.service
+Wants=cloud-init.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/vmsetup/docker-ce/configure.sh
+
+[Install]
+WantedBy=multi-user.target

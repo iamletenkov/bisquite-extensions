@@ -1,0 +1,11 @@
+name: lxde
+version: 1.0.0
+family: deb
+arch: [amd64, arm64]
+phase: [build, firstboot]
+# xorg xinput                          -> x11-server     (install.sh:21)
+# lightdm + set-default graphical.target -> display-manager (install.sh:38-39)
+# lxde                                 -> desktop-session
+provides: [x11-server, display-manager, desktop-session]
+requires: []
+conflicts: [gnome, xfce4]

@@ -1,0 +1,17 @@
+name: gnome
+version: 1.0.0
+family: deb
+# Ставится только apt-пакетами, ничего не качает по фиксированной ссылке.
+arch: [amd64, arm64]
+# build     — install.sh ставит task-gnome-desktop/gdm3 и включает юниты;
+# firstboot — configure-gnome.service гоняет configure.sh: автологин под
+#             пользователем, которого создаёт cloud-init (при сборке он неизвестен).
+phase: [build, firstboot]
+# xorg xinput          -> x11-server     (install.sh:21)
+# gdm3 + set-default graphical.target -> display-manager (install.sh:38-39)
+# task-gnome-desktop   -> desktop-session
+provides: [x11-server, display-manager, desktop-session]
+requires: []
+# Три десктопа взаимоисключающи: каждый ставит свой display manager и
+# делает его системным `display-manager.service`.
+conflicts: [xfce4, lxde]

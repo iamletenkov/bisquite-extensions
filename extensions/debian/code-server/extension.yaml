@@ -1,0 +1,15 @@
+name: code-server
+version: 1.0.0
+family: deb
+# ТОЛЬКО amd64: install.sh качает mkcert по прибитой ссылке
+# mkcert-v1.4.4-linux-amd64 (install.sh, MKCERT_GH_URL) и валидирует ELF —
+# на arm64 сборка упадёт. Сам code-server ставится штатным install.sh
+# и arm64 поддерживает; ограничение вносит mkcert.
+arch: [amd64]
+# build     — install.sh ставит mkcert и code-server;
+# firstboot — configure-code-server.service выпускает сертификат и заводит
+#             сервис под пользователем (из config.yaml либо из cloud-init).
+phase: [build, firstboot]
+provides: [web-ide]
+requires: []
+conflicts: []

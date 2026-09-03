@@ -1,0 +1,16 @@
+name: kiosk
+version: 1.0.0
+family: deb
+arch: [amd64, arm64]
+# build     — install.sh ставит chromium и кладёт kiosk-chromium@.service;
+# firstboot — configure.sh поднимает kiosk-chromium@<пользователь> под
+#             пользователем из cloud-init.
+phase: [build, firstboot]
+provides: [kiosk-browser]
+# install.sh НЕ ставит xorg — только x11-xserver-utils и dbus-x11 (install.sh:33).
+# X-сервер и автологин обязан дать кто-то другой:
+#   kiosk-chromium@.service:9-10 — DISPLAY=:0, XAUTHORITY=/home/%i/.Xauthority
+#   configure-kiosk.service:3    — After=graphical.target ... display-manager.service
+requires: [x11-server, display-manager]
+# Обе реализации киоска забирают экран себе, автостартом на graphical.target.
+conflicts: [chromium-kiosk]

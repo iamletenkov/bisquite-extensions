@@ -1,0 +1,16 @@
+name: chromium-kiosk
+version: 1.0.0
+family: deb
+# Пакет тянется из стороннего репозитория repository.salamek.cz (suite `all`),
+# набор архитектур там не проверялся; на сборках bisquite подтверждён amd64
+# (debian12/chromium-kiosk.vmfile, debian12/nuc-kiosk.vmfile).
+arch: [amd64, arm64]
+# build     — install.sh ставит пакет chromium-kiosk и локаль;
+# firstboot — configure-chromium-kiosk.service раскладывает config.yaml
+#             в /etc/chromium-kiosk/config.yml до старта config watcher'а.
+phase: [build, firstboot]
+provides: [kiosk-browser]
+# Пакет salamek приносит собственную графическую сессию: оба использующих его
+# VMFILE ставят его БЕЗ расширения десктопа. Поэтому x11-server не требуется.
+requires: []
+conflicts: [kiosk]

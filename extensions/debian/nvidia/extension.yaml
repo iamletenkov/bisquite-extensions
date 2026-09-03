@@ -1,0 +1,13 @@
+name: nvidia
+version: 1.0.0
+family: deb
+# Ветка Debian прибивает метапакет linux-headers-amd64 (install.sh,
+# install_debian_drivers); ветка Ubuntu идёт в graphics-drivers PPA, где
+# arm64 не публикуется.
+arch: [amd64]
+# Только build: configure.sh у расширения нет, ничего на первой загрузке
+# не донастраивается (нужна лишь перезагрузка после установки драйвера).
+phase: build
+provides: [gpu-driver-nvidia]
+requires: []
+conflicts: []
