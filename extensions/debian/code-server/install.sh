@@ -217,6 +217,42 @@ else
   log_warn "configure-code-server.service not found in /opt/vmsetup/code-server/"
 fi
 
+# Параметры из VMFILE перекрывают config.yaml.
+#
+# ЗАЧЕМ. config.yaml лежит в каталоге расширения, то есть в кеше источников,
+# а кеш перезаписывается на каждом `bs extension sync`. Правка порта в нём
+# держалась бы до первой синхронизации и пропадала молча — ровно та болезнь
+# «мёртвых ручек», из-за которой у расширения x11vnc настройки переехали
+# в переменные окружения (2026-09-03).
+#
+# Читает config.yaml не install.sh, а configure.sh на первой загрузке
+# (`read_config`, оттуда же bind-addr и auth), поэтому перезаписываем файл
+# здесь, в фазе сборки, а не подменяем механизм.
+_cs_config="/opt/vmsetup/code-server/config.yaml"
+if [[ -n "${CODE_SERVER_PORT:-}${CODE_SERVER_PASSWORD:-}${CODE_SERVER_USER:-}" ]]; then
+  if [[ -f "$_cs_config" ]]; then
+    # Значения, которых не задали, берём из существующего файла, чтобы
+    # `EXTENSION code-server CODE_SERVER_PORT=9002` не сбрасывал версию.
+    _cs_old_user=$(sed -n 's/^USER:[[:space:]]*//p' "$_cs_config" | head -1)
+    _cs_old_pass=$(sed -n 's/^PASSWORD:[[:space:]]*//p' "$_cs_config" | head -1)
+    _cs_old_port=$(sed -n 's/^PORT:[[:space:]]*//p' "$_cs_config" | head -1)
+    _cs_old_ver=$(sed -n 's/^VERSION:[[:space:]]*//p' "$_cs_config" | head -1)
+  fi
+  cat > "$_cs_config" <<CSCONF
+USER: ${CODE_SERVER_USER:-${_cs_old_user:-}}
+PASSWORD: ${CODE_SERVER_PASSWORD:-${_cs_old_pass:-none}}
+PORT: ${CODE_SERVER_PORT:-${_cs_old_port:-9001}}
+VERSION: ${_cs_old_ver:-latest}
+CSCONF
+  log_info "config.yaml перезаписан из VMFILE: порт ${CODE_SERVER_PORT:-${_cs_old_port:-9001}}, пароль ${CODE_SERVER_PASSWORD:-${_cs_old_pass:-none}}"
+  # configure.sh поднимет сервер на 0.0.0.0 и с `auth: none`, если пароль
+  # `none`. Сказать об этом вслух обязаны здесь: в журнале сборки это
+  # единственное место, где решение видно.
+  if [[ "${CODE_SERVER_PASSWORD:-${_cs_old_pass:-none}}" == "none" ]]; then
+    log_warn "code-server будет слушать 0.0.0.0 БЕЗ ПАРОЛЯ — кто угодно в сети получит шелл"
+  fi
+fi
+
 systemctl daemon-reload || true
 systemctl enable configure-code-server.service || true
 
