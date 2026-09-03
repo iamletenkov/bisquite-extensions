@@ -1,0 +1,54 @@
+name: Check
+
+# Единственный job репозитория: он гоняет tools/check.sh — сверку вендоренных
+# копий lib/ с источником и валидацию манифестов extension.yaml.
+#
+# Почему это вообще заведено: обе проверки существовали только как ручные
+# скрипты. Ровно так и разошлись восемь копий get_cloud_user.sh — расхождение
+# ничем не ловилось на пути в репозиторий. Проверка, которую надо не забыть
+# запустить, — это не проверка.
+#
+# Почему ubuntu-latest, а не [self-hosted, linux, x64], как в основном
+# репозитории: там раннер нужен ради docker, Nuitka и деба, здесь — только bash
+# и Python с PyYAML. Плюс job, приколоченный к раннеру, которого у этого
+# репозитория может не оказаться, не падает, а висит в очереди навсегда — это
+# хуже красного CI. Появится свой раннер — меняется одна строка.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # PyYAML на образе раннера присутствует, но это деталь образа, а не
+      # контракт: ставим явно, чтобы обновление образа не выключило половину
+      # проверки молча (validate-extensions.py на отсутствие yaml отвечает
+      # кодом 2 и внятным сообщением, но проверять он в этом случае перестаёт).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install --disable-pip-version-check pyyaml
+
+      # Одна точка входа, та же, что запускают руками: CI и локальный прогон
+      # не должны расходиться. check.sh доводит до конца обе проверки, даже
+      # если первая упала, — в логе видны обе ошибки, а не первая из двух.
+      - name: Run repository checks
+        run: tools/check.sh

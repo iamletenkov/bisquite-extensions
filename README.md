@@ -20,6 +20,7 @@ extensions/
     └── wrt_cloudinit/
 lib/                         # общий код, источник истины (вендорится в расширения)
 tools/                       # sync-lib.sh, check-lib.sh, validate-extensions.py, check.sh
+.github/workflows/check.yml  # CI: гоняет tools/check.sh на push и pull request
 docs/extensions.md           # конвенция целиком: манифест, фазы, способности
 ```
 
@@ -96,6 +97,19 @@ tools/validate-extensions.py  # только манифесты (нужен pyth
 Валидатор проверяет, что у каждого каталога с `install.sh` есть манифест, что
 поля заполнены и осмысленны, что каждая способность из `requires` кем-то
 предоставляется, что в графе нет циклов и что `conflicts` симметричны.
+
+**Проверки автоматические.** `tools/check.sh` гоняет GitHub Actions на каждый
+push и pull request — `.github/workflows/check.yml`. Локально перед пушем это
+та же одна команда, и запускать её руками полезно ровно затем, чтобы не узнать
+о расхождении из красного CI:
+
+```bash
+tools/check.sh
+```
+
+Из зависимостей нужен bash и Python 3 с PyYAML (`pip install pyyaml` или
+`apt install python3-yaml`). Разошлась копия `lib/` — чинится
+`tools/sync-lib.sh`, а не правкой копии.
 
 ## Подключение в VMFILE
 
