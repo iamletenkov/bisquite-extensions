@@ -1,0 +1,23 @@
+[Unit]
+Description=Configure jetson-stats (jtop) for the cloud-init user
+# Пользователя создаёт cloud-init: до него в группу вносить некого.
+# Сам скрипт всё равно ждёт его циклом — упорядочивание сокращает ожидание,
+# но не заменяет проверку.
+After=cloud-init.service
+Wants=cloud-init.service
+# jtop.service поднимается сам (WantedBy=multi-user.target у upstream-юнита);
+# нам нужно лишь оказаться после него, чтобы `systemctl start` не гонялся
+# с штатным запуском.
+After=jtop.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/vmsetup/jetson-stats/configure.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=configure-jetson-stats
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

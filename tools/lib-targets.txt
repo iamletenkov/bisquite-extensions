@@ -18,3 +18,4 @@ extensions/debian/x11vnc        # configure.sh:23,40 — под каким по�
 extensions/debian/xfce4         # configure.sh:25,42 — автологин LightDM
 
 extensions/debian/docker         # configure.sh — пользователь cloud-init
+extensions/debian/jetson-stats  # configure.sh — кого вносить в группу jtop

@@ -1,0 +1,25 @@
+name: jetson-stats
+version: 1.0.0
+family: deb
+# Только arm64, и это не осторожность, а форма железа: Jetson существует
+# исключительно как aarch64-модуль на Tegra (t210 у Nano, t194, t234, t264).
+# С PyPI приезжает колесо `py3-none-any` — то есть на amd64 пакет поставился
+# бы и был бы мёртвым грузом: jtop читает `tegrastats` и sysfs-узлы Tegra,
+# которых там нет. Объявленная ось ловит несовпадение до сборки; случай
+# «arm64, но не Jetson» ловит уже install.sh по /etc/nv_tegra_release.
+arch: [arm64]
+# build     — install.sh ставит jetson-stats и заводит jtop.service;
+# firstboot — configure.sh вносит пользователя cloud-init в группу `jtop`.
+#
+# Второй фазы не было в задании, и она добавлена по замеру, а не для полноты:
+# сокет /run/jtop.sock создаётся с правами 0660 root:jtop
+# (jtop/service.py, JtopServer.start — chown на gid группы `jtop`, chmod 0660),
+# поэтому пользователю вне группы `jtop` клиент отвечает «I can't access
+# jtop.service. Please logout or reboot this board» (jtop/jtop.py:1117).
+# Кого вносить в группу — известно только на устройстве: имя пользователя
+# создаёт cloud-init. Тот же довод, по которому автологин настраивается
+# на первой загрузке, а не на сборке.
+phase: [build, firstboot]
+provides: [jetson-monitor]
+requires: []
+conflicts: []
