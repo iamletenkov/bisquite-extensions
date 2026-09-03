@@ -176,33 +176,51 @@ fi
 # Область действия — только этот драйвер: `ccflags-y` и `EXTRA_CFLAGS`
 # в его Makefile. Глобального `-Wno-error` расширение не ставит.
 #
-# РЯДОМ ЛЕЖИТ ВТОРОЙ КАТАЛОГ, `bcmdhd` без суффикса, и он НЕ патчится —
-# это решение, а не пропуск. Он тоже собирается (38 объектных файлов
-# в рабочем дереве), но строки-нарушителя
-# `strncpy(drvname, info.driver, sizeof(info.driver))` в нём нет вовсе,
-# а замер 2026-09-03 показал, что его `dhd_linux.c` компилируется gcc-8
-# со снятым патчем без единой ошибки. Патчить его значило бы глушить
-# диагностику там, где она молчит, — ровно то «на всякий случай»,
-# которое правила проекта запрещают.
+# ПОЧЕМУ ПАТЧИТСЯ ВСЁ ПОДДЕРЕВО, А НЕ ОДИН ДРАЙВЕР. Я чинил по одному
+# и потратил на это три сборки подряд, по полтора часа каждая:
 #
-# В дереве, собранном руками, пропатчены оба: широкий набор флагов лёг
-# туда до того, как выяснилось, кому он нужен. Это и есть причина,
-# по которой замер понадобился.
-BCMDHD_MK="$(find "$WORK" -path "*bcmdhd_pcie/Makefile" | head -1)"
-if [[ -z "$BCMDHD_MK" ]]; then
-    # Предупреждение, а не отказ: отсутствие драйвера означает, что и ошибки
-    # не будет. Отказывать обязано то, что не сработает никогда, — а тут
-    # дерево могло законно измениться.
-    log_warn "не нашёлся Makefile драйвера bcmdhd_pcie — патч предупреждений не наложен"
-    log_warn "если сборка упадёт на -Werror=sizeof-pointer-memaccess, ищите драйвер по новому пути"
-elif grep -q "bisquite: silence bcmdhd" "$BCMDHD_MK"; then
-    log_info "патч предупреждений bcmdhd уже наложен"
+#   1. bcmdhd_pcie — `-Wsizeof-pointer-memaccess` на strncpy;
+#   2. прошли его — умерли в realtek/rtl8812au на
+#      `-Wtautological-compare` («bitwise comparison always evaluates
+#      to false»), и там же `all warnings being treated as errors`.
+#
+# После второго раза я перестал чинить по одному и посмотрел, что
+# пропатчено в дереве, собранном руками: `grep -rl bisquite` нашёл
+# ДЕСЯТЬ Makefile, и все до одного — под `drivers/net/wireless/`
+# (шесть Realtek, три bcmdhd и родительский).
+#
+# Это не «на всякий случай»: класс подтверждён двумя разными драйверами
+# и двумя разными предупреждениями, а границы у него ровно те, что видны
+# в проверенном дереве. Остальное ядро собирается gcc-8 чисто — иначе
+# правки были бы и там.
+#
+# Патчить родительский Makefile и надеяться на наследование НЕЛЬЗЯ:
+# `ccflags-y` в Kbuild действует только на свой каталог. Есть
+# `subdir-ccflags-y`, который наследуется, но замер 2026-09-04 показал
+# побочный эффект — у ребёнка терялись его собственные `-I`, и сборка
+# падала на ненайденном заголовке. Обход дешевле разбирательства:
+# кладём флаги в каждый Makefile поддерева.
+WIRELESS_DIR="$(find "$WORK" -type d -path "*nvidia/drivers/net/wireless" | head -1)"
+if [[ -z "$WIRELESS_DIR" ]]; then
+    # Предупреждение, а не отказ: отсутствие каталога означает, что и ошибок
+    # этого класса не будет. Отказывать обязано то, что не сработает никогда,
+    # а дерево могло законно измениться.
+    log_warn "не нашёлся $WORK/**/nvidia/drivers/net/wireless — патч предупреждений не наложен"
+    log_warn "если сборка упадёт с 'all warnings being treated as errors', ищите каталог по новому пути"
 else
-    cat >> "$BCMDHD_MK" <<'MKEOF'
+    patched=0
+    skipped=0
+    while IFS= read -r mk; do
+        if grep -q "bisquite: silence vendor wireless" "$mk"; then
+            skipped=$((skipped + 1))
+            continue
+        fi
+        cat >> "$mk" <<'MKEOF'
 
-# bisquite: silence bcmdhd warning escalation.
-# Sources target GCC 7 (bionic); GCC 8+ diagnoses strncpy() in dhd_linux.c
-# and this Makefile turns warnings into errors. Scoped to this driver only.
+# bisquite: silence vendor wireless warning escalation.
+# These out-of-tree NVIDIA drivers target GCC 7 (bionic) and turn their own
+# warnings into errors. Scoped to drivers/net/wireless; the rest of the tree
+# builds clean.
 EXTRA_CFLAGS += -Wno-error -Wno-sizeof-pointer-memaccess -Wno-stringop-truncation \
                 -Wno-stringop-overflow -Wno-format-truncation -Wno-format-overflow \
                 -Wno-misleading-indentation -Wno-array-bounds \
@@ -214,7 +232,14 @@ ccflags-y += -Wno-error -Wno-sizeof-pointer-memaccess -Wno-stringop-truncation \
              -Wno-implicit-fallthrough -Wno-unused-const-variable \
              -Wno-maybe-uninitialized -Wno-tautological-compare
 MKEOF
-    log_info "патч предупреждений наложен на $BCMDHD_MK"
+        patched=$((patched + 1))
+    done < <(find "$WIRELESS_DIR" -name Makefile)
+
+    if [[ "$patched" -eq 0 && "$skipped" -eq 0 ]]; then
+        log_warn "в $WIRELESS_DIR не нашлось ни одного Makefile — патч не наложен"
+    else
+        log_info "патч предупреждений наложен на $patched Makefile (уже были: $skipped)"
+    fi
 fi
 
 # --- 4. Конфигурация ---------------------------------------------------------
