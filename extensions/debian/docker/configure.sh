@@ -40,6 +40,35 @@ else
     fi
 fi
 
+# Raspberry Pi: memory cgroup.
+#
+# The kernel supports memcg (CONFIG_MEMCG=y in every branch) but the DTB turns
+# it off: bcm2711-rpi-ds.dtsi and bcm2712-rpi.dtsi carry cgroup_disable=memory
+# in bootargs. Without the fix `docker run --memory` is SILENTLY ignored:
+#   WARNING: Your kernel does not support memory limit capabilities
+#            or the cgroup is not mounted. Limitation discarded.
+#
+# This runs here and not at build time for a measured reason: inside
+# virt-customize /boot/firmware is EMPTY — libguestfs does not mount the FAT
+# partition even though the guest fstab declares it. The build-time check
+# never found the file and silently took the "not a Raspberry Pi" branch.
+#
+# cgroup_enable= is a Raspberry Pi patch, not upstream: torvalds/linux only
+# has cgroup_disable=. On any other kernel the argument is ignored, and the
+# file gate below closes that case anyway.
+CMDLINE=/boot/firmware/cmdline.txt
+if [[ -f "$CMDLINE" ]]; then
+    if grep -q "cgroup_enable=memory" "$CMDLINE"; then
+        log_info "cgroup_enable=memory уже в cmdline.txt"
+    else
+        cp -a "$CMDLINE" "$CMDLINE.before-docker"
+        # Everything must stay on ONE line — the bootloader requires it.
+        sed -i '1s/[[:space:]]*$//; 1s/$/ cgroup_enable=memory/' "$CMDLINE"
+        log_info "в cmdline.txt добавлен cgroup_enable=memory"
+        log_warn "ограничения памяти у контейнеров заработают после перезагрузки"
+    fi
+fi
+
 # L4T: nvidia-ctk rewrote /etc/docker/daemon.json during the build phase, but
 # the daemon was not running then — virt-customize works in a chroot. Pick the
 # new runtime up here, once, on the machine where it matters.
