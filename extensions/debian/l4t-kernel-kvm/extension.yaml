@@ -1,0 +1,13 @@
+name: l4t-kernel-kvm
+version: 1.0.0
+family: deb
+# Только arm64: L4T существует только под Tegra, а Tegra бывает только arm64.
+arch: [arm64]
+# Только `build`. Ядро обязано быть запечено в образ, а не собираться на
+# устройстве: собранное на месте давало бы каждой плате свой бинарь, и
+# «одинаковый флот» перестал бы быть правдой. Ровно тот довод, которым
+# resolve_phases запрещает подменять build на firstboot.
+phase: [build]
+provides: [kvm-host, l4t-custom-kernel]
+requires: []
+conflicts: []
