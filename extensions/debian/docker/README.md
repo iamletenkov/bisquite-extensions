@@ -90,6 +90,7 @@ RUN_COMMAND /opt/vmsetup/docker/install.sh
 | Система | Архитектура | Что получилось | Дата |
 |---|---|---|---|
 | Debian 13 trixie | amd64 | `docker-ce 5:29.7.2-1~debian.13~trixie`, `containerd.io 2.3.4`, плагины `buildx` и `compose` на месте | 2026-09-03 |
+| Ubuntu 18.04 bionic | amd64 | `docker-ce 5:24.0.2-1~ubuntu.18.04~bionic` — замороженная версия, оба плагина на месте | 2026-09-03 |
 
 Проверялось не по коду возврата, а по содержимому образа: `virt-ls` нашёл
 `docker`, `dockerd`, `containerd` в `/usr/bin` и оба плагина в
