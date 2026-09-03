@@ -128,7 +128,48 @@ if [[ ! -f "$UNIT" ]]; then
 fi
 
 if [[ ! -f "$UNIT" ]]; then
-    log_error "jtop.service не установлен ни одним из трёх способов"
+    # Четвёртый заход: пишем юнит сами.
+    #
+    # Это не догадка. Содержимое снято с ЖИВОГО Jetson Nano (2026-09-03),
+    # где jtop 7.2.1 работает: `systemctl status jtop.service` — active,
+    # юнит лежит в /etc/systemd/system и написан руками, потому что пакет
+    # его не несёт вовсе (в колесе нет ни services/, ни share/jetson_stats).
+    # То есть три захода выше отрабатывают ровно на старых версиях,
+    # а на нынешней остаётся только этот.
+    #
+    # Отказывать здесь было бы неправильно: у нас есть проверенный эталон,
+    # и отказ означал бы «не умею то, что умею».
+    #
+    # Путь к jtop резолвится, а не прибивается: sudo pip3 кладёт его
+    # в /usr/local/bin, а pip в venv — в другое место.
+    _jtop_bin="$(command -v jtop || true)"
+    if [[ -z "$_jtop_bin" ]]; then
+        log_error "jtop не найден в PATH после установки — писать юнит не на что"
+        exit 1
+    fi
+    cat > "$UNIT" <<UNITEOF
+[Unit]
+Description=Jetson Stats (jtop service)
+After=network.target
+
+[Service]
+Environment="JTOP_SERVICE=True"
+ExecStart=${_jtop_bin} --force
+Restart=on-failure
+RestartSec=10s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+    chmod 0644 "$UNIT"
+    log_warn "юнит написан расширением: пакет его не поставляет (колесо без data-файлов)"
+    log_warn "эталон снят с работающего Jetson Nano, jtop 7.2.1, 2026-09-03"
+fi
+
+if [[ ! -f "$UNIT" ]]; then
+    log_error "jtop.service не установлен ни одним из четырёх способов"
     log_error "без него клиент отвечает «The jtop.service is not active»,"
     log_error "то есть образ уехал бы на плату с неработающей командой"
     exit 1
