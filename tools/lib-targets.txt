@@ -19,3 +19,4 @@ extensions/debian/xfce4         # configure.sh:25,42 — автологин Ligh
 
 extensions/debian/docker         # configure.sh — пользователь cloud-init
 extensions/debian/jetson-stats  # configure.sh — кого вносить в группу jtop
+extensions/debian/vino-vnc      # configure.sh — чей dconf и чей ~/.config/autostart

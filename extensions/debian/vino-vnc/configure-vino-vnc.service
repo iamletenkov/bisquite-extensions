@@ -1,0 +1,24 @@
+[Unit]
+Description=Configure vino VNC server for the cloud-init user
+# Пользователя создаёт cloud-init: до него настраивать некого. Скрипт всё
+# равно ждёт его циклом — упорядочивание сокращает ожидание, но не заменяет
+# проверку.
+After=cloud-init.service
+Wants=cloud-init.service
+# ДО дисплей-менеджера, и это несущее. Настройки уезжают в dconf
+# пользователя, а автозапуск — в его ~/.config/autostart; и то и другое
+# читается при ОТКРЫТИИ сессии. Отработай юнит после — vino поднялся бы
+# только со следующего входа, то есть после перезагрузки платы.
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/vmsetup/vino-vnc/configure.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=configure-vino-vnc
+TimeoutStartSec=300
+
+[Install]
+WantedBy=graphical.target
