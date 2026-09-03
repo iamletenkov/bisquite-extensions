@@ -1,11 +1,16 @@
 name: code-server
 version: 1.0.0
 family: deb
-# ТОЛЬКО amd64: install.sh качает mkcert по прибитой ссылке
-# mkcert-v1.4.4-linux-amd64 (install.sh, MKCERT_GH_URL) и валидирует ELF —
-# на arm64 сборка упадёт. Сам code-server ставится штатным install.sh
-# и arm64 поддерживает; ограничение вносит mkcert.
-arch: [amd64]
+# amd64 и arm64. Ограничение вносил не code-server, а mkcert: install.sh
+# качал его по прибитой ссылке mkcert-v1.4.4-linux-amd64 и валидировал ELF,
+# поэтому на arm64 сборка падала. Замер 2026-09-03: релиз mkcert v1.4.4
+# публикует и -linux-arm64, и -linux-arm, так что выбирать было из чего.
+# Ссылка стала зависеть от `dpkg --print-architecture`, ограничение снято.
+#
+# armhf в списке НЕТ, хотя mkcert его публикует: 32-битные цели проектом
+# не собираются и не проверялись, а объявить архитектуру значит обещать,
+# что она работает.
+arch: [amd64, arm64]
 # build     — install.sh ставит mkcert и code-server;
 # firstboot — configure-code-server.service выпускает сертификат и заводит
 #             сервис под пользователем (из config.yaml либо из cloud-init).

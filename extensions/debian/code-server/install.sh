@@ -105,7 +105,11 @@ get_version_from_config() {
 }
 
 # Парсинг аргументов
-CODE_SERVER_VERSION=""
+# Переменная окружения имеет приоритет над config.yaml и уступает --version.
+# Безусловное затирание пустой строкой означало, что
+# `EXTENSION code-server CODE_SERVER_VERSION=4.104.3` ТИХО терял пин: значение
+# приходило в окружении и стиралось здесь, до разбора аргументов.
+CODE_SERVER_VERSION="${CODE_SERVER_VERSION:-}"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -152,8 +156,31 @@ log_info "Installing mkcert..."
 if [[ "$EUID" -eq 0 ]]; then
     # Установка mkcert для root пользователя
     if ! command -v mkcert >/dev/null 2>&1; then
-        tmp_file="/tmp/mkcert-linux-amd64.$$"
-        MKCERT_GH_URL="https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64"
+        # Архитектура выбирается по гостю, а не прибита к amd64.
+        #
+        # Прибитая ссылка была ЕДИНСТВЕННОЙ причиной, по которой расширение
+        # объявлялось только для amd64 (см. комментарий в extension.yaml):
+        # сам code-server arm64 поддерживает, и его штатный установщик
+        # определяет архитектуру сам. Замер 2026-09-03: релиз mkcert v1.4.4
+        # публикует mkcert-v1.4.4-linux-amd64, -linux-arm64 и -linux-arm,
+        # то есть выбирать было из чего с самого начала.
+        #
+        # Имя берётся у dpkg, а не у uname: у dpkg тот же словарь, что
+        # у релизов mkcert (amd64/arm64/armhf), а uname говорит x86_64
+        # и aarch64 — пришлось бы заводить таблицу перевода.
+        _mkcert_arch="$(dpkg --print-architecture)"
+        case "$_mkcert_arch" in
+            amd64|arm64) : ;;
+            armhf)       _mkcert_arch="arm" ;;
+            *)
+                log_error "для архитектуры ${_mkcert_arch} релиз mkcert v1.4.4 не публикуется"
+                log_error "поддерживаются amd64, arm64 и armhf"
+                exit 1
+                ;;
+        esac
+        tmp_file="/tmp/mkcert-linux-${_mkcert_arch}.$$"
+        MKCERT_GH_URL="https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-${_mkcert_arch}"
+        log_info "mkcert для ${_mkcert_arch}"
         # Качаем только из GitHub релиза через wget
         if wget_with_retry "$MKCERT_GH_URL" "$tmp_file"; then
             chmod 0755 "$tmp_file"
@@ -248,7 +275,7 @@ if [[ -n "${CODE_SERVER_PORT:-}${CODE_SERVER_PASSWORD:-}${CODE_SERVER_USER:-}" ]
 USER: ${CODE_SERVER_USER:-${_cs_old_user:-}}
 PASSWORD: ${_cs_pass}
 PORT: ${_cs_port}
-VERSION: ${_cs_old_ver:-latest}
+VERSION: ${CODE_SERVER_VERSION:-${_cs_old_ver:-latest}}
 CSCONF
 
   # Пароль в журнал НЕ печатается — только факт его наличия. Журнал сборки
