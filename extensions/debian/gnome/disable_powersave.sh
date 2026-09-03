@@ -64,13 +64,40 @@ chown "$USER:$USER" "$USER_AUTOSTART/disable-screensaver.desktop"
 
 log_info "Created autostart entry for screen blanking disable"
 
-# Configure GNOME settings via gsettings
-USER_CONFIG_DIR="$USER_HOME/.config/dconf"
-mkdir -p "$USER_CONFIG_DIR"
-chown -R "$USER:$USER" "$USER_HOME/.config/dconf" 2>/dev/null || true
+# Configure GNOME defaults through the SYSTEM dconf database.
+#
+# ЗДЕСЬ БЫЛ ДЕФЕКТ, и он был тихим. Скрипт писал этот же keyfile прямо
+# в `$USER_HOME/.config/dconf/user` — а это НЕ текстовый файл: dconf
+# хранит там бинарную базу GVDB. Текст на её месте dconf не разбирает
+# (в журнале сессии — «unable to open file ... expected GVDB header»),
+# и все перечисленные ключи просто не применялись.
+#
+# Замаскировано это было тем, что рядом лежит `disable-powersave-runtime.sh`
+# с вызовами `gsettings`, который отрабатывает на живой сессии и делает
+# то же самое. То есть экран не гас, и дефект не проявлялся, — но
+# настройки жили только до тех пор, пока автозапуск срабатывал.
+#
+# Штатный способ задать умолчания — системная база: keyfile в
+# `/etc/dconf/db/local.d/`, профиль, `dconf update`. Компилирует текст
+# в GVDB сам dconf, и именно он решает, как эта база устроена.
+#
+# Побочная польза: настройки перестают быть привязаны к одному
+# пользователю. Он на сборке ещё может не существовать вовсе — его
+# заводит cloud-init на первой загрузке.
+mkdir -p /etc/dconf/db/local.d /etc/dconf/profile
 
-# Create dconf user configuration to disable power saving
-cat > "$USER_CONFIG_DIR/user" <<'EOF'
+# Профиль дописывается, а не перезаписывается вслепую: `user-db:user`
+# обязан стоять ПЕРВЫМ, иначе системные умолчания перекроют то, что
+# пользователь поменял руками, и настройка перестанет сохраняться.
+if [[ ! -f /etc/dconf/profile/user ]]; then
+  printf 'user-db:user\nsystem-db:local\n' > /etc/dconf/profile/user
+  log_info "Created /etc/dconf/profile/user"
+elif ! grep -q '^system-db:local$' /etc/dconf/profile/user; then
+  printf 'system-db:local\n' >> /etc/dconf/profile/user
+  log_info "Added system-db:local to /etc/dconf/profile/user"
+fi
+
+cat > /etc/dconf/db/local.d/00-disable-powersave <<'EOF'
 [org/gnome/settings-daemon/plugins/power]
 sleep-inactive-ac-type='nothing'
 sleep-inactive-battery-type='nothing'
@@ -90,9 +117,20 @@ disable-lock-screen=true
 [org/gnome/shell]
 disable-user-extensions=false
 EOF
-chown "$USER:$USER" "$USER_CONFIG_DIR/user"
 
-log_info "Configured GNOME settings to disable power saving"
+# Отказ здесь ГРОМКИЙ: без `dconf update` keyfile остаётся текстом,
+# который никто не читает, — то есть ровно тем состоянием, которое
+# чинится этой правкой.
+if ! command -v dconf >/dev/null 2>&1; then
+  log_error "dconf not found — install the 'dconf-cli' package"
+  exit 1
+fi
+if ! dconf update; then
+  log_error "dconf update failed: /etc/dconf/db/local.d/00-disable-powersave not compiled"
+  exit 1
+fi
+
+log_info "Configured GNOME power-saving defaults in the system dconf database"
 
 # Create a script to apply settings at runtime (for already running sessions)
 cat > "$USER_HOME/.config/disable-powersave-runtime.sh" <<'EOF'
