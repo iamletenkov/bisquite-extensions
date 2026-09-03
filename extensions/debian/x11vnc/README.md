@@ -4,11 +4,11 @@ VNC-доступ к рабочему столу X11 для пользовате�
 
 ## Параметры
 
-Задаются переменными окружения в VMFILE — `RUN_COMMAND` отдаёт строку шеллу
-гостя целиком:
+Задаются переменными окружения. В инструкции `EXTENSION` они пишутся
+`КЛЮЧ=ЗНАЧЕНИЕ` и уезжают в `install.sh` как есть:
 
 ```vmfile
-RUN_COMMAND X11VNC_PORT=5901 X11VNC_PASSWORD=секрет /opt/vmsetup/x11vnc/install.sh
+EXTENSION x11vnc X11VNC_PORT=5901 X11VNC_PASSWORD=секрет
 ```
 
 | Переменная | Умолчание | Что делает |
@@ -18,12 +18,23 @@ RUN_COMMAND X11VNC_PORT=5901 X11VNC_PASSWORD=секрет /opt/vmsetup/x11vnc/in
 | `X11VNC_PASSWORD` | пусто | пароль; без него сервер поднимается с `-nopw` |
 | `X11VNC_LISTEN` | `localhost` | `localhost` — только петля, любое другое значение — все интерфейсы |
 
-`install.sh` кладёт их в `/etc/default/bisquite-x11vnc`, юнит читает оттуда.
+`install.sh` кладёт первые три в `/etc/default/bisquite-x11vnc`, юнит читает
+оттуда. Пароль туда не пишется: `x11vnc -storepasswd` кладёт его в
+`/etc/x11vnc/passwd` в собственном формате `-rfbauth`, а в файл окружения
+уезжает только путь (`X11VNC_PASSFILE`).
+
+Значение со пробелами берётся в кавычки — аргумент разбирается `shlex`,
+и кавычки снимаются до попадания в окружение:
+
+```vmfile
+EXTENSION x11vnc X11VNC_PASSWORD="two words"
+```
 
 **Умолчание `localhost` — смена поведения.** Раньше сервер слушал все
-интерфейсы и всегда без пароля, а compose-примеры ставят `firewall: false`.
-Позиция проекта записана в `examples/build/ubuntu1804/README.md`: только
-петля, доступ через SSH-туннель:
+интерфейсы и всегда без пароля, а compose-примеры ставят `firewall: false`:
+рабочий стол оказывался открыт всей сети из одной строки VMFILE, которую
+никто не писал специально. Позиция проекта — только петля, доступ через
+SSH-туннель:
 
 ```bash
 ssh -L 5900:localhost:5900 пользователь@адрес
@@ -88,17 +99,37 @@ x11vnc.
 
 ## Подключение в VMFILE
 
+Основной способ. Десктоп идёт **до** x11vnc — порядок слоёв и есть то
+единственное, чем сегодня держится связь `requires`:
+
 ```vmfile
-COPY_IN ../bisquite-extensions/extensions/debian/x11vnc:/opt/vmsetup/
-RUN_COMMAND chmod +x /opt/vmsetup/x11vnc/*.sh
-RUN_COMMAND /opt/vmsetup/x11vnc/install.sh
+EXTENSION gnome
+EXTENSION x11vnc X11VNC_PORT=5901
 ```
+
+Прежняя запись продолжает работать; параметры в ней задаются той же строкой,
+потому что `RUN_COMMAND` отдаёт её шеллу гостя целиком:
+
+```vmfile
+COPY_IN <чекаут>/extensions/debian/x11vnc:/opt/vmsetup/
+RUN_COMMAND chmod +x /opt/vmsetup/x11vnc/*.sh
+RUN_COMMAND X11VNC_PORT=5901 /opt/vmsetup/x11vnc/install.sh
+```
+
+`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
+VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
+и глубина зависит от того, насколько глубоко лежит сам VMFILE.
 
 ## Проверено на
 
-| Система | Дисплей-менеджер | Дата |
-|---|---|---|
-| <не проверялось на живой ВМ> | | |
+| Система | Дисплей-менеджер | Что получилось | Дата |
+|---|---|---|---|
+| Debian 12 | GDM | authority `/run/user/1000/gdm/Xauthority` (кандидат 2), `NRestarts=0` | 2026-09-03 |
+| Debian 12 | LightDM | authority `/home/check/.Xauthority` (кандидат 1), `NRestarts=0` | 2026-09-03 |
 
-Сценарий проверки — в плане `docs/plans/2026-09-03-image-identity-and-extensions.md`,
-пункт 32.
+Оба менеджера прогнаны подряд на одной машине, переключением симлинка
+`display-manager.service`. Замер подтвердил и то, ради чего заведена обёртка:
+прежнего пути `/var/run/lightdm/<user>/:0` нет **ни под одним** из них,
+каталог `root` под LightDM существует и принадлежит X-серверу с правами 0600,
+а `x11vnc -findauth` под GDM отвечает пустой строкой — то есть `-auth guess`
+здесь не помог бы.

@@ -1,95 +1,132 @@
-# Расширение Chromium Kiosk
+# chromium-kiosk
 
-Расширение устанавливает [chromium-kiosk](https://github.com/salamek/chromium-kiosk) и настраивает браузер в полноэкранном режиме для стендов и терминалов Bisquite.
+Пакет [chromium-kiosk](https://github.com/salamek/chromium-kiosk) из
+репозитория Salamek: полноэкранный браузер для стендов и терминалов,
+со своей графической сессией.
 
-## Возможности
+## Что делает
 
-- Устанавливает chromium-kiosk из репозитория Salamek вместе с зависимостями (`yq`, локали, требуемые сервисы).
-- Подготавливает русскую локаль `ru_RU.UTF-8`.
-- Копирует YAML-конфигурацию перед стартом дисплей-менеджера через systemd unit.
-- Поддерживает настройку режима окна, списка разрешённых адресов, времени простоя и других параметров через `config.yaml`.
-- Идемпотентна: повторный запуск установки/конфигурации не ломает окружение.
+**Сборка** (`install.sh`)
 
-## Требования
+- ставит `wget`, `gnupg`, `locales`, `yq`;
+- включает локаль `ru_RU.UTF-8` (`LANG=ru_RU.UTF-8`, `LC_MESSAGES=POSIX`);
+- прописывает ключ и репозиторий `repository.salamek.cz` (suite `all`);
+- ставит пакет `chromium-kiosk`;
+- кладёт и включает `configure-chromium-kiosk.service`.
 
-- Debian 12 / Ubuntu 22.04+ с `systemd` и рабочим X11-дисплеем.
-- Настроенный автологин пользователя (через расширение графической среды).
-- Доступ к интернету при сборке для добавления внешнего репозитория.
+**Первая загрузка** (`configure.sh`)
 
-## Состав расширения
+- копирует `config.yaml` из каталога расширения в
+  `/etc/chromium-kiosk/config.yml`.
 
-- `install.sh` — установка пакетов, локали и systemd-юнита.
-- `configure.sh` — применение конфигурации перед запуском графической сессии.
-- `configure-chromium-kiosk.service` — oneshot-сервис, выполняющий `configure.sh`.
-- `config.yaml` — шаблон настроек (можно заменить собственным).
-- `README.md` — документация.
+Юнит стоит `Before=chromium-kiosk_configwatcher.service` — конфигурация
+обязана лечь до того, как пакет запустит собственный наблюдатель за файлом.
 
-## Интеграция в VMFILE
+## Десктопное расширение не требуется
 
-```bash
-# Файлы расширения
-UPLOAD files/chromium-kiosk/install.sh:/opt/vmsetup/chromium-kiosk/install.sh
-UPLOAD files/chromium-kiosk/configure.sh:/opt/vmsetup/chromium-kiosk/configure.sh
-UPLOAD files/chromium-kiosk/config.yaml:/opt/vmsetup/chromium-kiosk/config.yaml
-UPLOAD files/chromium-kiosk/configure-chromium-kiosk.service:/opt/vmsetup/chromium-kiosk/configure-chromium-kiosk.service
+Манифест объявляет `requires: []`, и это не пропуск: пакет Salamek приносит
+собственную графическую сессию, поэтому оба использующих его VMFILE ставят
+его **без** `gnome`/`xfce4`/`lxde`. Этим он и отличается от расширения
+`kiosk`, которому X-сервер и дисплей-менеджер обязан дать кто-то другой.
 
-# Права и установка
+Взаимоисключающе с `kiosk`: оба автостартом на `graphical.target`
+разворачивают полноэкранный браузер на одном месте. Сборка этого **не
+проверяет** — топологической сортировки и отказа по конфликту у резолвера
+нет.
+
+## Параметров окружения нет
+
+Расширение читает только `config.yaml`; ни одной переменной окружения
+`install.sh` не разбирает. Файл лежит в каталоге расширения, то есть
+в кеше источников, а кеш перезаписывается на каждом `bs extension sync` —
+правка на хосте держится до первой синхронизации.
+
+Рабочие способы задать свою конфигурацию:
+
+- при форме `COPY_IN` — положить свой файл поверх отдельным `UPLOAD`
+  после копирования каталога и до `install.sh`;
+- на устройстве — cloud-init `write_files` по пути
+  `/opt/vmsetup/chromium-kiosk/config.yaml` плюс
+  `systemctl restart configure-chromium-kiosk`;
+- либо править `/etc/chromium-kiosk/config.yml` напрямую — но его
+  перезапишет `configure.sh` на следующей загрузке.
+
+## Конфигурация (`config.yaml`)
+
+Формат — самого пакета chromium-kiosk, расширение его только копирует.
+Ключи верхнего уровня в поставляемом шаблоне:
+
+| Ключ | Что задаёт |
+| --- | --- |
+| `WINDOW_MODE` | `hidden`, `automaticvisibility`, `windowed`, `minimized`, `maximized`, `fullscreen` |
+| `HOME_PAGE` | стартовый URL |
+| `TOUCHSCREEN` | поддержка тач-ввода |
+| `IDLE_TIME` | секунды до возврата на `HOME_PAGE`; `0` — выключено |
+| `WHITE_LIST` | вложенный блок: `ENABLED`, `URLS`, `IFRAME_ENABLED` |
+| `NAV_BAR` | вложенный блок: `ENABLED`, `ENABLED_BUTTONS`, позиция, размеры |
+| `VIRTUAL_KEYBOARD` | вложенный блок: `ENABLED` |
+| `DISPLAY_ROTATION` | `normal`, `left`, `right`, `inverted` |
+| `EXTRA_ARGUMENTS` | флаги браузера строкой |
+| `ALLOWED_FEATURES` | список разрешений (камера, гео, невалидный сертификат) |
+| `CURSOR` | вложенный блок: `ENABLED` |
+
+`WHITE_LIST`, `NAV_BAR`, `VIRTUAL_KEYBOARD` и `CURSOR` — **блоки, а не
+скаляры**: `VIRTUAL_KEYBOARD: true` пакет не поймёт. Закомментированные
+в шаблоне `SCREEN_ROTATION`, `TOUCHSCREEN_ROTATION`, `ADDRESS_BAR`,
+`SCROLL_BARS`, `REMOTE_DEBUGGING`, `EXTRA_ENV_VARS` и `PROFILE_NAME`
+поддерживаются пакетом, но по умолчанию не заданы.
+
+## Архитектуры
+
+Манифест объявляет `amd64` и `arm64`, но **проверен только amd64**
+(`amd64/debian12/chromium-kiosk.vmfile`, `amd64/debian12/nuc-kiosk.vmfile`
+основного репозитория). Репозиторий
+Salamek публикует suite `all`; что там есть под arm64, не замерялось.
+
+## Подключение в VMFILE
+
+```vmfile
+EXTENSION chromium-kiosk
+```
+
+Прежняя запись продолжает работать:
+
+```vmfile
+COPY_IN <чекаут>/extensions/debian/chromium-kiosk:/opt/vmsetup/
 RUN_COMMAND chmod +x /opt/vmsetup/chromium-kiosk/*.sh
 RUN_COMMAND /opt/vmsetup/chromium-kiosk/install.sh
 ```
 
-`install.sh` сам копирует systemd unit в `/etc/systemd/system`, выполняет `daemon-reload` и включает сервис.
+`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
+VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
+и глубина зависит от того, насколько глубоко лежит сам VMFILE.
 
-## Как это работает
+## Требования
 
-1. **Сборка** — `install.sh` ставит chromium-kiosk, включает локаль, регистрирует `configure-chromium-kiosk.service`.
-2. **Первая загрузка** — systemd-сервис запускается до GDM/LightDM, копирует `config.yaml` в `/etc/chromium-kiosk/config.yml`.
-3. **Графическая сессия** — после входа пользователя chromium-kiosk стартует автоматически с нужными параметрами.
-4. **Изменения конфигурации** — обновите `/opt/vmsetup/chromium-kiosk/config.yaml` и перезапустите сервис:
-   `sudo systemctl restart configure-chromium-kiosk`.
-
-## Настройка
-
-Основные параметры (`config.yaml`):
-
-| Ключ | Описание |
-| --- | --- |
-| `WINDOW_MODE` | Режим окна (`fullscreen`, `windowed`, `kiosk`) |
-| `HOME_PAGE` | URL для запуска |
-| `WHITE_LIST` | Разрешённые хосты и схемы |
-| `IDLE_TIME` | Таймаут автоматического обновления страницы |
-| `VIRTUAL_KEYBOARD` | Включение экранной клавиатуры |
-| `TOUCHSCREEN` | Поддержка тач-жестов |
-| `DISPLAY_ROTATION` | Поворот экрана (например, `left`, `inverted`) |
-
-Полный список — в шаблоне `config.yaml`.
+- Debian 12 / Ubuntu 22.04+ со `systemd`;
+- доступ в интернет при сборке — репозиторий и ключ внешние.
 
 ## Диагностика
 
 ```bash
-# Логи конфигурации
 journalctl -u configure-chromium-kiosk -f
-
-# Проверить актуальную конфигурацию
 cat /etc/chromium-kiosk/config.yml
-
-# Перезапустить сервис конфигурации
 sudo systemctl restart configure-chromium-kiosk.service
 ```
 
-Если chromium не запускается, убедитесь, что дисплей `:0` существует (`ls /tmp/.X11-unix/`) и пользователь имеет права на X11.
+Chromium не запускается — убедитесь, что дисплей `:0` существует
+(`ls /tmp/.X11-unix/`) и что у пользователя есть права на X11.
 
+## Работа с неподдерживаемыми тачскринами (поворот)
 
-## Работа с неподдерживаемыми тач скринами (поворот)
-
-Посмотреть устройства
+Посмотреть устройства:
 
 ```bash
 export DISPLAY=:0
 xinput list
 ```
 
-Отредактировать скрипт
+Отредактировать сессионный скрипт пакета:
 
 ```bash
 cat /var/lib/chromium-kiosk/.xinitrc
@@ -117,7 +154,11 @@ fi
 exec chromium-kiosk run --config_prod --log_dir=$HOME && killall -u $USER
 ```
 
+Файл принадлежит пакету, а не расширению: правка переживёт перезагрузку,
+но не переустановку пакета.
 
 ## Лицензия
 
-Расширение распространяется на условиях публичной некоммерческой лицензии Bisquite (PolyForm Noncommercial 1.0.0, см. `LICENSE`). Для коммерческого использования требуется отдельная платная лицензия — см. `COMMERCIAL-LICENSE.md`.
+Расширение распространяется на условиях публичной некоммерческой лицензии
+Bisquite (PolyForm Noncommercial 1.0.0, см. `LICENSE`). Для коммерческого
+использования требуется отдельная платная лицензия — см. `COMMERCIAL-LICENSE.md`.

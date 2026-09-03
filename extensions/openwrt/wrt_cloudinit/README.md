@@ -1,8 +1,17 @@
 # wrt.cloudinit
 
-`wrt.cloudinit` — init-скрипт OpenWrt, имитирующий cloud-init (NoCloud) для образов,
-развёртываемых в Proxmox. Читает ISO `cloudinit` (`/dev/sr0`), монтирует в
-`/mnt/cidata` и настраивает систему по `meta-data` / `user-data` / `network-config`.
+`wrt.cloudinit` — init-скрипт OpenWrt, имитирующий cloud-init (NoCloud).
+Монтирует seed в `/mnt/cidata` и настраивает систему по
+`meta-data` / `user-data` / `network-config`.
+
+**Источников seed два, и оба проверяются по очереди:**
+
+1. `/dev/sr0` — ISO, который вешает Proxmox (`ide2: …:cloudinit,media=cdrom`);
+2. блочное устройство с меткой `cidata` — FAT32-раздел в конце носителя,
+   который создаёт `bs device write`. Раньше он не искался вовсе, и карта,
+   записанная бисквитом, приезжала без пользователя, пароля и сети.
+   Устройство ищется через `block info` (пакет `block-mount`, есть всегда)
+   и через `blkid` (есть не всегда).
 
 ## Поведение: provision-once
 
@@ -53,20 +62,34 @@ Init-скрипт сорсит **все `*.sh` из `/usr/lib/wrt-cloudinit/lib/
 
 ## Как подключить к образу
 
-В VMFILE (см. [openwrt.vmfile](../../../../examples/build/openwrt/openwrt.vmfile)):
+Инструкция `EXTENSION` здесь **не применима**: `OpenWrtBuilder` блокирует её
+целиком — расширения рассчитаны на apt и systemd, а `wrt.cloudinit` вообще
+доставляется не каталогом в `/opt/vmsetup`, а файлами по конкретным путям.
+Манифеста `extension.yaml` у каталога поэтому нет; разбор — в
+`docs/extensions.md`.
 
-```dockerfile
+В VMFILE (живой пример — `examples/build/amd64/openwrt/openwrt.vmfile`
+основного репозитория):
+
+```vmfile
 # Завершающий '/' в dest обязателен — иначе virt-customize --copy-in
 # падает «target is not a directory» (билдер создаёт только этот каталог при '/').
-COPY_IN bisquite-extensions/extensions/openwrt/wrt_cloudinit/lib:/usr/lib/wrt-cloudinit/
-UPLOAD  bisquite-extensions/extensions/openwrt/wrt_cloudinit/wrt.cloudinit:/etc/init.d/wrt.cloudinit
+COPY_IN <чекаут>/extensions/openwrt/wrt_cloudinit/lib:/usr/lib/wrt-cloudinit/
+UPLOAD  <чекаут>/extensions/openwrt/wrt_cloudinit/wrt.cloudinit:/etc/init.d/wrt.cloudinit
 RUN_COMMAND chmod +x /etc/init.d/wrt.cloudinit && \
             /etc/init.d/wrt.cloudinit enable
 ```
 
+`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
+VMFILE**; в `examples/build/amd64/openwrt/openwrt.vmfile` это
+`../../../../bisquite-extensions`.
+
 `COPY_IN` должен идти **до** `UPLOAD`/`enable` (lib обязана быть в образе к моменту
 включения сервиса). `WRT_LIBDIR=/usr/lib/wrt-cloudinit/lib` в init-скрипте должен
 совпадать с местом, куда `COPY_IN` кладёт `lib/`.
+
+Библиотека обязательна: без неё `wrt.cloudinit` на первой загрузке пишет
+`FATAL: нет lib` и выходит **не трогая сеть**, а не настраивает её наполовину.
 
 Bisquite сам подключает cloud-init ISO в Proxmox (`ide2: <storage>:cloudinit,media=cdrom`).
 

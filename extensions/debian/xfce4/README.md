@@ -1,82 +1,105 @@
-# Расширение Xfce4
+# xfce4
 
-Лёгкое графическое окружение Xfce4 для Bisquite: установка, настройка LightDM с автологином и подготовка рабочего стола для последующих расширений (x11vnc, kiosk и т.п.).
+Лёгкий рабочий стол Xfce4 с автологином через LightDM. База для расширений,
+которым нужен X-сервер и дисплей-менеджер, — `x11vnc` и `kiosk`.
 
-## Возможности
+## Что делает
 
-- Устанавливает полный стек Xfce4 (`xfce4`, `xfce4-goodies`, `lightdm`, `xorg`, `firefox-esr`).
-- Настраивает автологин для пользователя из cloud-init (или заданного в конфигурации).
-- Создаёт oneshot-сервис `configure-xfce4`, который подготавливает LightDM каждый раз при загрузке.
-- Включает утилиту `yq` для интеграции с другими расширениями.
+**Сборка** (`install.sh`)
 
-## Требования
+- ставит `xfce4`, `xfce4-goodies`, `lightdm`, `lightdm-gtk-greeter`,
+  `xorg`, `xinput`, `firefox-esr`, `usbutils`, `dbus-x11`, `yq`;
+- заводит `/etc/X11/xorg.conf.d`;
+- включает `lightdm.service`, делает `graphical.target` умолчанием;
+- кладёт и включает `configure-xfce4.service`.
 
-- Debian 12 / Ubuntu 22.04+.
-- `systemd`, `cloud-init`, доступ в интернет при сборке.
-- Свободные ресурсы: ≥2 ГБ RAM (минимум 1 ГБ), ≥3 ГБ диска.
+**Первая загрузка** (`configure.sh`)
 
-## Состав
+- ждёт появления пользователя cloud-init — до 120 секунд, 40 попыток по 3 с;
+- подставляет его имя в шаблон `lightdm.conf` и кладёт результат
+  в `/etc/lightdm/lightdm.conf`;
+- перезапускает LightDM (`try-restart`, то есть не поднимает остановленный);
+- зовёт `disable_powersave.sh`.
 
-- `install.sh` — установка пакетов и LightDM.
-- `configure.sh` — настройка автологина.
-- `get_cloud_user.sh` — определение пользователя из cloud-init.
-- `configure-xfce4.service` — oneshot unit, выполняющий `configure.sh`.
-- `lightdm.conf` — шаблон конфигурации LightDM.
+Юнит стоит `Before=lightdm.service display-manager.service`: конфигурация
+обязана лечь до старта дисплей-менеджера, иначе первая загрузка пройдёт
+с гритером вместо автологина.
 
-## Интеграция в VMFILE
+Шаблон задаёт `user-session=xfce` — этим и отличается от `lxde`, где та же
+пара скриптов пишет `user-session=LXDE`.
 
-```bash
-UPLOAD files/xfce4/install.sh:/opt/vmsetup/xfce4/install.sh
-UPLOAD files/xfce4/configure.sh:/opt/vmsetup/xfce4/configure.sh
-UPLOAD files/xfce4/get_cloud_user.sh:/opt/vmsetup/xfce4/get_cloud_user.sh
-UPLOAD files/xfce4/lightdm.conf:/opt/vmsetup/xfce4/lightdm.conf
-UPLOAD files/xfce4/configure-xfce4.service:/opt/vmsetup/xfce4/configure-xfce4.service
+## Параметров нет
 
+Расширение не читает переменных окружения: единственное, что в нём
+изменяемо, — имя пользователя, а оно приходит из cloud-init на устройстве.
+Задавать его при сборке нечем и незачем.
+
+## Подключение в VMFILE
+
+```vmfile
+EXTENSION xfce4
+```
+
+Прежняя запись продолжает работать:
+
+```vmfile
+COPY_IN <чекаут>/extensions/debian/xfce4:/opt/vmsetup/
 RUN_COMMAND chmod +x /opt/vmsetup/xfce4/*.sh
 RUN_COMMAND /opt/vmsetup/xfce4/install.sh
 ```
 
-`install.sh` копирует systemd unit в `/etc/systemd/system`, делает `daemon-reload`, включает `configure-xfce4` и LightDM.
+`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
+VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
+и глубина зависит от того, насколько глубоко лежит сам VMFILE.
 
-## Как это работает
+Ставите поверх `x11vnc` или `kiosk` — десктоп идёт **первым**:
+топологической сортировки у резолвера нет, порядок держится этой строкой.
 
-1. **Сборка** — ставится Xfce4, LightDM, создаётся шаблон конфигурации.
-2. **Первая загрузка** — `configure-xfce4` ждёт пользователя (до 120 секунд), заполняет `autologin-user` и перезапускает LightDM.
-3. **Каждый старт** — сервис остаётся `RemainAfterExit=yes` и повторно применяет конфиг при изменении пользователем (через cloud-init).
+## Требования
+
+- Debian 12 / Ubuntu 22.04+ со `systemd` и `cloud-init`;
+- доступ к apt-репозиториям при сборке;
+- ≥2 ГБ RAM (минимум 1 ГБ), ≥3 ГБ диска.
+
+Взаимоисключающе с `gnome` и `lxde`: каждый ставит свой дисплей-менеджер
+и делает его системным `display-manager.service`. Валидатор этого репозитория
+требует симметрии конфликтов, но **сборка их не проверяет** — два десктопа
+подряд она поставит молча.
 
 ## Доступ к рабочему столу
 
-- Proxmox console / noVNC.
-- VNC/Spice (если установлены соответствующие расширения).
-- Дополнительные расширения (kiosk, x11vnc) можно ставить поверх Xfce4.
+- консоль Proxmox / noVNC;
+- `x11vnc` поверх — VNC на loopback, доступ через SSH-туннель;
+- локальный монитор или тачскрин.
 
 ## Диагностика
 
 ```bash
-# Проверить LightDM и сервис конфигурации
 systemctl status lightdm
 systemctl status configure-xfce4.service
 
-# Логи
 journalctl -u lightdm -f
 journalctl -u configure-xfce4 -f
 
-# Проверка конфигурации
 cat /etc/lightdm/lightdm.conf
 ```
 
-Проблемы и решения:
-
-- **Нет автологина** — убедитесь, что нужный пользователь существует (`id <user>`), и посмотрите логи `configure-xfce4`.
-- **Чёрный экран** — проверьте `Xorg.0.log` и выделенные ресурсы VM.
-- **Нужно отключить автологин** — закомментируйте в `/etc/lightdm/lightdm.conf` строки `autologin-user` и перезапустите `systemctl restart lightdm`.
+- **Нет автологина** — проверьте, что пользователь существует (`id <user>`),
+  и посмотрите журнал `configure-xfce4`: он печатает имя, которое нашёл.
+- **Чёрный экран** — `Xorg.0.log` и выделенные ресурсы ВМ.
+- **Отключить автологин** — закомментируйте `autologin-user`
+  в `/etc/lightdm/lightdm.conf` и перезапустите `lightdm`. Учтите, что
+  `configure-xfce4.service` при следующей загрузке отработает снова
+  и вернёт автологин: файл пересобирается из шаблона каждый раз.
 
 ## Кастомизация
 
-- Измените тему/панель через `xfconf-query` или подготовьте файлы в cloud-init (`write_files`).
-- Чтобы отключить экранную блокировку, добавьте в cloud-init:
-  `xfconf-query -c xfce4-screensaver -p /saver/enabled -s false`.
+- тема и панель — `xfconf-query` либо файлы через cloud-init `write_files`;
+- блокировка экрана уже выключена `disable_powersave.sh`; если нужно
+  вернуть — `xfconf-query -c xfce4-screensaver -p /saver/enabled -s true`.
 
 ## Лицензия
 
-Расширение распространяется на условиях публичной некоммерческой лицензии Bisquite (PolyForm Noncommercial 1.0.0, см. `LICENSE`). Для коммерческого использования требуется отдельная платная лицензия — см. `COMMERCIAL-LICENSE.md`.
+Расширение распространяется на условиях публичной некоммерческой лицензии
+Bisquite (PolyForm Noncommercial 1.0.0, см. `LICENSE`). Для коммерческого
+использования требуется отдельная платная лицензия — см. `COMMERCIAL-LICENSE.md`.

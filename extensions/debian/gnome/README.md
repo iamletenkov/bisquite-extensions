@@ -1,98 +1,133 @@
-# Расширение GNOME для Bisquite
+# gnome
 
-Расширение автоматизирует установку GNOME Desktop и настраивает автоматический вход пользователя, созданного через cloud-init. Оно подходит для образов на базе Debian/Ubuntu, собираемых Bisquite.
+GNOME Desktop с автологином пользователя, которого создаёт cloud-init.
+База для расширений, которым нужен X-сервер и дисплей-менеджер, — `x11vnc`
+и `kiosk`.
 
-## Возможности
+## Что делает
 
-- Устанавливает полный стек GNOME (`task-gnome-desktop`, `gdm3`, `gnome-shell`, Chromium и сопутствующие пакеты).
-- Включает автологин для пользователя, заданного в cloud-init (`user` или `users[0].name`).
-- Создаёт systemd-службу, которая повторно применяет конфигурацию перед запуском GDM.
-- Отключает энергосбережение и блокировку экрана через `disable_powersave.sh`.
-- Идемпотентно: перезапуск сервисов или повторный вызов `configure.sh` не ломает систему.
+**Сборка** (`install.sh`)
 
-## Состав расширения
+- ставит `task-gnome-desktop`, `gdm3`, `gnome-shell`, `gnome-session`,
+  `xorg`, `xinput`, `dconf-cli`, `chromium`, `usbutils`, `dbus-x11`, `yq`;
+- заводит `/etc/X11/xorg.conf.d`;
+- включает `gdm3.service` (или `gdm.service`), делает `graphical.target`
+  умолчанием;
+- кладёт и включает `configure-gnome.service`.
 
-- `install.sh` — ставит GNOME, включает `gdm3`, регистрирует сервис `configure-gnome.service`.
-- `configure.sh` — выполняется при загрузке, находит cloud-init пользователя, генерирует `/etc/gdm3/daemon.conf` и вызывает `disable_powersave.sh`.
-- `get_cloud_user.sh` — утилита поиска пользователя в cloud-init user-data (требует `yq`).
-- `disable_powersave.sh` — отключает DPMS, скринсейвер, idle-delay и создаёт автозагрузку для пользователя.
-- `configure-gnome.service` — oneshot-служба systemd, запускающая `configure.sh` до старта GDM.
-- `daemon.conf` — шаблон конфигурации GDM c плейсхолдером `USER`.
+**Первая загрузка** (`configure.sh`)
 
-## Требования
+- ждёт появления пользователя cloud-init — до 120 секунд, 40 попыток по 3 с;
+- подставляет его имя в шаблон `daemon.conf` и записывает в тот файл,
+  который читает GDM (см. ниже);
+- перезапускает GDM;
+- зовёт `disable_powersave.sh`: DPMS, скринсейвер, блокировку экрана
+  и засыпание.
 
-- Образ Debian 12 / Ubuntu 22.04+ со `systemd` и `cloud-init`.
-- Доступ к APT-репозиториям при сборке (устанавливаются пакеты GNOME и `yq`).
-- Выполнение скриптов от имени root внутри `RUN_COMMAND` или эквивалента Bisquite.
+Юнит стоит `Before=gdm.service gdm3.service display-manager.service` —
+конфигурация обязана лечь до старта дисплей-менеджера, иначе первая загрузка
+пройдёт с гритером вместо автологина.
 
-## Интеграция в VMFILE
+## Параметров нет
 
-Добавьте в VMFILE секцию загрузки файлов и запуск установщика:
+Расширение не читает переменных окружения: единственное, что в нём
+изменяемо, — имя пользователя, а оно приходит из cloud-init на устройстве.
+Задавать его при сборке нечем и незачем.
 
-```bash
-# Загружаем файлы расширения
-UPLOAD files/gnome/install.sh:/opt/vmsetup/gnome/install.sh
-UPLOAD files/gnome/configure.sh:/opt/vmsetup/gnome/configure.sh
-UPLOAD files/gnome/get_cloud_user.sh:/opt/vmsetup/gnome/get_cloud_user.sh
-UPLOAD files/gnome/disable_powersave.sh:/opt/vmsetup/gnome/disable_powersave.sh
-UPLOAD files/gnome/daemon.conf:/opt/vmsetup/gnome/daemon.conf
-UPLOAD files/gnome/configure-gnome.service:/opt/vmsetup/gnome/configure-gnome.service
+## Куда пишется автологин: `daemon.conf` или `custom.conf`
 
-# Делаем скрипты исполняемыми и запускаем установку
+Имя файла, который GDM реально читает, решается на **этапе сборки пакета**,
+а не в рантайме, и дистрибутивы расходятся:
+
+| Пакет | Флаг сборки | Что ставит |
+|---|---|---|
+| Debian 13 | `-Dcustom-conf=/etc/gdm3/daemon.conf` в `debian/rules` | `/etc/gdm3/daemon.conf` |
+| Ubuntu 24.04 | флага нет, meson берёт умолчание | `/etc/gdm3/custom.conf` |
+
+Замер 2026-09-03, распаковкой обоих пакетов: `ubuntu:24.04` →
+`./etc/gdm3/custom.conf`, `debian:13` → `./etc/gdm3/daemon.conf`.
+
+`gdm_settings_reload()` читает ровно два бэкенда, и первый — это имя,
+зафиксированное при сборке пакета. **Запись в другой файл ошибкой не
+считается и предупреждения не даёт**: GDM просто никогда в него не смотрит.
+Прибитый `daemon.conf` означал, что на Ubuntu не применялись ни автологин,
+ни `WaylandEnable=false`, и машина поднималась на Wayland с гритером —
+молча.
+
+Поэтому `configure.sh` выбирает тот файл, который поставил пакет, а если
+не нашёл ни одного (дистрибутив, который мы не замеряли) — пишет **оба**.
+Лишний GDM не прочитает, а промах стоит рабочего стола без автологина
+и сессии на Wayland, где `x11vnc` не работает вовсе.
+
+## Wayland выключен, и это несущая связь
+
+Шаблон `daemon.conf` содержит `WaylandEnable=false`. Это не вкусовщина:
+`x11vnc` обслуживает X11 и на Wayland-сессии бесполезен, а его обёртка
+спрашивает у `loginctl` тип сессии и отказывает внятно. Xorg включает
+именно расширение рабочего стола — в манифестах эта связь не выражается,
+поэтому записана здесь.
+
+## Подключение в VMFILE
+
+```vmfile
+EXTENSION gnome
+```
+
+Прежняя запись продолжает работать:
+
+```vmfile
+COPY_IN <чекаут>/extensions/debian/gnome:/opt/vmsetup/
 RUN_COMMAND chmod +x /opt/vmsetup/gnome/*.sh
 RUN_COMMAND /opt/vmsetup/gnome/install.sh
 ```
 
-`install.sh` копирует сервис в `/etc/systemd/system/configure-gnome.service`, выполняет `daemon-reload`, включает `gdm3` и помечает `graphical.target` как default. Дополнительно вы можете развернуть собственные настройки (wallpaper, расширения GNOME) следующими командами Bisquite.
+`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
+VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
+и глубина зависит от того, насколько глубоко лежит сам VMFILE.
 
-## Как это работает
+Ставите поверх `x11vnc` или `kiosk` — десктоп идёт **первым**:
+топологической сортировки у резолвера нет, порядок держится этой строкой.
 
-1. **Сборка**: `install.sh` ставит пакеты, добавляет systemd-службу и включает её.
-2. **Первая загрузка**: `configure-gnome.service` выполняется до запуска GDM.
-3. **Поиск пользователя**: `configure.sh` читает cloud-init user-data через `get_cloud_user.sh` и `yq`, ожидая появления учётной записи (до 120 секунд).
-4. **Настройка GDM**: шаблон `daemon.conf` обновляется именем пользователя, автологин и Xorg включаются.
-5. **Отключение энергосбережения**: `disable_powersave.sh` создаёт dconf-профиль, скрипты автозапуска и Xsession-хук для постоянного включённого экрана.
-6. **Повторные загрузки**: служба остаётся `RemainAfterExit=yes` и при каждом старте проверяет, не поменялся ли пользователь cloud-init; конфигурация обновляется автоматически.
+## Требования
 
-## Проверка и отладка
+- Debian 12 / Ubuntu 22.04+ со `systemd` и `cloud-init`;
+- `yq` в госте (его ставит и само расширение);
+- доступ к apt-репозиториям при сборке;
+- минимум 4 ГБ RAM и 2 vCPU, лучше 4. Первая загрузка занимает минуты:
+  инициализация GNOME плюс cloud-init.
+
+Взаимоисключающе с `xfce4` и `lxde`: каждый ставит свой дисплей-менеджер
+и делает его системным `display-manager.service`. Валидатор этого репозитория
+требует симметрии конфликтов, но **сборка их не проверяет** — два десктопа
+подряд она поставит молча.
+
+## Диагностика
 
 ```bash
-# Статус и журнал службы настройки
 systemctl status configure-gnome.service
 journalctl -u configure-gnome -f
 
-# Проверка состояния GDM и графического таргета
 journalctl -u gdm3 -f
 systemctl status graphical.target
 
-# Файл автологина
-cat /etc/gdm3/daemon.conf
+# в какой файл легло — зависит от дистрибутива
+cat /etc/gdm3/daemon.conf 2>/dev/null || cat /etc/gdm3/custom.conf
 
-# Логи Xorg и GNOME Shell
 cat /var/log/Xorg.0.log
 journalctl -b | grep gnome-shell
 ```
 
-Если автологин не сработал, убедитесь, что пользователь существует (`id <user>`), а cloud-init содержит поле `user` или `users[0].name`.
+Автологин не сработал — проверьте, что пользователь существует
+(`id <user>`), что cloud-init отдаёт поле `user` или `users[0].name`,
+и в какой из двух файлов легла конфигурация.
 
-## Изменение поведения
-
-- **Отключить автологин** — закомментируйте `AutomaticLoginEnable` и `AutomaticLogin` в `/etc/gdm3/daemon.conf` и перезапустите GDM (`systemctl restart gdm3`).
-- **Настроить GNOME через dconf/gsettings** — добавляйте команды в `disable_powersave.sh` или создавайте отдельные скрипты, загруженные через VMFILE.
-- **Добавить приложения** — после установки можно выполнить дополнительные `RUN_COMMAND apt-get install gnome-tweaks ...`.
-
-## Производительность
-
-- Рекомендуется минимум 4 ГБ RAM и 2 vCPU (лучше 4).
-- Для комфортной графики выделите не менее 64–128 МБ видеопамяти и включите 3D-ускорение, если гипервизор поддерживает.
-- Используйте SSD/быстрое хранилище: GNOME активно обращается к диску при первом запуске.
-
-## Известные ограничения
-
-- Wayland отключён ради совместимости с VNC/Spice — работает Xorg.
-- Первая загрузка может занять несколько минут из-за инициализации GNOME и cloud-init.
-- Скрипты рассчитаны на Debian/Ubuntu; для других дистрибутивов потребуются правки.
+Отключить автологин — закомментируйте `AutomaticLoginEnable` и
+`AutomaticLogin` в том файле, который читает ваш GDM, и перезапустите
+`gdm3`. Учтите, что `configure-gnome.service` стоит `RemainAfterExit=yes`,
+но при следующей загрузке отработает снова и вернёт автологин.
 
 ## Лицензия
 
-Расширение распространяется на условиях публичной некоммерческой лицензии Bisquite (PolyForm Noncommercial 1.0.0, см. `LICENSE`). Для коммерческого использования требуется отдельная платная лицензия — см. `COMMERCIAL-LICENSE.md`.
+Расширение распространяется на условиях публичной некоммерческой лицензии
+Bisquite (PolyForm Noncommercial 1.0.0, см. `LICENSE`). Для коммерческого
+использования требуется отдельная платная лицензия — см. `COMMERCIAL-LICENSE.md`.
