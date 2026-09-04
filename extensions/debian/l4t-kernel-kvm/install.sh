@@ -301,10 +301,16 @@ log_info "ядро установлено: /boot/Image.kvm"
 #     то есть контроллер microSD; ЗАГРУЗОЧНО
 DTB_DIR="$TEGRA_KERNEL_OUT/arch/arm64/boot/dts"
 installed_dtb=0
+# Дедуп по ИМЕНИ ФАЙЛА, а не по пути. find отдаёт каждое дерево дважды —
+# каталог сборки содержит два пути к одному и тому же файлу, — и `sort -u`
+# по путям их не схлопывает: пути-то разные. Без этого `install`
+# отрабатывал вдвое чаще, чем нужно, и счётчик врал ровно вдвое
+# (говорил 44 при 22 уникальных файлах; замер 2026-09-04).
 while IFS= read -r dtb; do
     install -m 0644 "$dtb" "/boot/$(basename "${dtb%.dtb}")-kvm.dtb"
     installed_dtb=$((installed_dtb + 1))
-done < <(find "$DTB_DIR" -name 'tegra210-*.dtb' | sort -u)
+done < <(find "$DTB_DIR" -name 'tegra210-*.dtb' -printf '%f\t%p\n' \
+         | sort -u -k1,1 | cut -f2)
 
 if [[ "$installed_dtb" -eq 0 ]]; then
     log_error "среди собранных не нашлось ни одного дерева tegra210-*.dtb"
