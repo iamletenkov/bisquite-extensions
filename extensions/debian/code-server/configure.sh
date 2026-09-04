@@ -306,7 +306,20 @@ main() {
     if [[ -n "$CODE_PASSWORD" && "$CODE_PASSWORD" != "none" ]]; then
         log_info "Authentication: password"
     else
-        log_warn "Authentication: НЕТ (auth: none) на 0.0.0.0 — шелл открыт всей сети"
+        # Адрес подставляется, а не пишется жёстко. Здесь стояло «на
+        # 0.0.0.0» константой, хотя двадцатью строками выше `write_config`
+        # уже различает адрес правильным `case`. При
+        # `CODE_SERVER_BIND=127.0.0.1` журнал первой загрузки говорил
+        # и «снаружи недоступен», и «шелл открыт всей сети» — второе
+        # неправда, и именно оно кричало громче.
+        case "$CODE_BIND" in
+            127.*|::1|localhost)
+                log_info "Authentication: НЕТ (auth: none), но адрес $CODE_BIND — снаружи недоступен"
+                ;;
+            *)
+                log_warn "Authentication: НЕТ (auth: none) на $CODE_BIND — шелл открыт всей сети"
+                ;;
+        esac
     fi
 }
 
