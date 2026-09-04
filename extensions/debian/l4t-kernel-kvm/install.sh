@@ -280,52 +280,73 @@ log_info "ядро установлено: /boot/Image.kvm"
 # Имя DTB берём у ТЕКУЩЕЙ записи extlinux, а не угадываем по плате:
 # у Nano их несколько (p3448-0000-p3449-0000 -a02/-b00), и промах даёт
 # незагружаемую систему.
-# ВЫБОР DTB НЕ УГАДЫВАЕТСЯ. Раньше здесь стоял `find … | head -1`, и это
-# дало настоящий дефект (замер 2026-09-04): у вендорского образа
-# Q-engineering в extlinux.conf строки FDT нет вовсе, запасная ветка взяла
-# первое попавшееся дерево и положила в образ
-# `tegra210-p3448-0002-…` — модуль с eMMC, — тогда как плата на самом деле
-# `p3448-0000`, девкит с microSD. Сверено с живой машиной:
-#   /proc/device-tree/compatible → nvidia,p3449-0000-a02+p3448-0000-a02
-# Деревья различаются конфигурацией контроллера SD и пинмукса, то есть
-# образ с чужим DTB на девките не находит корень.
+# ДЕРЕВЬЯ УСТРОЙСТВ: СТАВИМ ВСЕ, ВЫБИРАЕМ ПОЗЖЕ.
 #
-# Цена ошибки несимметрична и вся на одной стороне: неверное дерево даёт
-# незагружаемую плату, а плата без монитора не чинится вовсе. Поэтому
-# отказ, а не догадка.
-CUR_FDT="$(sed -n 's/^\s*FDT\s\+//p' "$EXTLINUX" | head -1)"
-if [[ -n "$CUR_FDT" ]]; then
-    # Лучший источник: у образа уже есть запись, и в ней названо ЕГО дерево.
-    SRC_NAME="$(basename "${CUR_FDT%-kvm.dtb}.dtb")"
-elif [[ -n "${L4T_KERNEL_FDT:-}" ]]; then
-    # Второй источник: автор VMFILE назвал плату явно. Он единственный,
-    # кто её знает: внутри appliance /proc/device-tree принадлежит
-    # ПРИЁМНИКУ сборки, а не целевому устройству.
-    SRC_NAME="${L4T_KERNEL_FDT%.dtb}.dtb"
-else
-    log_error "не удалось определить дерево устройств для этой платы"
-    log_error "в $EXTLINUX нет строки FDT, а L4T_KERNEL_FDT не задан"
-    log_error "угадывать нельзя: чужое дерево даёт незагружаемую плату"
-    log_error "кандидаты, собранные из этих исходников:"
-    find "$TEGRA_KERNEL_OUT/arch/arm64/boot/dts" -name 'tegra210-p3448*.dtb' \
-        -printf '  %f\n' | sort | sed 's/\.dtb$//' >&2
-    log_error "узнать своё: cat /proc/device-tree/compatible на целевой плате"
-    log_error "и задать в VMFILE: EXTENSION l4t-kernel-kvm L4T_KERNEL_FDT=<имя>"
+# Ядро от платы не зависит вовсе — зависит дерево. Их из этих исходников
+# собирается семь штук: четыре несущих платы (a00/a01/a02/b00) на модуле
+# с microSD, две на модуле с eMMC и одна для 2 ГБ. Каждое около 250 КБ,
+# то есть все вместе весят меньше двух мегабайт при образе в 34 ГБ.
+#
+# Патч GIC накладывается на ИСХОДНИК до сборки, поэтому пропатчены
+# оказываются все разом — доплачивать не приходится.
+#
+# Раз ставим все, выбор платы перестаёт быть решением этого расширения
+# и переезжает в дешёвый слой поверх (`l4t-board-fdt`, секунды вместо
+# двух с четвертью часов). Мотив прямой: раньше на каждую пару
+# «модуль + несущая» нужна была своя двухчасовая сборка.
+#
+# Замер 2026-09-04, чем деревья вообще различаются:
+#   a02 ↔ b00 (несущая) — 2226 строк, ВСЕ про камеры; не загрузочно
+#   p3448-0000 ↔ -0002 (модуль) — 524 строки, среди них пинмукс sdmmc1,
+#     то есть контроллер microSD; ЗАГРУЗОЧНО
+DTB_DIR="$TEGRA_KERNEL_OUT/arch/arm64/boot/dts"
+installed_dtb=0
+while IFS= read -r dtb; do
+    install -m 0644 "$dtb" "/boot/$(basename "${dtb%.dtb}")-kvm.dtb"
+    installed_dtb=$((installed_dtb + 1))
+done < <(find "$DTB_DIR" -name 'tegra210-*.dtb' | sort -u)
+
+if [[ "$installed_dtb" -eq 0 ]]; then
+    log_error "среди собранных не нашлось ни одного дерева tegra210-*.dtb"
+    log_error "искали в $DTB_DIR"
     exit 1
+fi
+log_info "деревьев устройств установлено: $installed_dtb (все с суффиксом -kvm)"
+
+# СТРОКА FDT НЕОБЯЗАТЕЛЬНА, и это главное следствие.
+#
+# Названа плата — пишем `FDT`, поведение прежнее, образ готов к прошивке.
+# Не названа — строки нет, и CBoot подставляет дерево из раздела QSPI:
+# заведомо своё для этой платы. База при этом ГРУЗИТСЯ, просто KVM идёт
+# через ловушки, то есть медленно. Это осознанный компромисс: база не для
+# прошивки, база для наследования.
+#
+# Прежний отказ «не удалось определить дерево» снят вместе с причиной.
+# Он защищал от угадывания (`find … | head -1`, положивший в образ дерево
+# чужого модуля), а угадывания больше нет: либо имя названо, либо строки
+# нет вовсе.
+NEW_FDT=""
+CUR_FDT="$(sed -n 's/^\s*FDT\s\+//p' "$EXTLINUX" | head -1)"
+if [[ -n "${L4T_KERNEL_FDT:-}" ]]; then
+    NEW_FDT="/boot/${L4T_KERNEL_FDT%.dtb}-kvm.dtb"
+    SRC_HINT="L4T_KERNEL_FDT"
+elif [[ -n "$CUR_FDT" ]]; then
+    NEW_FDT="/boot/$(basename "${CUR_FDT%.dtb}")-kvm.dtb"
+    SRC_HINT="строка FDT в $EXTLINUX"
 fi
 
-SRC_DTB="$(find "$TEGRA_KERNEL_OUT/arch/arm64/boot/dts" -name "$SRC_NAME" | head -1)"
-if [[ -z "$SRC_DTB" ]]; then
-    log_error "дерево '$SRC_NAME' среди собранных не найдено"
-    log_error "кандидаты:"
-    find "$TEGRA_KERNEL_OUT/arch/arm64/boot/dts" -name 'tegra210-p3448*.dtb' \
-        -printf '  %f\n' | sort >&2
-    exit 1
+if [[ -n "$NEW_FDT" ]]; then
+    if [[ ! -f "$NEW_FDT" ]]; then
+        log_error "дерево $NEW_FDT не найдено среди установленных ($SRC_HINT)"
+        log_error "есть в образе:"
+        find /boot -name 'tegra210-*-kvm.dtb' -printf '  %f\n' | sort >&2
+        exit 1
+    fi
+    log_info "дерево устройств для записи kvm: $NEW_FDT ($SRC_HINT)"
+else
+    log_info "плата не названа — запись kvm пойдёт без FDT"
+    log_info "дерево подставит CBoot из QSPI; выбрать своё можно слоем l4t-board-fdt"
 fi
-log_info "дерево устройств выбрано: $SRC_NAME"
-NEW_FDT="/boot/$(basename "${SRC_DTB%.dtb}")-kvm.dtb"
-install -m 0644 "$SRC_DTB" "$NEW_FDT"
-log_info "дерево устройств установлено: $NEW_FDT"
 
 # --- 7. extlinux.conf --------------------------------------------------------
 # APPEND КОПИРУЕТСЯ, а не пишется. В нём root=PARTUUID=…, свой у каждого
@@ -350,13 +371,19 @@ cp -a "$EXTLINUX" "${EXTLINUX}.before-kvm"
 sed -i 's/^DEFAULT .*/DEFAULT kvm/' "$EXTLINUX"
 grep -q "^DEFAULT kvm$" "$EXTLINUX" || sed -i '1i DEFAULT kvm' "$EXTLINUX"
 
+# Строка FDT пишется ТОЛЬКО когда плата названа. Без неё CBoot берёт
+# дерево из раздела QSPI — своё для этой платы, — и образ грузится.
+# Дописать её потом можно дешёвым слоем `l4t-board-fdt`.
+FDT_LINE=""
+[[ -n "$NEW_FDT" ]] && FDT_LINE="
+      FDT ${NEW_FDT}"
+
 cat >> "$EXTLINUX" <<EXTEOF
 
 LABEL kvm
       MENU LABEL kvm kernel (${LOCALVERSION#-}, собрано bisquite)
       LINUX /boot/Image.kvm
-      INITRD /boot/initrd
-      FDT ${NEW_FDT}
+      INITRD /boot/initrd${FDT_LINE}
       APPEND ${APPEND_LINE}
 EXTEOF
 log_info "extlinux.conf: запись kvm добавлена и назначена умолчанием"

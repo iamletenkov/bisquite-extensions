@@ -1,0 +1,14 @@
+name: l4t-board-fdt
+version: 1.0.0
+family: deb
+# Только arm64: L4T существует только под Tegra, а Tegra бывает только arm64.
+arch: [arm64]
+# Только `build`, и по той же причине, что у l4t-kernel-kvm: строка FDT —
+# часть образа, а не настройка устройства. Выбранная на первой загрузке,
+# она давала бы платам разные extlinux.conf при одном теге образа.
+phase: [build]
+provides: [l4t-board-selected]
+# То, что объявляет l4t-kernel-kvm. Резолвер сегодня requires не сверяет,
+# но объявление честное: без установленных `-kvm.dtb` выбирать нечего.
+requires: [l4t-custom-kernel]
+conflicts: []
