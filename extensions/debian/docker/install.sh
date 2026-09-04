@@ -175,11 +175,43 @@ if (( IS_L4T )); then
     L4T_REV="$(awk -F'REVISION: ' 'NR==1{split($2,a,","); print a[1]}' /etc/nv_tegra_release 2>/dev/null | tr -d ' ' || true)"
     if [[ -n "$L4T_REL" && -n "$L4T_REV" ]]; then
         L4T_SUITE="r${L4T_REL}.${L4T_REV%%.*}"
-        log_info "L4T $L4T_SUITE — подключаю репозиторий NVIDIA"
-        curl -fsSL "https://repo.download.nvidia.com/jetson/jetson-ota-public.asc" \
-            -o /etc/apt/keyrings/nvidia-jetson.asc || \
-            log_warn "ключ NVIDIA не скачался"
-        cat > /etc/apt/sources.list.d/nvidia-jetson.sources <<NVSOURCES
+
+        # СВОЙ ИСТОЧНИК ДОБАВЛЯЕМ, ТОЛЬКО ЕСЛИ ЕГО НЕТ, и это не
+        # аккуратность, а починка ломающего дефекта.
+        #
+        # Вендорские образы L4T несут репозиторий сами:
+        # `/etc/apt/sources.list.d/nvidia-l4t-apt-source.list` со строкой
+        # `deb https://repo.download.nvidia.com/jetson/common r32.6 main`,
+        # а ключ лежит в общем `trusted.gpg.d/jetson-ota-public.asc`,
+        # то есть БЕЗ `Signed-By`. Наш файл указывал на тот же URI, но
+        # с `Signed-By`, и apt объявлял конфликт:
+        #
+        #     E: Conflicting values set for option Signed-By regarding
+        #        source https://repo.download.nvidia.com/jetson/common
+        #     E: The list of sources could not be read.
+        #
+        # Ломался при этом не сам docker — он к тому моменту уже стоял, —
+        # а ВЕСЬ список источников, то есть каждый следующий слой сборки.
+        # Замер 2026-09-04 на Jetson Nano: сборка дошла до расширения
+        # vino-vnc и упала там на `apt-get install vino`, хотя виновата
+        # была эта строка тремя слоями раньше.
+        #
+        # Ищем только незакомментированные записи и оба формата — старый
+        # однострочный и deb822.
+        if grep -rqsE '^[[:space:]]*deb[[:space:]].*repo\.download\.nvidia\.com/jetson' \
+                /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null \
+            || grep -rqsE '^[[:space:]]*URIs:.*repo\.download\.nvidia\.com/jetson' \
+                /etc/apt/sources.list.d/ 2>/dev/null; then
+            log_info "репозиторий NVIDIA уже подключён в образе — свой не добавляю"
+            # Убрать свой файл, если он остался от прежней сборки: иначе
+            # конфликт переживёт починку.
+            rm -f /etc/apt/sources.list.d/nvidia-jetson.sources
+        else
+            log_info "L4T $L4T_SUITE — подключаю репозиторий NVIDIA"
+            curl -fsSL "https://repo.download.nvidia.com/jetson/jetson-ota-public.asc" \
+                -o /etc/apt/keyrings/nvidia-jetson.asc || \
+                log_warn "ключ NVIDIA не скачался"
+            cat > /etc/apt/sources.list.d/nvidia-jetson.sources <<NVSOURCES
 Types: deb
 URIs: https://repo.download.nvidia.com/jetson/common
 Suites: ${L4T_SUITE}
@@ -187,6 +219,7 @@ Components: main
 Architectures: arm64
 Signed-By: /etc/apt/keyrings/nvidia-jetson.asc
 NVSOURCES
+        fi
         apt_retry apt-get "${APT_OPTS[@]}" update || log_warn "индекс NVIDIA не обновился"
         if apt_retry apt-get "${APT_OPTS[@]}" install nvidia-container-toolkit; then
             # Правит только /etc/docker/daemon.json — это фаза сборки.
