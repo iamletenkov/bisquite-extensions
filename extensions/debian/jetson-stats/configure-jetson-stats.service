@@ -8,7 +8,23 @@ Wants=cloud-init.service
 # jtop.service поднимается сам (WantedBy=multi-user.target у upstream-юнита);
 # нам нужно лишь оказаться после него, чтобы `systemctl start` не гонялся
 # с штатным запуском.
-After=jtop.service
+# `After=jtop.service` УБРАН, и это починка, а не упрощение.
+#
+# Он давал гарантированный цикл: наш юнит объявлен `WantedBy=multi-user.target`,
+# а вендорский `jtop.service` — `After=multi-user.target`. Кольцо
+# `multi-user.target → configure-jetson-stats → jtop.service → multi-user.target`
+# systemd разрывает, МОЛЧА выбрасывая нашу задачу:
+#
+#     multi-user.target: Found ordering cycle on configure-jetson-stats.service
+#     Job configure-jetson-stats.service/start deleted to break ordering cycle
+#
+# Замер 2026-09-04 на живом Jetson Nano: служба не выполнялась ни разу,
+# и в журнале это одна строка, которую легко пропустить.
+#
+# Встать «после jtop, но внутри multi-user» невозможно по построению:
+# jtop намеренно поднимается ПОСЛЕ таргета. Дожидаться его и не нужно —
+# `configure.sh` работает с уже установленным пакетом и группой `jtop`,
+# а не с запущенной службой.
 
 [Service]
 Type=oneshot
