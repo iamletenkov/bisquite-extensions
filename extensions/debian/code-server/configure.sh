@@ -69,6 +69,10 @@ read_config() {
     CODE_USER=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.USER // empty' "$config_file" 2>/dev/null || echo "")
     CODE_PASSWORD=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.PASSWORD // empty' "$config_file" 2>/dev/null || echo "none")
     CODE_PORT=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.PORT // empty' "$config_file" 2>/dev/null || echo "9001")
+    CODE_BIND=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.BIND // empty' "$config_file" 2>/dev/null || echo "")
+    # Умолчание историческое: до появления параметра адрес был прибит
+    # к 0.0.0.0, и образы, собранные раньше, обязаны вести себя как прежде.
+    CODE_BIND="${CODE_BIND:-0.0.0.0}"
     CODE_VERSION=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.VERSION // empty' "$config_file" 2>/dev/null || echo "latest")
 }
 
@@ -169,7 +173,7 @@ create_config() {
     # предупреждение снималось ровно в том случае, когда защиты не было.
     if [[ -n "$CODE_PASSWORD" && "$CODE_PASSWORD" != "none" ]]; then
         cat > "$config_dir/config.yaml" << EOF
-bind-addr: 0.0.0.0:${CODE_PORT}
+bind-addr: ${CODE_BIND}:${CODE_PORT}
 auth: password
 password: ${CODE_PASSWORD}
 cert: /home/${CODE_USER}/.local/share/code-server/certs/localhost.crt
@@ -178,12 +182,23 @@ EOF
         log_info "аутентификация по паролю включена"
     else
         cat > "$config_dir/config.yaml" << EOF
-bind-addr: 0.0.0.0:${CODE_PORT}
+bind-addr: ${CODE_BIND}:${CODE_PORT}
 auth: none
 cert: /home/${CODE_USER}/.local/share/code-server/certs/localhost.crt
 cert-key: /home/${CODE_USER}/.local/share/code-server/certs/localhost.key
 EOF
-        log_warn "аутентификации НЕТ, сервер слушает 0.0.0.0 — шелл открыт всей сети"
+        # Громкость по адресу, а не по одному лишь отсутствию пароля:
+        # code-server без пароля на 127.0.0.1 — обычная связка для доступа
+        # по ssh-туннелю, и кричать на неё значит приучать не читать
+        # предупреждения. Открытым всей сети он становится от АДРЕСА.
+        case "$CODE_BIND" in
+            127.*|::1|localhost)
+                log_info "аутентификации нет, но сервер слушает только $CODE_BIND — снаружи недоступен"
+                ;;
+            *)
+                log_warn "аутентификации НЕТ, сервер слушает $CODE_BIND — шелл открыт всей сети"
+                ;;
+        esac
     fi
 
     # Устанавливаем правильные права доступа

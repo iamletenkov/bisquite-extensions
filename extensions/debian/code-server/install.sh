@@ -264,7 +264,7 @@ fi
 # (`read_config`, оттуда же bind-addr и auth), поэтому перезаписываем файл
 # здесь, в фазе сборки, а не подменяем механизм.
 _cs_config="/opt/vmsetup/code-server/config.yaml"
-if [[ -n "${CODE_SERVER_PORT:-}${CODE_SERVER_PASSWORD:-}${CODE_SERVER_USER:-}" ]]; then
+if [[ -n "${CODE_SERVER_PORT:-}${CODE_SERVER_PASSWORD:-}${CODE_SERVER_USER:-}${CODE_SERVER_BIND:-}" ]]; then
   if [[ -f "$_cs_config" ]]; then
     # Значения, которых не задали, берём из существующего файла, чтобы
     # `EXTENSION code-server CODE_SERVER_PORT=9002` не сбрасывал версию.
@@ -272,9 +272,11 @@ if [[ -n "${CODE_SERVER_PORT:-}${CODE_SERVER_PASSWORD:-}${CODE_SERVER_USER:-}" ]
     _cs_old_pass=$(sed -n 's/^PASSWORD:[[:space:]]*//p' "$_cs_config" | head -1)
     _cs_old_port=$(sed -n 's/^PORT:[[:space:]]*//p' "$_cs_config" | head -1)
     _cs_old_ver=$(sed -n 's/^VERSION:[[:space:]]*//p' "$_cs_config" | head -1)
+    _cs_old_bind=$(sed -n 's/^BIND:[[:space:]]*//p' "$_cs_config" | head -1)
   fi
   _cs_pass="${CODE_SERVER_PASSWORD:-${_cs_old_pass:-none}}"
   _cs_port="${CODE_SERVER_PORT:-${_cs_old_port:-9001}}"
+  _cs_bind="${CODE_SERVER_BIND:-${_cs_old_bind:-0.0.0.0}}"
 
   # Права ставятся ДО записи: файл может содержать пароль, и промежутка,
   # в котором он лежит с правами по umask, быть не должно.
@@ -283,19 +285,29 @@ if [[ -n "${CODE_SERVER_PORT:-}${CODE_SERVER_PASSWORD:-}${CODE_SERVER_USER:-}" ]
 USER: ${CODE_SERVER_USER:-${_cs_old_user:-}}
 PASSWORD: ${_cs_pass}
 PORT: ${_cs_port}
+BIND: ${_cs_bind}
 VERSION: ${CODE_SERVER_VERSION:-${_cs_old_ver:-latest}}
 CSCONF
 
   # Пароль в журнал НЕ печатается — только факт его наличия. Журнал сборки
   # уезжает в CI и в переписку чаще, чем сам образ.
   if [[ "$_cs_pass" == "none" ]]; then
-    log_info "config.yaml перезаписан из VMFILE: порт ${_cs_port}, пароль не задан"
-    # configure.sh поднимет сервер как `bind-addr: 0.0.0.0` с `auth: none`.
+    log_info "config.yaml перезаписан из VMFILE: порт ${_cs_port}, адрес ${_cs_bind}, пароль не задан"
     # Это ЕДИНСТВЕННОЕ место, где решение видно до того, как образ уедет
-    # на устройство, поэтому формулировка прямая.
-    log_warn "code-server будет слушать 0.0.0.0 БЕЗ АУТЕНТИФИКАЦИИ:"
-    log_warn "  любой, кто достаёт до этой машины по сети, получает шелл"
-    log_warn "  от имени пользователя code-server со всеми его правами"
+    # на устройство, поэтому формулировка прямая. Но громкость идёт по
+    # АДРЕСУ, а не по одному лишь отсутствию пароля: без пароля на
+    # 127.0.0.1 — обычная связка для доступа по ssh-туннелю, и крик на
+    # неё приучает не читать предупреждения.
+    case "$_cs_bind" in
+      127.*|::1|localhost)
+        log_info "аутентификации нет, но адрес ${_cs_bind} — снаружи сервер недоступен"
+        ;;
+      *)
+        log_warn "code-server будет слушать ${_cs_bind} БЕЗ АУТЕНТИФИКАЦИИ:"
+        log_warn "  любой, кто достаёт до этой машины по сети, получает шелл"
+        log_warn "  от имени пользователя code-server со всеми его правами"
+        ;;
+    esac
   else
     log_info "config.yaml перезаписан из VMFILE: порт ${_cs_port}, пароль задан"
     # Пароль лежит в образе открытым текстом — и в /opt/vmsetup, и потом
