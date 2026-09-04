@@ -280,19 +280,49 @@ log_info "ядро установлено: /boot/Image.kvm"
 # Имя DTB берём у ТЕКУЩЕЙ записи extlinux, а не угадываем по плате:
 # у Nano их несколько (p3448-0000-p3449-0000 -a02/-b00), и промах даёт
 # незагружаемую систему.
+# ВЫБОР DTB НЕ УГАДЫВАЕТСЯ. Раньше здесь стоял `find … | head -1`, и это
+# дало настоящий дефект (замер 2026-09-04): у вендорского образа
+# Q-engineering в extlinux.conf строки FDT нет вовсе, запасная ветка взяла
+# первое попавшееся дерево и положила в образ
+# `tegra210-p3448-0002-…` — модуль с eMMC, — тогда как плата на самом деле
+# `p3448-0000`, девкит с microSD. Сверено с живой машиной:
+#   /proc/device-tree/compatible → nvidia,p3449-0000-a02+p3448-0000-a02
+# Деревья различаются конфигурацией контроллера SD и пинмукса, то есть
+# образ с чужим DTB на девките не находит корень.
+#
+# Цена ошибки несимметрична и вся на одной стороне: неверное дерево даёт
+# незагружаемую плату, а плата без монитора не чинится вовсе. Поэтому
+# отказ, а не догадка.
 CUR_FDT="$(sed -n 's/^\s*FDT\s\+//p' "$EXTLINUX" | head -1)"
-if [[ -z "$CUR_FDT" ]]; then
-    # У записи по умолчанию FDT может отсутствовать — тогда загрузчик берёт
-    # дерево из раздела DTB. Собираем имя по модели платы.
-    CUR_FDT="/boot/$(basename "$(find "$TEGRA_KERNEL_OUT/arch/arm64/boot/dts" -name 'tegra210-p3448*.dtb' | head -1)")"
-    log_warn "в extlinux.conf не было FDT — беру $CUR_FDT"
-fi
-SRC_DTB="$(find "$TEGRA_KERNEL_OUT/arch/arm64/boot/dts" -name "$(basename "${CUR_FDT%-kvm.dtb}.dtb")" | head -1)"
-[[ -z "$SRC_DTB" ]] && SRC_DTB="$(find "$TEGRA_KERNEL_OUT/arch/arm64/boot/dts" -name 'tegra210-p3448*.dtb' | head -1)"
-if [[ -z "$SRC_DTB" ]]; then
-    log_error "собранный DTB не найден"
+if [[ -n "$CUR_FDT" ]]; then
+    # Лучший источник: у образа уже есть запись, и в ней названо ЕГО дерево.
+    SRC_NAME="$(basename "${CUR_FDT%-kvm.dtb}.dtb")"
+elif [[ -n "${L4T_KERNEL_FDT:-}" ]]; then
+    # Второй источник: автор VMFILE назвал плату явно. Он единственный,
+    # кто её знает: внутри appliance /proc/device-tree принадлежит
+    # ПРИЁМНИКУ сборки, а не целевому устройству.
+    SRC_NAME="${L4T_KERNEL_FDT%.dtb}.dtb"
+else
+    log_error "не удалось определить дерево устройств для этой платы"
+    log_error "в $EXTLINUX нет строки FDT, а L4T_KERNEL_FDT не задан"
+    log_error "угадывать нельзя: чужое дерево даёт незагружаемую плату"
+    log_error "кандидаты, собранные из этих исходников:"
+    find "$TEGRA_KERNEL_OUT/arch/arm64/boot/dts" -name 'tegra210-p3448*.dtb' \
+        -printf '  %f\n' | sort | sed 's/\.dtb$//' >&2
+    log_error "узнать своё: cat /proc/device-tree/compatible на целевой плате"
+    log_error "и задать в VMFILE: EXTENSION l4t-kernel-kvm L4T_KERNEL_FDT=<имя>"
     exit 1
 fi
+
+SRC_DTB="$(find "$TEGRA_KERNEL_OUT/arch/arm64/boot/dts" -name "$SRC_NAME" | head -1)"
+if [[ -z "$SRC_DTB" ]]; then
+    log_error "дерево '$SRC_NAME' среди собранных не найдено"
+    log_error "кандидаты:"
+    find "$TEGRA_KERNEL_OUT/arch/arm64/boot/dts" -name 'tegra210-p3448*.dtb' \
+        -printf '  %f\n' | sort >&2
+    exit 1
+fi
+log_info "дерево устройств выбрано: $SRC_NAME"
 NEW_FDT="/boot/$(basename "${SRC_DTB%.dtb}")-kvm.dtb"
 install -m 0644 "$SRC_DTB" "$NEW_FDT"
 log_info "дерево устройств установлено: $NEW_FDT"
