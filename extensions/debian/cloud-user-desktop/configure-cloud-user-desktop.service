@@ -9,6 +9,24 @@ Description=Point desktop autologin at the cloud-init user
 After=cloud-final.service
 Wants=cloud-final.service
 
+# И ПОСЛЕ САМОГО МЕНЕДЖЕРА ВХОДА.
+#
+# Без этого служба отрабатывала РАНЬШЕ него: замер 2026-09-06 на Jetson
+# Nano — правка автологина в 06:22:35, старт gdm3 в 06:22:48. Перезапуск
+# менеджера при этом не срабатывал (перезапускать было нечего), а он
+# нужен, и вот почему.
+#
+# Первая попытка X на этой плате ПРОИГРЫВАЕТ ГОНКУ ЗА ВИДЕОЯДРОМ:
+#
+#     (EE) NVIDIA(GPU-0): Failed to initialize the NVIDIA graphics device!
+#     (EE) NVIDIA(0): Failing initialization of X screen 0
+#     gdm3: GdmDisplay: Session never registered, failing
+#
+# X сеанса пользователя умирает, менеджер возвращает приглашение — и
+# его собственный X, запущенный секундой позже, поднимается прекрасно.
+# То есть достаточно ВТОРОЙ попытки, а её и даёт перезапуск.
+After=gdm3.service display-manager.service
+
 [Service]
 Type=oneshot
 RemainAfterExit=yes

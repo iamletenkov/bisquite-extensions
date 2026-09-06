@@ -26,6 +26,44 @@ if [[ ! -d "/home/${user}" ]]; then
     exit 1
 fi
 
+# ГРУППЫ ДЛЯ РАБОЧЕГО СТОЛА: без `video` графический сеанс не поднимается.
+#
+# Замер 2026-09-06 на Jetson Nano. cloud-init заводит пользователя
+# с группами из seed — у нас это `sudo`, — а устройства видеоядра
+# принадлежат группе `video`:
+#
+#     crw-rw---- root video /dev/nvhost-ctrl
+#     crw-rw---- root video /dev/nvhost-gpu
+#     crw-rw---- root video /dev/nvmap
+#
+# X-сервер сеанса не может их открыть и умирает:
+#
+#     (EE) NVIDIA(GPU-0): Failed to initialize the NVIDIA graphics device!
+#     gdm3: GdmDisplay: Session never registered, failing
+#
+# Менеджер возвращает приглашение, и его СОБСТВЕННЫЙ X поднимается
+# прекрасно — потому что `gdm` в группе `video` состоит. Отсюда
+# обманчивая картина: экран жив, а сеанса пользователя нет, и VNC,
+# которому нужна сессия, молчит. Вендорская учётка в этих группах
+# была, поэтому на исходном образе всё работало; ломается ровно тогда,
+# когда её заменяют пользователем cloud-init.
+#
+# Набор по назначению, а не «на всякий случай»: video — видеоядро и X,
+# audio с pulse — звук, input — устройства ввода, render — DRI,
+# dialout и plugdev — типовые для рабочей станции. Несуществующие
+# группы пропускаются: состав зависит от дистрибутива.
+for grp in video render audio pulse input dialout plugdev; do
+    getent group "$grp" >/dev/null 2>&1 || continue
+    if id -nG "$user" | tr ' ' '\n' | grep -qx "$grp"; then
+        continue
+    fi
+    if usermod -aG "$grp" "$user" 2>/dev/null; then
+        log_info "'$user' добавлен в группу $grp"
+    else
+        log_warn "не удалось добавить '$user' в группу $grp"
+    fi
+done
+
 changed=0
 if [[ -f /etc/gdm3/custom.conf ]]; then
     sed -i -e "s/^\s*AutomaticLoginEnable\s*=.*/AutomaticLoginEnable=True/" \
