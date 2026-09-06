@@ -66,14 +66,14 @@ read_config() {
     fi
 
     # Читаем значения с помощью yq в чистом окружении
-    CODE_USER=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.USER // empty' "$config_file" 2>/dev/null || echo "")
-    CODE_PASSWORD=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.PASSWORD // empty' "$config_file" 2>/dev/null || echo "none")
-    CODE_PORT=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.PORT // empty' "$config_file" 2>/dev/null || echo "9001")
-    CODE_BIND=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.BIND // empty' "$config_file" 2>/dev/null || echo "")
+    CODE_USER=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.USER // ""' "$config_file" 2>/dev/null || echo "")
+    CODE_PASSWORD=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.PASSWORD // ""' "$config_file" 2>/dev/null || echo "none")
+    CODE_PORT=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.PORT // ""' "$config_file" 2>/dev/null || echo "9001")
+    CODE_BIND=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.BIND // ""' "$config_file" 2>/dev/null || echo "")
     # Умолчание историческое: до появления параметра адрес был прибит
     # к 0.0.0.0, и образы, собранные раньше, обязаны вести себя как прежде.
     CODE_BIND="${CODE_BIND:-0.0.0.0}"
-    CODE_VERSION=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.VERSION // empty' "$config_file" 2>/dev/null || echo "latest")
+    CODE_VERSION=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.VERSION // ""' "$config_file" 2>/dev/null || echo "latest")
 }
 
 # Определение пользователя

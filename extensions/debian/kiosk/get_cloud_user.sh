@@ -84,11 +84,11 @@ get_cloud_user() {
     fi
 
     # Извлекаем пользователя с помощью yq в чистом окружении
-    ci_user=$(echo "$userdata" | env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.user // empty' 2>/dev/null || true)
+    ci_user=$(echo "$userdata" | env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.user // ""' 2>/dev/null || true)
 
     # Если пользователь не найден, пробуем альтернативные поля
     if [[ -z "$ci_user" ]]; then
-        ci_user=$(echo "$userdata" | env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.users[0].name // empty' 2>/dev/null || true)
+        ci_user=$(echo "$userdata" | env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.users[0].name // ""' 2>/dev/null || true)
     fi
 
     # Если пользователь найден, возвращаем его

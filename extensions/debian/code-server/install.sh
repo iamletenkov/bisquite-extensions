@@ -142,7 +142,7 @@ get_version_from_config() {
     if [[ -f "$config_file" ]]; then
         # Используем grep для поиска VERSION, так как yq может не быть установлен на ранних этапах
         if command -v yq >/dev/null 2>&1; then
-            version=$(yq -r '.VERSION // empty' "$config_file" 2>/dev/null || true)
+            version=$(yq -r '.VERSION // ""' "$config_file" 2>/dev/null || true)
         else
             # Fallback к grep/sed если yq недоступен
             version=$(grep -E '^VERSION:' "$config_file" | sed 's/VERSION: *//' | tr -d ' ' || true)

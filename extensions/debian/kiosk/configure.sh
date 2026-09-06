@@ -98,7 +98,7 @@ resolve_user(){
 read_config(){
   local key="$1"
   local value
-  value=$(yq -r ".$key // empty" "$CONFIG_YAML" 2>/dev/null || echo "")
+  value=$(yq -r ".$key // \"\"" "$CONFIG_YAML" 2>/dev/null || echo "")
   echo "$value"
 }
 
