@@ -42,5 +42,47 @@ for conf in /etc/lightdm/lightdm.conf /etc/lightdm/lightdm.conf.d/*.conf; do
     changed=1
     log_info "lightdm: автологин включён для $user ($conf)"
 done
-(( changed )) || log_warn "менеджера входа не нашлось — автологин не потребовался"
+(( changed )) || { log_warn "менеджера входа не нашлось — автологин не потребовался"; exit 0; }
+
+# ПЕРЕЗАПУСК МЕНЕДЖЕРА ВХОДА, иначе правка не применится до следующей
+# загрузки.
+#
+# Порядок неустраним: менеджер поднимается по `graphical.target`, а имя
+# пользователя cloud-init становится известно только после `cloud-final`,
+# то есть позже. К моменту нашей правки на экране уже висит приглашение,
+# и прочитанный при старте `custom.conf` его не касается.
+#
+# Замер 2026-09-06 на Jetson Nano: файл правился верно
+# (`AutomaticLogin=garage`), а сессии не появлялось; из-за этого не
+# поднимался и VNC, которому нужна сессия пользователя.
+#
+# ЧУЖУЮ СЕССИЮ НЕ ТРОГАЕМ. Если графическая сессия уже есть, перезапуск
+# её оборвёт — а это может быть работающий человек. Тогда правка просто
+# ждёт следующей загрузки, и об этом говорится вслух.
+# Класс сессии, а не только её тип. Приглашение менеджера входа — тоже
+# графическая сессия (`Type=x11`), но принадлежит она пользователю `gdm`
+# и имеет `Class=greeter`. Условие по одному типу считало её работой
+# человека и отказывалось перезапускать менеджер (замер 2026-09-06).
+graphical_user_session=0
+for _sid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}'); do
+    _class="$(loginctl show-session "$_sid" -p Class --value 2>/dev/null)"
+    _type="$(loginctl show-session "$_sid" -p Type --value 2>/dev/null)"
+    if [[ "$_class" == "user" ]] && [[ "$_type" == "x11" || "$_type" == "wayland" ]]; then
+        graphical_user_session=1
+        break
+    fi
+done
+if (( graphical_user_session )); then
+    log_warn "графическая сессия уже открыта — менеджер входа не перезапускаю"
+    log_warn "автологин для '$user' применится со следующей загрузки"
+    exit 0
+fi
+
+for dm in gdm3 lightdm; do
+    if systemctl is-active "$dm" >/dev/null 2>&1; then
+        log_info "перезапускаю $dm, чтобы автологин применился сейчас"
+        systemctl restart "$dm" || log_warn "$dm не перезапустился"
+        break
+    fi
+done
 log_info "готово"

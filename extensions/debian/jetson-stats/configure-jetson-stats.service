@@ -43,4 +43,22 @@ SyslogIdentifier=configure-jetson-stats
 TimeoutStartSec=300
 
 [Install]
-WantedBy=multi-user.target
+# ПРИВЯЗКА К cloud-init.target, А НЕ К multi-user.target.
+#
+# С `After=cloud-final.service` привязка к multi-user даёт цикл, потому
+# что сам `cloud-final` объявлен `After=multi-user.target`:
+#
+#     multi-user.target → тянет эту службу → ждёт cloud-final
+#                       → ждёт multi-user.target
+#
+# systemd разрывает кольцо, МОЛЧА выбрасывая нашу задачу. Замер
+# 2026-09-06 на Jetson Nano: так выбросило сразу три службы.
+#
+# Это та же форма, что была с `After=jtop.service`; исправляя её,
+# я подставил её же с другой стороны, не проверив упорядочение
+# `cloud-final`. Проверка теперь записана здесь.
+#
+# `cloud-init.target` для этого и существует: он объявлен
+# `After=cloud-final.service`, то есть достигается уже после того,
+# как cloud-init закончил всё.
+WantedBy=cloud-init.target

@@ -268,6 +268,25 @@ should_reconfigure() {
         return 0
     fi
 
+    # И ЕСЛИ НОВЕЕ НАШ СОБСТВЕННЫЙ config.yaml.
+    #
+    # Он источник настроек расширения — порт, адрес, пароль, — а
+    # проверялся только `user-data` от cloud-init. Правка config.yaml
+    # не считалась изменением вовсе, и служба выходила с «No
+    # configuration changes needed», оставив прежний конфиг.
+    #
+    # Замер 2026-09-06 на Jetson Nano: манифест записи менял адрес
+    # на 0.0.0.0 через firstboot, служба запускалась следом и молча
+    # ничего не делала — сервер остался на 127.0.0.1.
+    local script_dir_cfg="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.yaml"
+    if [[ -f "$script_dir_cfg" ]]; then
+        local cfg_mtime
+        cfg_mtime=$(stat -c %Y "$script_dir_cfg" 2>/dev/null || echo "0")
+        if [[ "$cfg_mtime" -gt "$last_config_time_value" ]]; then
+            return 0
+        fi
+    fi
+
     return 1
 }
 
