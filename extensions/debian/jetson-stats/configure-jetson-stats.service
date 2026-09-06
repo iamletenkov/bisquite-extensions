@@ -3,8 +3,15 @@ Description=Configure jetson-stats (jtop) for the cloud-init user
 # Пользователя создаёт cloud-init: до него в группу вносить некого.
 # Сам скрипт всё равно ждёт его циклом — упорядочивание сокращает ожидание,
 # но не заменяет проверку.
-After=cloud-init.service
-Wants=cloud-init.service
+# ПОСЛЕ cloud-final, а не cloud-init.
+#
+# `cloud-init.service` — вторая стадия из четырёх, и пользователя на ней
+# ещё нет: его создаёт `cloud-config`, а заканчивает всё `cloud-final`.
+# Замер 2026-09-06 на Jetson Nano: службы с `After=cloud-init.service`
+# отсчитывали 40 попыток по 3 секунды и сдавались ЗА ДВЕ СЕКУНДЫ до
+# финиша `cloud-final`.
+After=cloud-final.service
+Wants=cloud-final.service
 # jtop.service поднимается сам (WantedBy=multi-user.target у upstream-юнита);
 # нам нужно лишь оказаться после него, чтобы `systemctl start` не гонялся
 # с штатным запуском.

@@ -1,0 +1,12 @@
+name: yq
+version: 1.0.0
+family: deb
+# Бинарь ставится под архитектуру гостя, но выбирается по `dpkg
+# --print-architecture` внутри него же, а не угадывается снаружи.
+arch: [amd64, arm64]
+# Только `build`: на первой загрузке ставить нечего, а нужен он там
+# уже готовым — им читают config.yaml другие расширения.
+phase: [build]
+provides: [yq]
+requires: []
+conflicts: []

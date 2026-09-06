@@ -2,6 +2,14 @@
 Description=Configure code-server after network is online
 After=network.target network-online.target
 Wants=network-online.target
+# И ПОСЛЕ cloud-final: сеть нужна для скачивания, а пользователь —
+# для настройки, и появляется он позже. `cloud-init.service` тут не
+# годится, это вторая стадия из четырёх; пользователя создаёт
+# `cloud-config`, а заканчивает всё `cloud-final`. Замер 2026-09-06:
+# служба падала с «User not found in cloud-init userdata», хотя
+# пользователь уже существовал.
+After=cloud-final.service
+Wants=cloud-final.service
 
 [Service]
 Type=oneshot

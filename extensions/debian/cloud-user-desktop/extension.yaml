@@ -1,0 +1,11 @@
+name: cloud-user-desktop
+version: 1.0.0
+family: deb
+arch: [amd64, arm64]
+# build     — ставит службу первой загрузки;
+# firstboot — переводит автологин на пользователя cloud-init и, если
+#             попросили, убирает вендорского.
+phase: [build, firstboot]
+provides: [cloud-user-desktop]
+requires: []
+conflicts: []
