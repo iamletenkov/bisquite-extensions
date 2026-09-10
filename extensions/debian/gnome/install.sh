@@ -20,8 +20,33 @@ apt-get install -y \
   task-gnome-desktop \
   gdm3 gnome-shell gnome-session \
   xorg xinput dconf-cli \
-  chromium \
   usbutils dbus-x11 || exit 1
+
+# Браузер ставится ОТДЕЛЬНО и не обязателен.
+#
+# Имя пакета различается: в Debian это `chromium`, в Ubuntu его нет вовсе
+# (замер 2026-09-10 на jammy: `E: Package 'chromium' has no installation
+# candidate`), а есть `chromium-browser` — переходник на snap. Пока браузер
+# стоял в общем списке с `|| exit 1`, установка ВСЕГО десктопа падала на
+# Ubuntu из-за одного пакета, хотя ни gdm3, ни gnome-shell от него
+# не зависят.
+#
+# Поэтому: перебираем известные имена, ставим первое доступное, и отсутствие
+# любого — предупреждение, а не отказ. Сессия GNOME поднимется и без браузера.
+browser_installed=""
+for browser in chromium chromium-browser; do
+    if apt-get install -y "$browser" >/dev/null 2>&1; then
+        browser_installed="$browser"
+        break
+    fi
+done
+
+if [[ -n "$browser_installed" ]]; then
+    log_info "Browser installed: $browser_installed"
+else
+    log_warn "No chromium package available in this distribution"
+    log_warn "GNOME session works without it; install a browser manually if needed"
+fi
 
 # Ensure Xorg configuration directory exists
 mkdir -p /etc/X11/xorg.conf.d
