@@ -41,6 +41,19 @@ RUN_COMMAND /opt/vmsetup/network-manager/install.sh
 VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
 и глубина зависит от того, насколько глубоко лежит сам VMFILE.
 
+## Манифест
+
+| Поле | Значение |
+|---|---|
+| `phase` | `[build]` — конфигурацию сети пишет cloud-init, донастраивать на первой загрузке нечего, `configure.sh` нет |
+| `provides` | `network-manager` |
+| `requires` | — |
+| `conflicts` | — |
+
+`requires` пуст намеренно: NetworkManager нужен не расширению, а тому, кто
+объявил Wi-Fi в манифесте устройства, — и это отношение живёт не в дереве
+расширений, а между образом и `bs device write`.
+
 ## Что делает
 
 **Сборка** (`install.sh`)

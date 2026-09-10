@@ -1,26 +1,50 @@
 # chromium-kiosk
 
 Пакет [chromium-kiosk](https://github.com/salamek/chromium-kiosk) из
-репозитория Salamek: полноэкранный браузер для стендов и терминалов,
-со своей графической сессией.
+репозитория Salamek: полноэкранный браузер для стендов и терминалов, со
+своей графической сессией. Расширение прописывает внешний репозиторий,
+ставит пакет и на каждой загрузке раскладывает поставляемый `config.yaml`
+в `/etc/chromium-kiosk/config.yml` — до того, как пакет запустит
+собственный наблюдатель за этим файлом.
+
+## Манифест
+
+| Поле | Значение |
+|---|---|
+| `phase` | `build`, `firstboot` |
+| `arch` | `amd64`, `arm64` — но проверен только amd64, см. «Архитектуры» |
+| `provides` | `kiosk-browser` |
+| `requires` | пусто, и это не пропуск — см. «Десктопное расширение не требуется» |
+| `conflicts` | `kiosk` |
 
 ## Что делает
 
 **Сборка** (`install.sh`)
 
-- ставит `wget`, `gnupg`, `locales`, `yq`;
+- ставит `wget`, `gnupg`, `locales`;
 - включает локаль `ru_RU.UTF-8` (`LANG=ru_RU.UTF-8`, `LC_MESSAGES=POSIX`);
-- прописывает ключ и репозиторий `repository.salamek.cz` (suite `all`);
+- кладёт ключ в `/usr/share/keyrings/salamek-archive-keyring.gpg` и
+  репозиторий `https://repository.salamek.cz/deb/pub` (suite `all`,
+  компонент `main`) в `/etc/apt/sources.list.d/salamek.cz.list`;
 - ставит пакет `chromium-kiosk`;
-- кладёт и включает `configure-chromium-kiosk.service`.
+- кладёт `configure-chromium-kiosk.service` и включает его.
 
-**Первая загрузка** (`configure.sh`)
+**Каждая загрузка** (`configure.sh`)
 
 - копирует `config.yaml` из каталога расширения в
-  `/etc/chromium-kiosk/config.yml`.
+  `/etc/chromium-kiosk/config.yml` (`install -m 0644`), создавая каталог,
+  если его нет.
 
 Юнит стоит `Before=chromium-kiosk_configwatcher.service` — конфигурация
 обязана лечь до того, как пакет запустит собственный наблюдатель за файлом.
+И это **каждая** загрузка, а не только первая: юнит `Type=oneshot` с
+`RemainAfterExit=yes` включён в `multi-user.target`, то есть
+`/etc/chromium-kiosk/config.yml` перезаписывается на каждом старте.
+
+**`yq` расширению не нужен.** Ни `install.sh`, ни `configure.sh` его не
+зовут и YAML не разбирают вовсе — `config.yaml` копируется файлом как есть.
+Порядок относительно `EXTENSION yq` здесь поэтому безразличен, в отличие от
+`code-server` и расширений, чей `configure.sh` ходит в `get_cloud_user.sh`.
 
 ## Десктопное расширение не требуется
 
@@ -30,45 +54,72 @@
 `kiosk`, которому X-сервер и дисплей-менеджер обязан дать кто-то другой.
 
 Взаимоисключающе с `kiosk`: оба автостартом на `graphical.target`
-разворачивают полноэкранный браузер на одном месте. Сборка этого **не
-проверяет** — топологической сортировки и отказа по конфликту у резолвера
-нет.
+разворачивают полноэкранный браузер на одном месте. Конфликт объявлен
+симметрично в обоих манифестах, но **сборка его не проверяет** —
+топологической сортировки и отказа по конфликту у резолвера нет.
 
-## Параметров окружения нет
+## Переменных окружения нет
 
-Расширение читает только `config.yaml`; ни одной переменной окружения
-`install.sh` не разбирает. Файл лежит в каталоге расширения, то есть
-в кеше источников, а кеш перезаписывается на каждом `bs extension sync` —
-правка на хосте держится до первой синхронизации.
+`install.sh` не разбирает ни одной переменной и не принимает аргументов:
+вся настройка живёт в `config.yaml`. Ручки в окружении тут означали бы
+второй источник правды рядом с файлом, который пакет и так читает целиком.
 
-Рабочие способы задать свою конфигурацию:
+Файл лежит в каталоге расширения, то есть в кеше источников, а кеш
+перезаписывается на каждом `bs extension sync` — правка в кеше на хосте
+держится до первой синхронизации.
+
+## Что править на живой машине и чем применять
+
+Правится **`/opt/vmsetup/chromium-kiosk/config.yaml`** в госте — это
+источник, с которого `configure.sh` копирует. Применить:
+
+```bash
+sudo systemctl restart configure-chromium-kiosk.service
+```
+
+Перезапуск только перекладывает файл в `/etc/chromium-kiosk/config.yml`;
+подхватить изменения дальше — дело самого пакета (`chromium-kiosk_configwatcher`),
+и если сессия не перечитала конфигурацию, надёжный способ один —
+перезагрузка.
+
+Править `/etc/chromium-kiosk/config.yml` напрямую бессмысленно: его
+перезапишет `configure.sh` на следующей загрузке.
+
+Способы задать свою конфигурацию заранее:
 
 - при форме `COPY_IN` — положить свой файл поверх отдельным `UPLOAD`
   после копирования каталога и до `install.sh`;
 - на устройстве — cloud-init `write_files` по пути
-  `/opt/vmsetup/chromium-kiosk/config.yaml` плюс
-  `systemctl restart configure-chromium-kiosk`;
-- либо править `/etc/chromium-kiosk/config.yml` напрямую — но его
-  перезапишет `configure.sh` на следующей загрузке.
+  `/opt/vmsetup/chromium-kiosk/config.yaml`.
 
 ## Конфигурация (`config.yaml`)
 
 Формат — самого пакета chromium-kiosk, расширение его только копирует.
-Ключи верхнего уровня в поставляемом шаблоне:
+Значения в таблице — те, что лежат в поставляемом файле:
 
-| Ключ | Что задаёт |
-| --- | --- |
-| `WINDOW_MODE` | `hidden`, `automaticvisibility`, `windowed`, `minimized`, `maximized`, `fullscreen` |
-| `HOME_PAGE` | стартовый URL |
-| `TOUCHSCREEN` | поддержка тач-ввода |
-| `IDLE_TIME` | секунды до возврата на `HOME_PAGE`; `0` — выключено |
-| `WHITE_LIST` | вложенный блок: `ENABLED`, `URLS`, `IFRAME_ENABLED` |
-| `NAV_BAR` | вложенный блок: `ENABLED`, `ENABLED_BUTTONS`, позиция, размеры |
-| `VIRTUAL_KEYBOARD` | вложенный блок: `ENABLED` |
-| `DISPLAY_ROTATION` | `normal`, `left`, `right`, `inverted` |
-| `EXTRA_ARGUMENTS` | флаги браузера строкой |
-| `ALLOWED_FEATURES` | список разрешений (камера, гео, невалидный сертификат) |
-| `CURSOR` | вложенный блок: `ENABLED` |
+| Ключ | В поставляемом файле | Что задаёт |
+| --- | --- | --- |
+| `WINDOW_MODE` | `fullscreen` | `hidden`, `automaticvisibility`, `windowed`, `minimized`, `maximized`, `fullscreen` |
+| `TOUCHSCREEN` | `true` | поддержка тач-ввода |
+| `HOME_PAGE` | `http://192.168.202.78/` | стартовый URL — **адрес чужой локальной сети, править обязательно** |
+| `IDLE_TIME` | `0` | секунды простоя до возврата на `HOME_PAGE`; `0` — выключено |
+| `WHITE_LIST` | `ENABLED: false`, `URLS: []`, `IFRAME_ENABLED: true` | белый список адресов |
+| `NAV_BAR` | `ENABLED: false`; кнопки `home`, `reload`, `back`, `forward`; `center`/`bottom`; `WIDTH: 100`, `HEIGHT: 5`, `UNDERLAY: false` | панель навигации |
+| `VIRTUAL_KEYBOARD` | `ENABLED: true` | экранная клавиатура |
+| `DISPLAY_ROTATION` | `normal` | `normal`, `left`, `right`, `inverted` |
+| `EXTRA_ARGUMENTS` | `--disable-pinch --overscroll-history-navigation=0` | флаги браузера строкой |
+| `ALLOWED_FEATURES` | только `invalid-certificate` | разрешения (камера, микрофон, гео, невалидный сертификат) |
+| `CURSOR` | `ENABLED: false` | показывать курсор |
+
+Два умолчания поставляемого файла стоит назвать вслух, потому что они
+заметны только на устройстве:
+
+- **`HOME_PAGE` указывает на `192.168.202.78`** — адрес из сети, в которой
+  файл когда-то писали. Собранный без правки образ покажет на стенде ошибку
+  загрузки, а не ваш интерфейс;
+- **`invalid-certificate` включён** — браузер принимает любой сертификат.
+  Для стенда с самоподписанным HTTPS это и нужно, но это снятая проверка,
+  а не удобство по умолчанию.
 
 `WHITE_LIST`, `NAV_BAR`, `VIRTUAL_KEYBOARD` и `CURSOR` — **блоки, а не
 скаляры**: `VIRTUAL_KEYBOARD: true` пакет не поймёт. Закомментированные
@@ -80,8 +131,8 @@
 
 Манифест объявляет `amd64` и `arm64`, но **проверен только amd64**
 (`amd64/debian12/chromium-kiosk.vmfile`, `amd64/debian12/nuc-kiosk.vmfile`
-основного репозитория). Репозиторий
-Salamek публикует suite `all`; что там есть под arm64, не замерялось.
+основного репозитория). Репозиторий Salamek публикует suite `all`; что там
+есть под arm64, не замерялось.
 
 ## Подключение в VMFILE
 
@@ -101,10 +152,19 @@ RUN_COMMAND /opt/vmsetup/chromium-kiosk/install.sh
 VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
 и глубина зависит от того, насколько глубоко лежит сам VMFILE.
 
+**Путь `/opt/vmsetup/chromium-kiosk` прибит в трёх местах** — в `install.sh`
+(откуда он берёт юнит), в `ExecStart` юнита и, как следствие, в том, где
+`configure.sh` ищет `config.yaml` рядом с собой. Обе формы подключения
+кладут каталог именно туда, так что переименование каталога расширения
+сломает фазу первой загрузки молча: `install.sh` всего лишь скажет
+`configure-chromium-kiosk.service not found` предупреждением и продолжит.
+
 ## Требования
 
 - Debian 12 / Ubuntu 22.04+ со `systemd`;
-- доступ в интернет при сборке — репозиторий и ключ внешние.
+- доступ в интернет при сборке — репозиторий и ключ внешние;
+- пакет `locales` в образе или доступный в apt: `install.sh` правит
+  `/etc/locale.gen`, и при `set -e` отсутствие файла роняет сборку.
 
 ## Диагностика
 

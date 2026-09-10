@@ -3,18 +3,53 @@
 Лёгкий рабочий стол Xfce4 с автологином через LightDM. База для расширений,
 которым нужен X-сервер и дисплей-менеджер, — `x11vnc` и `kiosk`.
 
+## Манифест
+
+| Поле | Значение |
+|---|---|
+| `phase` | `[build, firstboot]` |
+| `provides` | `x11-server`, `display-manager`, `desktop-session` |
+| `requires` | — |
+| `conflicts` | `gnome`, `lxde` |
+
+`provides` расписано по строкам `install.sh`: `xorg` и `xinput` дают
+`x11-server`, `lightdm` вместе с `systemctl set-default graphical.target` —
+`display-manager`, а `xfce4` с `xfce4-goodies` — `desktop-session`. Именно
+эти три способности ищут в `requires` расширения `x11vnc` и `kiosk`.
+
+`requires` пуст, но **это не значит, что зависимостей нет**: на первой
+загрузке `configure.sh` требует `yq` (следующий раздел). Расширение `yq`
+способность `yq` объявляет, так что `requires: [yq]` валидатор принял бы —
+в манифесте этого просто нет, и порядок сегодня держится строкой в VMFILE,
+а не объявлением. Если правите манифест, это первый кандидат на добавление.
+
+## Порядок в VMFILE: `EXTENSION yq` обязан быть выше
+
+```vmfile
+EXTENSION yq
+EXTENSION xfce4
+```
+
+`configure.sh` начинает с `command -v yq` и при его отсутствии выходит кодом
+1 — то есть **автологин не настроится вовсе**, а узнаете вы об этом на уже
+записанном устройстве. Расширение `xfce4` само `yq` **не ставит**; ставит его
+отдельное расширение `yq`, и нужен именно mikefarah/yq (пакет из apt — другой
+инструмент с другим языком запросов, разбор в его README).
+
 ## Что делает
 
 **Сборка** (`install.sh`)
 
 - ставит `xfce4`, `xfce4-goodies`, `lightdm`, `lightdm-gtk-greeter`,
-  `xorg`, `xinput`, `firefox-esr`, `usbutils`, `dbus-x11`, `yq`;
+  `xorg`, `xinput`, `firefox-esr`, `usbutils`, `dbus-x11`;
 - заводит `/etc/X11/xorg.conf.d`;
 - включает `lightdm.service`, делает `graphical.target` умолчанием;
 - кладёт и включает `configure-xfce4.service`.
 
 **Первая загрузка** (`configure.sh`)
 
+- отказывает сразу, если нет `yq`, `get_cloud_user.sh` или шаблона
+  `lightdm.conf` рядом;
 - ждёт появления пользователя cloud-init — до 120 секунд, 40 попыток по 3 с;
 - подставляет его имя в шаблон `lightdm.conf` и кладёт результат
   в `/etc/lightdm/lightdm.conf`;
@@ -23,10 +58,34 @@
 
 Юнит стоит `Before=lightdm.service display-manager.service`: конфигурация
 обязана лечь до старта дисплей-менеджера, иначе первая загрузка пройдёт
-с гритером вместо автологина.
+с гритером вместо автологина. Пользователя он ждёт **циклом**, а не
+упорядочиванием по `cloud-final.service`: запас — те самые 120 секунд,
+и в журнале нехватка видна строкой «Timeout waiting for cloud-init user».
 
 Шаблон задаёт `user-session=xfce` — этим и отличается от `lxde`, где та же
 пара скриптов пишет `user-session=LXDE`.
+
+**Каталог `/opt/vmsetup/xfce4` обязан остаться в образе.**
+`configure-xfce4.service` зовёт `configure.sh` по этому пути в рантайме,
+шаблон `lightdm.conf` и `disable_powersave.sh` скрипт ищет рядом с собой.
+Инструкция `EXTENSION` кладёт каталог именно туда; `COPY_IN` в другое место
+`install.sh` не поддерживает — он ищет юнит по абсолютному
+`/opt/vmsetup/xfce4/configure-xfce4.service` и, не найдя, **ограничивается
+предупреждением**: сборка пройдёт, а первой загрузки не будет вовсе.
+
+### Что отключает `disable_powersave.sh`
+
+Вызывается с именем пользователя и пишет в пять мест:
+
+| Куда | Что |
+|---|---|
+| `/etc/X11/Xsession.d/90-disable-dpms` | `xset s off`, `xset s noblank`, `xset -dpms` на каждую сессию |
+| `~/.config/autostart/disable-screensaver.desktop` | то же самое при входе |
+| `~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml` | гашение экрана, DPMS, действия по крышке и кнопке питания |
+| `~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-session.xml` | `LockCommand` пустой, хранитель экрана выключен |
+| `~/.config/disable-powersave-runtime.sh` + `.desktop` в автозапуске | те же значения через `xfconf-query` в уже открытой сессии |
+
+Если в образе есть `~/.xscreensaver`, в нём правится `mode: off`.
 
 ## Параметров нет
 
@@ -95,8 +154,20 @@ cat /etc/lightdm/lightdm.conf
 ## Кастомизация
 
 - тема и панель — `xfconf-query` либо файлы через cloud-init `write_files`;
-- блокировка экрана уже выключена `disable_powersave.sh`; если нужно
-  вернуть — `xfconf-query -c xfce4-screensaver -p /saver/enabled -s true`.
+- **автологин и сессия** задаются шаблоном `lightdm.conf` рядом со скриптом,
+  а не правкой `/etc/lightdm/lightdm.conf`: результат пересобирается
+  из шаблона при каждой загрузке. Менять надо
+  `/opt/vmsetup/xfce4/lightdm.conf` (тогда правка применится со следующей
+  загрузки) либо выключить `configure-xfce4.service` вовсе;
+- **гашение экрана уже выключено** `disable_powersave.sh`. Вернуть его одной
+  командой не получится: значения записаны в `xfce4-session.xml`
+  и `xfce4-power-manager.xml`, а поверх них стоят две записи автозапуска,
+  которые накатывают те же значения при каждом входе. Чтобы вернуть,
+  уберите из `~/.config/autostart/` файлы `disable-screensaver.desktop`
+  и `disable-powersave-runtime.desktop`, снимите
+  `/etc/X11/Xsession.d/90-disable-dpms` и поправьте нужные ключи
+  (`xfconf-query -c xfce4-session -p /startup/screensaver/enabled -s true`).
+  Канала `xfce4-screensaver` расширение не трогает вовсе.
 
 ## Лицензия
 

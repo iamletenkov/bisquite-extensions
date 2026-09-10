@@ -2,21 +2,57 @@
 
 Docker CE из официального apt-репозитория Docker (`download.docker.com`).
 
+## Манифест
+
+| Поле | Значение |
+|---|---|
+| `phase` | `build`, `firstboot` |
+| `arch` | `amd64`, `arm64` (`binary-armhf` в репозитории есть, но проект его не собирает) |
+| `provides` | `container-runtime` |
+| `requires` | пусто — всё, что нужно, расширение ставит само |
+| `conflicts` | пусто: бывший близнец `docker-ce` слит сюда 2026-09-03, конфликтовать не с кем |
+
 ## Что делает
 
 **Сборка** (`install.sh`)
 
-- прописывает ключ и репозиторий Docker в формате deb822;
+- опознаёт систему по `/etc/os-release` и **отказывается** работать, если
+  `ID` не `debian` и не `ubuntu`;
+- снимает конфликтующие пакеты, если они стоят: `docker.io`, `docker-cli`,
+  `docker-compose`, `docker-compose-v2`, `docker-doc`, `docker-buildx`,
+  `podman-docker`, `containerd`, `runc`;
+- прописывает ключ (`/etc/apt/keyrings/docker.asc`) и репозиторий в формате
+  deb822 (`/etc/apt/sources.list.d/docker.sources`);
+- проверяет, есть ли вообще пакет для этой цели, и предупреждает о
+  замороженных сюитах;
 - ставит ровно пять пакетов: `docker-ce`, `docker-ce-cli`, `containerd.io`,
   `docker-buildx-plugin`, `docker-compose-plugin`;
-- на Raspberry Pi добавляет `cgroup_enable=memory` в `cmdline.txt`;
-- на Jetson подключает репозиторий NVIDIA и настраивает среду выполнения.
+- на Jetson подключает репозиторий NVIDIA, ставит `nvidia-container-toolkit`
+  и зовёт `nvidia-ctk runtime configure --runtime=docker`;
+- кладёт и включает `configure-docker.service`.
 
-**Первая загрузка** (`configure.sh`)
+**Каждая загрузка** (`configure.sh`, `Type=oneshot` + `RemainAfterExit=yes`)
 
 - добавляет пользователя cloud-init в группу `docker` — при сборке имя
   пользователя ещё неизвестно;
-- на Jetson перезапускает демон, чтобы подхватилась среда выполнения NVIDIA.
+- на Raspberry Pi добавляет `cgroup_enable=memory` в
+  `/boot/firmware/cmdline.txt` (с копией `.before-docker`) — на сборке этот
+  файл недостижим, см. отдельный раздел;
+- на Jetson перезапускает демон, чтобы подхватилась среда выполнения NVIDIA
+  (`nvidia-ctk` правил `daemon.json` в chroot, где демона не было).
+
+Все три шага идемпотентны и проверяют факт перед правкой.
+
+Снятие конфликтующих пакетов — не вкусовщина: `docker.io` конфликтует
+с `docker-ce` напрямую, `docker-cli` — с `docker-ce-cli`, а
+`docker-compose-v2` добавлен в список по документации самого Docker для
+Ubuntu. Неудачное удаление остаётся предупреждением — пакет мог быть
+и не установлен по-настоящему.
+
+Все вызовы apt идут через обёртку с повторами (до пяти попыток, задержка
+растёт) и с `DEBIAN_FRONTEND=noninteractive` плюс
+`-o Dpkg::Options::=--force-confnew`: сборка не может ответить на
+интерактивный вопрос про конфиг.
 
 ## Почему один путь, а не два
 
@@ -44,13 +80,22 @@ Docker CE из официального apt-репозитория Docker (`down
 - пять имён пакетов одинаковы на всех целях, включая bionic.
 
 Ветвления есть, но они **по признакам железа** и ортогональны системе:
-`/boot/firmware/cmdline.txt` и `/etc/nv_tegra_release`. Pi 4 с Ubuntu и
-Jetson с JetPack 6 оба дают `ID=ubuntu`.
+`/etc/rpi-issue` и `/boot/firmware/cmdline.txt` для Pi, `/etc/nv_tegra_release`
+для Jetson. Pi 4 с Ubuntu и Jetson с JetPack 6 оба дают `ID=ubuntu`, так что
+ветка по `ID` промахнулась бы по обоим.
+
+Строка `Architectures: <arch>` в `docker.sources` обязательна: Raspberry Pi OS
+собирается с добавленной второй архитектурой (`dpkg --add-architecture`
+в pi-gen), и без неё apt пойдёт ещё и за индексом, которого в репозитории
+может не быть.
 
 ## Гейт вместо таблицы
 
 Перед установкой скрипт спрашивает `apt-cache policy docker-ce`. Нет
 кандидата — **громкий отказ**, без отката на дистрибутивный `docker.io`.
+Заодно это ловит опечатку в кодовом имени и молча не отработавший
+`apt-get update`; сверяться с таблицей поддерживаемых сюит нельзя —
+таблица устарела бы молча.
 
 Откат был бы тихим: VMFILE один, а на флот уехали бы образы с разными
 движками (`download.docker.com` даёт 29.7.2, `docker.io` — 26.1.5 на
@@ -68,9 +113,19 @@ dists/bionic/Release   Date: 13 Jun 2023   docker-ce 24.0.2
 dists/noble/Release    Date: 02 Sep 2026   docker-ce 29.7.2
 ```
 
-Скрипт предупреждает об этом вслух. Это потолок цели, а не выбор способа.
+Скрипт предупреждает вслух для `trusty`, `xenial`, `bionic`, `focal`,
+`stretch`, `buster`. Это потолок цели, а не выбор способа.
 
 ## Почему правка cmdline.txt в фазе первой загрузки
+
+Ядро Pi умеет memcg (`CONFIG_MEMCG=y` во всех ветках), но DTB его гасит:
+`bcm2711-rpi-ds.dtsi` и `bcm2712-rpi.dtsi` несут `cgroup_disable=memory`
+в `bootargs`. Без правки `docker run --memory` **молча** игнорируется:
+
+```
+WARNING: Your kernel does not support memory limit capabilities
+         or the cgroup is not mounted. Limitation discarded.
+```
 
 Замер на arm64 (2026-09-03): внутри `virt-customize` каталог
 `/boot/firmware` **пуст** — libguestfs не монтирует FAT-раздел, хотя в fstab
@@ -81,28 +136,94 @@ dists/noble/Release    Date: 02 Sep 2026   docker-ce 29.7.2
 файл никогда и молча уходила в ветку «не Raspberry Pi». Образ собирался
 зелёным, а `docker run --memory` на устройстве продолжал игнорироваться.
 
-На первой загрузке раздел смонтирован по fstab — там правка и делается.
+На первой загрузке раздел смонтирован по fstab — там правка и делается,
+одной строкой (загрузчик требует, чтобы всё осталось на одной строке),
+и **вступает в силу только после перезагрузки**; расширение говорит об этом.
+`cgroup_enable=` — патч Raspberry Pi, не upstream, поэтому на чужом ядре
+аргумент просто проигнорируется, а проверка наличия файла такой случай и так
+отсекает.
 
 **Первый прогон на arm64 упал не из-за расширения**, а из-за размера: корень
 raspios 8 ГБ, Docker с зависимостями туда не влез
 (`cannot copy extracted data for './usr/bin/git' … No space left on device`).
 Для сборки с Docker нужен `RESIZE` минимум до 16 ГБ.
 
+## Jetson: среда выполнения NVIDIA
+
+Берётся из джетсоновского репозитория (`repo.download.nvidia.com/jetson/common`,
+сюита `r<release>.<major revision>` из `/etc/nv_tegra_release`), а не из общего
+`nvidia.github.io`: пакеты `nvidia-container-csv-*` публикуются только там,
+а без них контейнер не увидит CUDA/cuDNN/TensorRT хоста. `nvidia-docker2`
+объявляет `Depends: docker-ce | docker-ee | docker.io`, так что установленный
+выше Docker CE её удовлетворяет.
+
+**Свой источник добавляется только если его ещё нет**, и это починка
+ломающего дефекта, а не аккуратность. Вендорские образы L4T несут репозиторий
+сами — `nvidia-l4t-apt-source.list` с тем же URI, но **без** `Signed-By`,
+ключ у них в общем `trusted.gpg.d`. Наш файл с `Signed-By` давал:
+
+```
+E: Conflicting values set for option Signed-By regarding source
+   https://repo.download.nvidia.com/jetson/common
+E: The list of sources could not be read.
+```
+
+Ломался при этом не docker — он к тому моменту уже стоял, — а **весь** список
+источников, то есть каждый следующий слой сборки. Замер 2026-09-04 на Jetson
+Nano: сборка дошла до расширения `vino-vnc` и упала там на
+`apt-get install vino`, хотя виновата была эта строка тремя слоями раньше.
+Если наш файл остался от прежней сборки, он удаляется — иначе конфликт
+переживёт починку.
+
+Неустановившийся `nvidia-container-toolkit` — предупреждение, а не отказ:
+Docker работает, GPU в контейнерах не будет.
+
 ## OpenWrt
 
 Сюда не входит: там `opkg` (24.10) или `apk` (25.12) и нет systemd, то есть
-фазы первой загрузки не существует. Вдобавок в 25.12 пакета `dockerd` нет
-вовсе для `x86_64`, `aarch64_generic`, `aarch64_cortex-a53` и
-`aarch64_cortex-a76` — проверено по шести точечным релизам.
+фазы первой загрузки не существует. `install.sh` отказывает явно, если
+`ID` не `debian`/`ubuntu`. Вдобавок в 25.12 пакета `dockerd` нет вовсе для
+`x86_64`, `aarch64_generic`, `aarch64_cortex-a53` и `aarch64_cortex-a76` —
+проверено по шести точечным релизам.
 
 ## Параметров нет
 
 Расширение не читает ни одной переменной окружения: всё, на что оно
 ветвится, оно спрашивает у самой машины — `/etc/os-release` для сюиты
 репозитория, `apt-cache policy docker-ce` для наличия пакета,
-`/boot/firmware/cmdline.txt` и `/etc/nv_tegra_release` для железа. Ручка
-здесь означала бы второй источник правды рядом с ответом, который и так
-точен.
+`/etc/rpi-issue`, `/boot/firmware/cmdline.txt` и `/etc/nv_tegra_release`
+для железа. Ручка здесь означала бы второй источник правды рядом с ответом,
+который и так точен.
+
+## Как определяется пользователь для группы `docker`
+
+`configure.sh` зовёт вендоренную копию `get_cloud_user.sh` (источник —
+`lib/get_cloud_user.sh`, копии кладёт `tools/sync-lib.sh`; руками копию не
+правят): имя берётся из userdata cloud-init, а при отсутствии `cloud-init`
+или `yq` — первая по порядку `/etc/passwd` учётка с uid 1000..65533 и
+домашним каталогом. Не определился никто — предупреждение, группа не
+назначена; отказа нет, потому что Docker от этого работать не перестаёт.
+
+`EXTENSION yq` в VMFILE раньше этого расширения не обязателен, но
+**желателен**: без `yq` имя берётся запасным путём, а он угадывает, тогда
+как userdata знает точно.
+
+**Членство в группе `docker` равносильно root на этой машине** — через сокет
+поднимается привилегированный контейнер. Расширение говорит это вслух, чтобы
+это было решением, а не случайностью.
+
+## Что править на живой машине и чем перезапускать
+
+| Надо | Править | Применять |
+|---|---|---|
+| настройки демона (среды выполнения, логи, зеркала) | `/etc/docker/daemon.json` | `sudo systemctl restart docker` |
+| ограничения памяти на Pi | `/boot/firmware/cmdline.txt` | перезагрузка |
+| ещё одного пользователя в группу | `sudo usermod -aG docker <имя>` | новый сеанс пользователя (`usermod` не меняет уже открытый) |
+
+Своего файла времени выполнения расширение не держит: повторный прогон
+`sudo systemctl restart configure-docker.service` только перепроверит группу,
+`cmdline.txt` и необходимость перезапуска демона. `daemon.json` он не
+перезаписывает — его правил `nvidia-ctk` один раз, на сборке.
 
 ## Подключение в VMFILE
 
@@ -127,7 +248,8 @@ VMFILE**; в примерах основного репозитория это `
 
 Обе формы кладут каталог в `/opt/vmsetup/docker` и запускают `install.sh`
 внутри `virt-customize`, то есть под барьером архитектуры: arm64-образ
-собирается только на arm64-хосте.
+собирается только на arm64-хосте. Путь `/opt/vmsetup/docker` прибит в
+`ExecStart` юнита первой загрузки — каталог обязан лежать именно там.
 
 **Предупреждения этого расширения по умолчанию не видны.** `virt-customize`
 не печатает вывод гостевых команд вовсе, а расширение говорит вслух и про

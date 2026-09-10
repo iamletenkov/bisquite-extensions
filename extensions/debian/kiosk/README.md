@@ -3,14 +3,36 @@
 Chromium в режиме киоска: браузер разворачивается на весь экран после входа
 пользователя, которого создаёт cloud-init.
 
+## Манифест
+
+| Поле | Значение |
+|---|---|
+| `arch` | `amd64`, `arm64` |
+| `phase` | `build` (`install.sh`), `firstboot` (`configure.sh`) |
+| `provides` | `kiosk-browser` |
+| `requires` | `x11-server`, `display-manager` |
+| `conflicts` | `chromium-kiosk` |
+
+`requires` объявлено родово — «любой X-сервер и любой дисплей-менеджер», —
+и это верно: путь к X authority больше не зашит в юните, а ищется в рантайме,
+под LightDM и под GDM он разный. **Резолвер `requires` не сверяет**, порядок
+держится строкой в VMFILE.
+
 ## Что делает
 
 **Сборка** (`install.sh`)
 
-- ставит `curl`, `wget`, `yq`, `x11-xserver-utils`, `x11-utils`, `xauth`,
-  `dbus-x11`, `chromium`, `chromium-driver`;
-- кладёт `kiosk-chromium@.service`, `run-kiosk.sh` и
-  `configure-kiosk.service`, включает последний.
+- ставит `curl`, `wget`, `x11-xserver-utils`, `x11-utils`, `xauth`,
+  `dbus-x11`, а затем `chromium` и `chromium-driver` — оба списка
+  с `|| exit 1`;
+- кладёт `kiosk-chromium@.service` и `configure-kiosk.service`
+  в `/etc/systemd/system/`, включает **только** второй (первый — шаблон,
+  его поднимает `configure.sh` по имени пользователя);
+- ставит бит исполнения на `run-kiosk.sh`; **отсутствие этого файла —
+  отказ сборки**, потому что без него шаблонный юнит не запустится вовсе.
+
+**`yq` расширение не ставит**, хотя `configure.sh` без него отказывает, —
+см. «Порядок в VMFILE».
 
 **Первая загрузка** (`configure.sh`)
 
@@ -28,6 +50,34 @@ Chromium в режиме киоска: браузер разворачивает
 - ждёт дисплей до 60 секунд, при неудаче отказывает вслух со списком
   проверенных путей;
 - запускает `chromium` с базовым набором флагов плюс `CHROMIUM_FLAGS`.
+
+## Порядок в VMFILE: `EXTENSION yq` обязан стоять выше
+
+`configure.sh` начинается с `check_prereqs`, и тот делает `exit 1`, если
+нет чего-то из четырёх: `yq` в `PATH`, `chromium` в `PATH`, исполняемого
+`get_cloud_user.sh` рядом, файла `config.yaml` рядом. `yq` расширение
+**не ставит**, и сборка об этом не говорит: образ собирается зелёным,
+а отказ приезжает на первой загрузке устройства — после записи носителя.
+
+```vmfile
+EXTENSION yq
+EXTENSION gnome
+EXTENSION kiosk
+```
+
+Нужен именно бинарь [mikefarah/yq](https://github.com/mikefarah/yq), который
+ставит `EXTENSION yq`. Имя `yq` носят **два разных инструмента** с
+несовместимыми языками запросов — в apt лежит kislyuk/yq, — и `command -v yq`
+их не различает: проверка отвечает лишь на вопрос «хоть какой-то `yq` есть».
+Чем это кончается, записано замером 2026-09-06 на Jetson Nano: три службы
+настройки упали с «не дождался пользователя cloud-init», хотя пользователь
+существовал с первых секунд. Разбор — в `../yq/README.md`.
+
+Отдельная тонкость: у `get_cloud_user.sh` есть запасной путь — образ без
+`cloud-init` или без `yq` настраивается на первую учётку с uid 1000..65533
+и домашним каталогом. Здесь до него **не доходит**: `check_prereqs`
+отказывает раньше, на самом `command -v yq`. То есть в этом расширении
+`yq` — жёсткое требование, а не предпочтение.
 
 ## Расширение НЕ ставит X-сервер
 
@@ -136,6 +186,31 @@ CHROMIUM_FLAGS: "--disable-pinch --overscroll-history-navigation=0"
 --disable-session-crashed-bubble --disable-features=TranslateUI`), а не
 заменяют его.
 
+## Что править и чем перезапускать
+
+Параметров **две копии**, и это надо держать в голове: `config.yaml` рядом
+со скриптом — источник, `/var/lib/kiosk/config` — то, что читает юнит через
+`EnvironmentFile`. Второй файл пересобирается из первого на каждой загрузке.
+
+| Что менять | Где лежит на устройстве | Чем применить |
+|---|---|---|
+| URL, дисплей, флаги Chromium — **до следующей загрузки** | `/var/lib/kiosk/config` | `systemctl restart kiosk-chromium@<user>` |
+| то же **надолго** | `/opt/vmsetup/kiosk/config.yaml` | `systemctl restart configure-kiosk` (он перепишет `/var/lib/kiosk/config` и перезапустит браузер) |
+| под каким пользователем киоск | ключ `USER` в том же `config.yaml` | `systemctl restart configure-kiosk` |
+| логика запуска браузера, ожидание X | `/opt/vmsetup/kiosk/run-kiosk.sh` | `systemctl restart kiosk-chromium@<user>` |
+
+`DISPLAY` задан **дважды**: `Environment="DISPLAY=:0"` в юните и строкой
+в `/var/lib/kiosk/config`, который тот же юнит подхватывает
+`EnvironmentFile=`. На то, кто из двух победит, полагаться не стоит —
+меняйте значение в `config.yaml`, чтобы оба совпадали. `USER` в этом файле
+справочный: какой экземпляр шаблона запущен, решает `%i` в имени юнита,
+а не содержимое файла.
+
+Старый экземпляр шаблона сам собой не гаснет. Сменили `USER` — прежний
+`kiosk-chromium@<старый>.service` остаётся включённым, и его надо погасить
+руками (`systemctl disable --now kiosk-chromium@<старый>`): `configure.sh`
+включает новый, но не выключает прежний.
+
 ## Экранная клавиатура
 
 `KEYBOARD_ENABLED: true` включает **встроенную клавиатуру GNOME** —
@@ -151,12 +226,17 @@ CHROMIUM_FLAGS: "--disable-pinch --overscroll-history-navigation=0"
 
 ## Подключение в VMFILE
 
-Десктоп идёт **первым**:
+`yq` и десктоп идут **первыми**:
 
 ```vmfile
+EXTENSION yq
 EXTENSION gnome
 EXTENSION kiosk
 ```
+
+Порядок держится только этой строкой: `requires` резолвер не сверяет,
+а отказ из-за нарушенного порядка приезжает не на сборку, а на первую
+загрузку устройства.
 
 Прежняя запись продолжает работать:
 
@@ -198,6 +278,13 @@ ls -la /home/<user>/.config/autostart  # автозапуск клавиатур
   определился. Клавиатура есть только под GNOME.
 - **Нужно больше времени на X11** — правьте цикл ожидания
   в `run-kiosk.sh` (30 попыток по 2 с).
+- **`configure-kiosk` упал сразу** — это `check_prereqs`: в журнале прямо
+  сказано, чего нет (`yq`, `chromium`, `get_cloud_user.sh`, `config.yaml`).
+  Первое — самое частое: в VMFILE не было `EXTENSION yq` выше.
+- **`Timeout waiting for cloud-init user`** — 40 попыток по 3 с прошли зря;
+  если в `config.yaml` задан `USER`, в журнале будет другая строка —
+  «пользователь … из config.yaml так и не появился», и молчаливого отката
+  на cloud-init нет намеренно.
 
 ## Лицензия
 
