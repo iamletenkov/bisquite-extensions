@@ -17,6 +17,7 @@ extensions/debian/lxde          # configure.sh:25,42 — автологин Ligh
 extensions/debian/x11vnc        # configure.sh:23,40 — под каким пользователем поднимать x11vnc@
 extensions/debian/xfce4         # configure.sh:25,42 — автологин LightDM
 
+extensions/debian/cloud-user-desktop  # configure.sh:16 — чей рабочий стол настраивать
 extensions/debian/docker         # configure.sh — пользователь cloud-init
 extensions/debian/jetson-stats  # configure.sh — кого вносить в группу jtop
 extensions/debian/vino-vnc      # configure.sh — чей dconf и чей ~/.config/autostart
