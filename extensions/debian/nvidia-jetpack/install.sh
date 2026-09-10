@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Станция прошивки NVIDIA Jetson (AGX Orin, JetPack 6.x / L4T 36.x).
 # Ставится на amd64-образ Ubuntu 22.04: пакеты инструментария L4T, NFS-сервер,
-# udev-правило против USB-autosuspend и скрипты станции в /opt/nvidia-jetpack.
+# Регистрация binfmt для aarch64, udev-правило против USB-autosuspend
+# и скрипты станции в /opt/nvidia-jetpack.
 #
 # Ничего не запускает: прошивку начинает оператор, руками, по README.
 
@@ -119,7 +120,52 @@ enable_nfs_server() {
     fi
 }
 
-# Шаг 3: udev-правило против USB-autosuspend
+# Шаг 3: регистрация binfmt для aarch64
+#
+# Пакет qemu-user-static кладёт /usr/bin/qemu-aarch64-static, но САМ ПО СЕБЕ
+# НЕ ОБЪЯВЛЯЕТ обработчик ядру. На Ubuntu регистрацию делает postinst, и
+# только если установлен binfmt-support, — а внутри virt-customize это
+# ненадёжно вдвойне: там нет работающего systemd, и результат регистрации
+# может не дожить до образа.
+#
+# Замер 2026-09-11 на собранной станции: бинарь на месте, в
+# /usr/lib/binfmt.d/ лежит только python3.10.conf, в /proc/sys/fs/binfmt_misc/
+# тоже. То есть эмулятор есть, а выполнить arm64-бинарь нельзя — и
+# 04-customize-rootfs.sh, который правит rootfs платы изнутри, отказал бы
+# на станции, где всё остальное в порядке.
+#
+# Поэтому файл кладётся явно: systemd-binfmt читает /etc/binfmt.d на каждой
+# загрузке, и регистрация не зависит ни от postinst, ни от наличия
+# update-binfmts. Флаг F открывает интерпретатор в момент регистрации —
+# без него qemu пришлось бы копировать внутрь каждого chroot.
+install_binfmt_aarch64() {
+    local conf_file="/etc/binfmt.d/qemu-aarch64.conf"
+    local emulator="/usr/bin/qemu-aarch64-static"
+
+    log_info "Registering aarch64 binfmt handler: $conf_file"
+
+    if [[ ! -x "$emulator" ]]; then
+        # Не отказ по тому же доводу, что и у nfs-server: образ собирается,
+        # а оператор узнаёт, чего не хватает. Но сказать надо громко —
+        # без эмулятора шаг 04 не сработает.
+        log_warn "No $emulator — step 04 (customize rootfs) will fail; install qemu-user-static"
+        return 0
+    fi
+
+    mkdir -p /etc/binfmt.d
+    cat > "$conf_file" <<EOF
+# NVIDIA Jetson: выполнение arm64-бинарей при кастомизации rootfs платы.
+# Магия и маска — ELF aarch64 (EM_AARCH64 = 183 = 0xb7, little-endian).
+# Регистрацию применяет systemd-binfmt на каждой загрузке.
+:qemu-aarch64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:$emulator:F
+EOF
+    chmod 644 "$conf_file"
+
+    log_info "aarch64 binfmt registered (applies on next boot)"
+    log_info "  check on the station: ls /proc/sys/fs/binfmt_misc/ | grep qemu-aarch64"
+}
+
+# Шаг 4: udev-правило против USB-autosuspend
 #
 # Правило по vendor, а не по product, намеренно: за один сеанс прошивки плата
 # трижды меняет PID — 7020 (обычный режим) -> 7023 (APX) -> 7035 (initrd), —
@@ -142,7 +188,7 @@ EOF
     log_info "udev rule installed (applies on next boot or udevadm trigger)"
 }
 
-# Шаг 4: скрипты станции
+# Шаг 5: скрипты станции
 #
 # Копируются в /opt/nvidia-jetpack и там просто лежат. Автозапуска нет
 # намеренно: прошивка необратима для платы, и начинать её должен оператор.
@@ -193,6 +239,7 @@ main() {
 
     install_packages
     enable_nfs_server
+    install_binfmt_aarch64
     install_udev_rule
     install_station_scripts
 
