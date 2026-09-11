@@ -69,11 +69,16 @@ ARCH="$(dpkg --print-architecture)"
 log_info "система $DISTRO_ID $SUITE ($ARCH) -> репозиторий linux/$REPO_OS"
 
 # --- признаки железа, а не системы ------------------------------------------
-IS_RPI=0
-[[ -f /boot/firmware/cmdline.txt || -f /etc/rpi-issue ]] && IS_RPI=1
+# Raspberry Pi опознаётся ТОЛЬКО для строки в журнале, и переменной под него
+# здесь нет намеренно: в этой фазе признак Pi ничего не решает. Единственная
+# правка под Pi — cgroup_enable=memory в cmdline.txt — живёт в configure.sh
+# (см. ниже, раздел «Raspberry Pi: memory cgroup»), потому что внутри
+# virt-customize /boot/firmware пуст. Прежняя IS_RPI обещала читателю гейт,
+# которого нет; IS_L4T, в отличие от неё, живая — по ней ниже подключается
+# репозиторий NVIDIA.
+[[ -f /boot/firmware/cmdline.txt || -f /etc/rpi-issue ]] && log_info "опознан Raspberry Pi"
 IS_L4T=0
 [[ -f /etc/nv_tegra_release ]] && IS_L4T=1
-(( IS_RPI )) && log_info "опознан Raspberry Pi"
 (( IS_L4T )) && log_info "опознан L4T (Jetson)"
 
 # --- убрать конфликтующее ----------------------------------------------------

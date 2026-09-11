@@ -5,11 +5,17 @@ family: deb
 # сюит. binary-armhf там тоже есть, но проект его не собирает.
 arch: [amd64, arm64]
 # build     — install.sh прописывает apt-репозиторий Docker и ставит пять
-#             пакетов; на Raspberry Pi правит cmdline.txt, на Jetson
-#             подключает среду выполнения NVIDIA;
+#             пакетов; на Jetson подключает среду выполнения NVIDIA;
 # firstboot — configure-docker.service добавляет пользователя cloud-init
-#             в группу docker (имя пользователя при сборке неизвестно) и,
-#             на Jetson, перезапускает демон под NVIDIA.
+#             в группу docker (имя пользователя при сборке неизвестно),
+#             на Raspberry Pi правит cmdline.txt и, на Jetson, перезапускает
+#             демон под NVIDIA.
+#
+# Правка cmdline.txt стоит в firstboot, а не в build, и это замер, а не вкус:
+# внутри virt-customize каталог /boot/firmware ПУСТ (2026-09-03, сборка
+# raspios-trixie), поэтому в фазе сборки файл не находился никогда и ветка
+# «не Raspberry Pi» выбиралась молча. Разбор — install.sh:152-160 и
+# README.md, раздел «Почему правка cmdline.txt в фазе первой загрузки».
 phase: [build, firstboot]
 provides: [container-runtime]
 requires: []
