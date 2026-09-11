@@ -14,8 +14,12 @@
 # ПЛАТА НЕ НУЖНА, и это не удача, а свойство инструмента: в отличие от шага 05,
 # jetson-disk-image-creator.sh передаёт BOARDID/BOARDSKU/FAB переменными
 # окружения и ставит BUILD_SD_IMAGE=1, поэтому flash.sh не читает EEPROM
-# модуля. Проверено по его коду (create_signed_images): для
-# jetson-agx-orin-devkit зашито boardid=3701.
+# модуля. Проверено по его коду (create_signed_images).
+#
+# Но данные модуля знать всё равно надо, и одно из них creator НЕ заполняет:
+# для jetson-agx-orin-devkit у него зашит только boardid=3701, а boardsku
+# пуст, и flash.sh отказывает с `Error: Unrecognized module SKU`. Обходится
+# патчем копии creator'а — см. BOARD_SKU и шаг 3.
 #
 # Почему не system.img из шага 05: это образ ОДНОГО раздела APP, без GPT и без
 # служебных разделов. С него нельзя загрузиться и его нельзя записать на диск
@@ -26,7 +30,30 @@ set -uo pipefail
 WORK="${WORK:-/srv/jetson}"
 LFT="$WORK/Linux_for_Tegra"
 BOARD_TARGET="${BOARD_TARGET:-jetson-agx-orin-devkit}"
+
+# Ревизия в терминах creator'а. Для AGX Orin единственное принимаемое
+# значение — `default` (список печатает его usage), и оно уезжает в
+# flash.sh как FAB=. Передашь число — creator отвергнет аргументы и
+# напечатает usage.
 BOARD_REVISION="${BOARD_REVISION:-default}"
+
+# SKU МОДУЛЯ — то, без чего flash.sh отказывает с
+#   Error: Unrecognized module SKU
+# причём SKU там ПУСТОЙ, а не неизвестный: сообщение вводит в заблуждение
+# точно так же, как на шаге 05 без платы.
+#
+# Это дефект creator'а: в его ветке `jetson-agx-orin-devkit` заполнен
+# только boardid=3701, а boardsku не заполнен вовсе — хотя у соседнего
+# orin-nano рядом стоит boardsku="0005". Обходим патчем копии, см. шаг 3.
+#
+# Замерено 2026-09-11 на AGX Orin Developer Kit: с BOARDSKU=0000 сборка
+# идёт и при FAB=default, то есть лечит дело именно SKU, а не FAB —
+# проверено раздельно, обе комбинации прогнаны.
+#
+# Откуда взять значение для другого модуля: его печатает любой прогон
+# flash.sh с подключённой платой (шаг 05) строкой
+#   Board ID(3701) version(500) sku(0000) revision(J.0)
+BOARD_SKU="${BOARD_SKU:-0000}"
 # У creator'а есть только SD и USB; ветки под NVMe нет вовсе. Выбор влияет на
 # то, какое имя устройства он впишет в root= (USB -> /dev/sda1), а мы это
 # значение всё равно заменяем на PARTUUID — см. шаг 4 ниже.
@@ -119,16 +146,63 @@ FREE_GIB=$(df -BG --output=avail "$WORK" | tail -1 | tr -dc '0-9')
 echo "свободно    : ${FREE_GIB} GB"
 
 step "3. Сборка образа диска (плата НЕ нужна)"
-echo "цель        : $BOARD_TARGET, ревизия $BOARD_REVISION, устройство $ROOTFS_DEV"
+echo "цель        : $BOARD_TARGET, ревизия $BOARD_REVISION, SKU $BOARD_SKU, устройство $ROOTFS_DEV"
 echo "выход       : $OUT_RAW"
+
+# Патчим КОПИЮ creator'а, а не оригинал: ему нужно подставить boardsku,
+# которого он для AGX Orin не заполняет (см. комментарий у BOARD_SKU).
+# Копия, а не правка на месте, потому что патченный оригинал в чужом дереве —
+# сюрприз для того, кто придёт следом; а дерево вдобавок пересоздаётся
+# распаковкой в шаге 03, и правка терялась бы молча.
+#
+# КОПИЯ ЛЕЖИТ В $LFT/tools/, и это обязательно: creator вычисляет путь
+# к дереву ОТ СВОЕГО РАСПОЛОЖЕНИЯ (он рассчитывает быть в Linux_for_Tegra/
+# tools/). Копия рядом с логами в $WORK давала
+#   ERROR: /srv/flash.sh is not found
+# — он принимал /srv за корень дерева. Замер 2026-09-11.
+#
+# Ревизия передаётся штатным ключом -r и уезжает в flash.sh как FAB=.
+# SKU штатного ключа не имеет вовсе — отсюда sed по копии.
+CREATOR_PATCHED="$LFT/tools/.jetson-disk-image-creator.patched.sh"
+cp -f "$CREATOR" "$CREATOR_PATCHED" || fail "не скопировался creator"
+# Привязка к строке с boardid именно нашей цели, а не к первой попавшейся:
+# в файле есть ветки и других плат, и подставить SKU не туда значило бы
+# собрать образ под чужой модуль.
+python3 - "$CREATOR_PATCHED" "$BOARD_TARGET" "$BOARD_SKU" <<'PATCH' || fail "патч creator'а не применился"
+import re
+import sys
+
+path, target, sku = sys.argv[1], sys.argv[2], sys.argv[3]
+src = open(path, encoding="utf-8").read()
+
+# Берём ветку case ЦЕЛИКОМ — от "<target>)" до ";;", — а не до строки
+# с boardid: иначе проверка «уже пропатчено» смотрела бы во фрагмент,
+# который заканчивается ДО вставленной строки, и всегда говорила «нет».
+branch = re.compile(r"\t\t" + re.escape(target) + r"\)\n(?:.*?)\t\t\t;;\n", re.S)
+found = branch.search(src)
+if not found:
+    sys.exit(f"не нашёл ветку {target} в case")
+if re.search(r'boardsku="[^"]*"', found.group(0)):
+    sys.exit(0)  # уже заполнен — патч не нужен
+
+anchor = re.search(r'\t\t\tboardid="[0-9]+"\n', found.group(0))
+if not anchor:
+    sys.exit(f"в ветке {target} нет строки boardid")
+at = found.start() + anchor.end()
+open(path, "w", encoding="utf-8").write(src[:at] + f'\t\t\tboardsku="{sku}"\n' + src[at:])
+PATCH
+grep -A3 "^\s*${BOARD_TARGET})\$" "$CREATOR_PATCHED" | grep -q "boardsku=\"$BOARD_SKU\"" \
+    || echo "  ПРЕДУПРЕЖДЕНИЕ: boardsku в копии не подтверждён — смотри вывод flash.sh ниже"
+echo "creator     : $CREATOR_PATCHED (копия с подставленным boardsku)"
 echo
+
 # Размер APP creator считает сам: du -ms rootfs + 10% + 100 МБ. Поэтому образ
 # выходит компактным (порядка 9-10 ГБ на нашем дереве), а не под размер
 # целевого диска — расширять APP при первой загрузке будет growpart, для чего
 # APP и лежит физически последним (служебные разделы идут ПЕРЕД ним, несмотря
 # на то, что APP в таблице GPT числится первым).
 rm -f "$OUT_RAW"
-if ! "$CREATOR" -o "$OUT_RAW" -b "$BOARD_TARGET" -r "$BOARD_REVISION" -d "$ROOTFS_DEV"; then
+if ! "$CREATOR_PATCHED" -o "$OUT_RAW" -b "$BOARD_TARGET" -r "$BOARD_REVISION" -d "$ROOTFS_DEV"; then
     fail "jetson-disk-image-creator.sh не собрал образ"
 fi
 [ -s "$OUT_RAW" ] || fail "образ $OUT_RAW пуст"
