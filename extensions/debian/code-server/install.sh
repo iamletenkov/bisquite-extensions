@@ -23,6 +23,15 @@ log_error() {
     >&2 echo -e "${RED}[ERROR]${NC} $*"
 }
 
+# Каталог расширения — от каталога СКРИПТА, а не от зашитой строки.
+#
+# `EXTENSION` копирует каталог в /opt/vmsetup/<имя>/ и запускает install.sh
+# оттуда, поэтому $SCRIPT_DIR и есть тот каталог при любой раскладке.
+# Проверки ниже спрашивают «файл приехал рядом со мной?», а не «раскладка
+# всё ещё такая?»: прибитый путь превращал смену раскладки в отказ всех
+# сборок разом.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 
 # Функция для выполнения curl с retry логикой
 # Пишет тело ответа ТОЛЬКО в stdout, логи — в stderr (без смешивания)
@@ -91,13 +100,12 @@ wget_with_retry() {
 get_version_from_config() {
     # Путь от каталога СКРИПТА, а не от cwd.
     #
-    # Инструкция `EXTENSION` запускает /opt/vmsetup/code-server/install.sh,
-    # НЕ меняя текущий каталог, поэтому относительное "config.yaml" не
-    # находилось никогда: закреплённая версия молча схлопывалась в latest,
-    # и два образа из одного VMFILE могли разойтись содержимым. Соседний
-    # configure.sh делает это правильно — через свой $SCRIPT_DIR.
-    local config_file
-    config_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.yaml"
+    # Инструкция `EXTENSION` запускает install.sh, НЕ меняя текущий каталог,
+    # поэтому относительное "config.yaml" не находилось никогда: закреплённая
+    # версия молча схлопывалась в latest, и два образа из одного VMFILE могли
+    # разойтись содержимым. Соседний configure.sh делает это правильно —
+    # через свой $SCRIPT_DIR.
+    local config_file="$SCRIPT_DIR/config.yaml"
     local version=""
 
     if [[ -f "$config_file" ]]; then
@@ -246,12 +254,30 @@ else
     fi
 fi
 
-# Установка systemd unit-файла из каталога расширения (если присутствует)
-if [[ -f "/opt/vmsetup/code-server/configure-code-server.service" ]]; then
-  install -m 0644 /opt/vmsetup/code-server/configure-code-server.service /etc/systemd/system/configure-code-server.service || true
-else
-  log_warn "configure-code-server.service not found in /opt/vmsetup/code-server/"
-fi
+# --- Донастройка на первой загрузке -----------------------------------------
+# Отсутствие любого из этих файлов — ОТКАЗ СБОРКИ, а не предупреждение.
+#
+# Раньше здесь стоял log_warn и `|| true`: сборка оставалась зелёной, юнита
+# в образе не было, и новость приходила из журнала платы без монитора —
+# самый дорогой вид отказа в этом проекте. Из двух отказов дешевле тот,
+# который читает собиравший: он у своей машины и чинит за минуту.
+# Образец — vino-vnc/install.sh.
+#
+# config.yaml в списке не за компанию: configure.sh читает его первым делом
+# (`read_config`) и без него выходит с ошибкой, то есть его отсутствие стоит
+# ровно столько же, сколько отсутствие юнита.
+for f in configure-code-server.service configure.sh get_cloud_user.sh config.yaml; do
+    if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
+        log_error "рядом нет $f — донастройка на первой загрузке не состоится,"
+        log_error "а без неё code-server не получит ни сертификата, ни юнита"
+        exit 1
+    fi
+done
+
+# Без `|| true`: файл нашёлся, а копирование провалилось — это ровно тот же
+# исход, что и ненайденный файл.
+install -m 0644 "$SCRIPT_DIR/configure-code-server.service" \
+    /etc/systemd/system/configure-code-server.service
 
 # Параметры из VMFILE перекрывают config.yaml.
 #
@@ -264,7 +290,7 @@ fi
 # Читает config.yaml не install.sh, а configure.sh на первой загрузке
 # (`read_config`, оттуда же bind-addr и auth), поэтому перезаписываем файл
 # здесь, в фазе сборки, а не подменяем механизм.
-_cs_config="/opt/vmsetup/code-server/config.yaml"
+_cs_config="$SCRIPT_DIR/config.yaml"
 if [[ -n "${CODE_SERVER_PORT:-}${CODE_SERVER_PASSWORD:-}${CODE_SERVER_USER:-}${CODE_SERVER_BIND:-}" ]]; then
   if [[ -f "$_cs_config" ]]; then
     # Значения, которых не задали, берём из существующего файла, чтобы

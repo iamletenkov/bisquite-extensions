@@ -15,21 +15,28 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Функция логирования
+# Функция логирования (всегда пишем в stderr, чтобы не засорять stdout).
+#
+# Так же, как в соседнем install.sh и во всех прочих расширениях. Здесь
+# диагностика уходила в stdout, то есть в тот же канал, в котором скрипты
+# этого репозитория возвращают ЗНАЧЕНИЯ (`get_cloud_user.sh` — имя учётки).
+# Цена расхождения не в этом файле — юнит шлёт оба канала в журнал, — а
+# в следующем: конвенция, у которой есть исключение, перестаёт быть
+# конвенцией.
 log_info() {
-    echo -e "${GREEN}[INFO]${NC} $*"
+    >&2 echo -e "${GREEN}[INFO]${NC} $*"
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $*"
+    >&2 echo -e "${YELLOW}[WARN]${NC} $*"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $*"
+    >&2 echo -e "${RED}[ERROR]${NC} $*"
 }
 
 log_debug() {
-    echo -e "${BLUE}[DEBUG]${NC} $*"
+    >&2 echo -e "${BLUE}[DEBUG]${NC} $*"
 }
 
 # Проверка наличия необходимых команд
@@ -73,7 +80,11 @@ read_config() {
     # Умолчание историческое: до появления параметра адрес был прибит
     # к 0.0.0.0, и образы, собранные раньше, обязаны вести себя как прежде.
     CODE_BIND="${CODE_BIND:-0.0.0.0}"
-    CODE_VERSION=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.VERSION // ""' "$config_file" 2>/dev/null || echo "latest")
+    # VERSION отсюда НЕ читается, и это не упущение: поле относится к фазе
+    # сборки — его берёт install.sh (`get_version_from_config`) своим
+    # способом. Прежняя CODE_VERSION вычиталась здесь и не использовалась
+    # больше нигде, то есть была мёртвой ручкой: читатель думал, что версия
+    # на что-то влияет на первой загрузке, а менять её тут уже поздно.
 }
 
 # Определение пользователя
@@ -110,12 +121,30 @@ resolve_user() {
         log_error "Username can only contain letters, numbers, dots, underscores and hyphens"
         exit 1
     fi
+
+    # ДОМАШНИЙ КАТАЛОГ СПРАШИВАЕМ У getent, А НЕ СОБИРАЕМ ИЗ "/home/<имя>".
+    #
+    # Прибитый /home стоял в пяти местах — каталог сертификатов, каталог
+    # конфига, два пути внутри самого конфига и `ExecStart --config`. Учётка
+    # с домашним каталогом в другом месте (/srv, /export/home, /var/lib/…)
+    # ломалась МОЛЧА: каталоги создавались мимо, конфиг писался мимо,
+    # а служба рапортовала успех. Тот же способ уже применён в репозитории —
+    # kiosk/run-kiosk.sh и wrt_cloudinit/wrt.cloudinit спрашивают getent.
+    CODE_HOME="$(getent passwd "$CODE_USER" | cut -d: -f6 || true)"
+    if [[ -z "$CODE_HOME" ]]; then
+        # Запасного «/home/$CODE_USER» здесь нет намеренно: подстановка
+        # догадки — это и есть чинимый дефект. Всё, что настраивает
+        # расширение, живёт в домашнем каталоге, и учётка без него
+        # настройке не поддаётся.
+        log_error "У пользователя '$CODE_USER' в /etc/passwd нет домашнего каталога"
+        exit 1
+    fi
+    log_info "Домашний каталог пользователя: $CODE_HOME"
 }
 
 # Создание SSL сертификатов
 setup_certificates() {
-    local cert_dir="/home/$CODE_USER/.local/share/code-server/certs"
-    local user_home="/home/$CODE_USER"
+    local cert_dir="$CODE_HOME/.local/share/code-server/certs"
 
     log_info "Setting up SSL certificates for user: $CODE_USER"
 
@@ -157,7 +186,7 @@ setup_certificates() {
 
 # Создание конфигурации code-server
 create_config() {
-    local config_dir="/home/$CODE_USER/.config/code-server"
+    local config_dir="$CODE_HOME/.config/code-server"
 
     log_info "Creating code-server configuration..."
 
@@ -176,16 +205,16 @@ create_config() {
 bind-addr: ${CODE_BIND}:${CODE_PORT}
 auth: password
 password: ${CODE_PASSWORD}
-cert: /home/${CODE_USER}/.local/share/code-server/certs/localhost.crt
-cert-key: /home/${CODE_USER}/.local/share/code-server/certs/localhost.key
+cert: ${CODE_HOME}/.local/share/code-server/certs/localhost.crt
+cert-key: ${CODE_HOME}/.local/share/code-server/certs/localhost.key
 EOF
         log_info "аутентификация по паролю включена"
     else
         cat > "$config_dir/config.yaml" << EOF
 bind-addr: ${CODE_BIND}:${CODE_PORT}
 auth: none
-cert: /home/${CODE_USER}/.local/share/code-server/certs/localhost.crt
-cert-key: /home/${CODE_USER}/.local/share/code-server/certs/localhost.key
+cert: ${CODE_HOME}/.local/share/code-server/certs/localhost.crt
+cert-key: ${CODE_HOME}/.local/share/code-server/certs/localhost.key
 EOF
         # Громкость по адресу, а не по одному лишь отсутствию пароля:
         # code-server без пароля на 127.0.0.1 — обычная связка для доступа
@@ -226,7 +255,7 @@ After=network.target
 Type=exec
 User=${CODE_USER}
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
-ExecStart=/usr/bin/code-server --config /home/${CODE_USER}/.config/code-server/config.yaml
+ExecStart=/usr/bin/code-server --config ${CODE_HOME}/.config/code-server/config.yaml
 Restart=on-failure
 RestartSec=5
 
@@ -250,22 +279,52 @@ should_reconfigure() {
     # Создаем директорию для хранения времени последней конфигурации
     mkdir -p /var/lib/code-server
 
-    # Если файл user-data не существует, выходим
+    # ОТСУТСТВИЕ ДАННЫХ И ГОНКА — РАЗНЫЕ СЛУЧАИ, И РАЗЛИЧАТЬ ИХ ОБЯЗАТЕЛЬНО.
+    #
+    # Раньше здесь стоял безусловный `return 1`: нет user-data.txt — значит
+    # «менять нечего». На образе БЕЗ cloud-init файл не появится никогда,
+    # поэтому служба печатала «No configuration changes needed» и не
+    # настраивала ничего — хотя get_cloud_user.sh держит fallback_user()
+    # ровно для такого образа. Вторым следствием тот ранний выход перекрывал
+    # проверку своего config.yaml, которая стоит ниже (замер 2026-09-06).
+    #
+    # Различие взято у lib/get_cloud_user.sh, где оно уже сделано по тому же
+    # признаку. `yq` здесь в признак не входит: без него check_dependencies
+    # уже завершил бы скрипт, то есть до этой строки дело не дошло бы.
     if [[ ! -f "$user_data_file" ]]; then
-        return 1
+        if command -v cloud-init >/dev/null 2>&1; then
+            # cloud-init есть, а данных пока нет — это ГОНКА, и она законна.
+            # Отказ означает «попробуй ещё раз»: взять сейчас запасную
+            # учётку значит настроить не того пользователя, раньше, чем
+            # cloud-init создаст своего.
+            return 1
+        fi
+        # cloud-init в системе нет — файл не появится никогда, и решают
+        # остальные признаки: отметка last-config-time и mtime своего
+        # config.yaml. Дальше по тексту.
     fi
-
-    # Получаем время модификации user-data
-    local user_data_mtime
-    user_data_mtime=$(stat -c %Y "$user_data_file" 2>/dev/null || echo "0")
 
     # Получаем время последней конфигурации
     local last_config_time_value
     last_config_time_value=$(cat "$last_config_time" 2>/dev/null || echo "0")
 
-    # Если user-data новее последней конфигурации, нужно переконфигурировать
-    if [[ "$user_data_mtime" -gt "$last_config_time_value" ]]; then
+    # НИ РАЗУ НЕ НАСТРАИВАЛИ — НАСТРОИТЬ ХОТЯ БЫ РАЗ.
+    #
+    # Без этого случая первая настройка на образе без cloud-init висела бы
+    # на mtime config.yaml — то есть на файле, который расширение вправе
+    # удалить (у x11vnc он удалён целиком). Зависимость от того, чего может
+    # не быть, здесь означала бы «не настроено никогда».
+    if [[ ! -f "$last_config_time" ]]; then
         return 0
+    fi
+
+    # Если user-data новее последней конфигурации, нужно переконфигурировать
+    if [[ -f "$user_data_file" ]]; then
+        local user_data_mtime
+        user_data_mtime=$(stat -c %Y "$user_data_file" 2>/dev/null || echo "0")
+        if [[ "$user_data_mtime" -gt "$last_config_time_value" ]]; then
+            return 0
+        fi
     fi
 
     # И ЕСЛИ НОВЕЕ НАШ СОБСТВЕННЫЙ config.yaml.
