@@ -12,6 +12,8 @@ log_info(){ >&2 echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn(){ >&2 echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error(){ >&2 echo -e "${RED}[ERROR]${NC} $*"; }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 
 # Параметры приходят из VMFILE переменными окружения, потому что RUN_COMMAND
 # отдаёт строку шеллу гостя целиком:
@@ -38,27 +40,42 @@ apt-get install -y \
   xauth \
   x11-utils || exit 1
 
-# Install systemd unit template from extension directory if present
-if [[ -f "/opt/vmsetup/x11vnc/x11vnc@.service" ]]; then
-  install -m 0644 /opt/vmsetup/x11vnc/x11vnc@.service /etc/systemd/system/x11vnc@.service || true
-else
-  log_warn "x11vnc@.service not found in /opt/vmsetup/x11vnc/"
-fi
+# --- Файлы, без которых первой загрузки не будет -----------------------------
+#
+# Отсутствие любого из них — ОТКАЗ СБОРКИ, а не предупреждение. Раньше юниты
+# «не нашлись» тихо (log_warn плюс `|| true`), сборка оставалась зелёной,
+# а юнита в образе не было — и узнавал об этом тот, кто включил плату без
+# монитора. Из двух отказов дешевле тот, который читает собиравший: он
+# чинит за минуту на своей машине. То же направление у всей остальной
+# инфраструктуры bisquite — fail-closed у детектора устройств, preflight
+# утилит до `dd`. Образец — vino-vnc/install.sh.
+#
+# Ищем рядом с собой ($SCRIPT_DIR), а не по зашитому /opt/vmsetup/x11vnc/:
+# проверка обязана отвечать на вопрос «файл приехал рядом со мной?», а не
+# «раскладка EXTENSION всё ещё такая?». Скрипт запускается из того самого
+# каталога, куда его скопировали, поэтому $SCRIPT_DIR верен при любой
+# раскладке, и её смена не уронит все сборки разом. (Юниты ссылаются на
+# /opt/vmsetup абсолютным путём и после смены раскладки правятся вместе
+# с ней — но это правка одного файла, а не отказ конвейера.)
+for f in x11vnc@.service configure-x11vnc.service run-x11vnc.sh \
+         configure.sh get_cloud_user.sh; do
+  if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
+    log_error "рядом нет $f — донастройка на первой загрузке не состоится,"
+    log_error "а без неё x11vnc не запустится ни при каком параметре"
+    exit 1
+  fi
+done
 
-# Install configure script systemd unit if present
-if [[ -f "/opt/vmsetup/x11vnc/configure-x11vnc.service" ]]; then
-  install -m 0644 /opt/vmsetup/x11vnc/configure-x11vnc.service /etc/systemd/system/configure-x11vnc.service || true
-else
-  log_warn "configure-x11vnc.service not found in /opt/vmsetup/x11vnc/"
-fi
+# Без `|| true`: файл нашёлся, а копирование провалилось — исход ровно тот же,
+# что и у ненайденного файла, значит и отказ тот же.
+install -m 0644 "$SCRIPT_DIR/x11vnc@.service" /etc/systemd/system/x11vnc@.service
+install -m 0644 "$SCRIPT_DIR/configure-x11vnc.service" \
+  /etc/systemd/system/configure-x11vnc.service
 
-# Обёртка, которая ищет X authority в рантайме
-if [[ -f "/opt/vmsetup/x11vnc/run-x11vnc.sh" ]]; then
-  chmod +x /opt/vmsetup/x11vnc/run-x11vnc.sh || true
-else
-  log_error "run-x11vnc.sh не найден рядом — юнит не запустится"
-  exit 1
-fi
+# Обёртка, которая ищет X authority в рантайме. Юнит зовёт её через
+# `/bin/bash`, то есть бит исполнения ему не нужен; он нужен человеку,
+# который запустит обёртку руками при диагностике (README учит этому).
+chmod +x "$SCRIPT_DIR/run-x11vnc.sh"
 
 # Параметры в EnvironmentFile, который читает юнит.
 install -d -m 0755 /etc/default
@@ -70,13 +87,36 @@ install -d -m 0755 /etc/default
 
 if [[ -n "$X11VNC_PASSWORD" ]]; then
   # Файл пароля VNC, а не открытый пароль в окружении: у -rfbauth формат свой.
+  #
+  # Каталог остаётся 0755: пользователю, под которым работает сервер, нужно
+  # пройти сквозь него к файлу. Секрет закрывают права файла, а не каталога.
   install -d -m 0755 /etc/x11vnc
   if x11vnc -storepasswd "$X11VNC_PASSWORD" /etc/x11vnc/passwd >/dev/null 2>&1; then
-    chmod 0644 /etc/x11vnc/passwd
+    # 0600, а не 0644. Формат `-rfbauth` — НЕ хеш: пароль в нём зашифрован
+    # обратимо (DES с фиксированным ключом), поэтому файл, читаемый всеми,
+    # отдаёт сам пароль любой локальной учётной записи. И отдаёт его ровно
+    # тогда, когда пароль задали, — то есть когда сервер выставлен в сеть.
+    # Соседний vino-vnc кладёт свой файл 0600 по тому же доводу
+    # (vino-vnc/install.sh, раздел про vnc-password).
+    #
+    # ВЛАДЕЛЬЦА файл получает не здесь, а на первой загрузке. Сервер работает
+    # юнитом `x11vnc@<пользователь>` с `User=%i`, то есть пароль читает НЕ
+    # root, а учётка, которой на сборке ещё не существует (её создаёт
+    # cloud-init). `chown` на найденного пользователя делает configure.sh.
+    # Без этой пары ужесточение прав ОТКРЫЛО БЫ рабочий стол вместо того,
+    # чтобы его закрыть: обёртка проверяет файл на читаемость и при отказе
+    # прежде поднимала сервер с `-nopw`.
+    chmod 0600 /etc/x11vnc/passwd
     echo "X11VNC_PASSFILE=/etc/x11vnc/passwd" >> /etc/default/bisquite-x11vnc
     log_info "пароль записан в /etc/x11vnc/passwd"
   else
-    log_warn "не удалось записать файл пароля — сервер поднимется без него"
+    # Отказ, а не предупреждение: пароль просили, пароля не будет, а сервер
+    # без `X11VNC_PASSFILE` поднимается с `-nopw`. Собранный образ выглядел
+    # бы защищённым, а рабочий стол был бы открыт — узнать об этом можно
+    # только на устройстве.
+    log_error "не удалось записать файл пароля /etc/x11vnc/passwd"
+    log_error "пароль задан, значит сервер без него поднимать нельзя"
+    exit 1
   fi
 fi
 chmod 0644 /etc/default/bisquite-x11vnc

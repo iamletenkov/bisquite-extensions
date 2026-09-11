@@ -158,7 +158,22 @@ else
     [[ -z "$PASSFILE" ]] && log_warn "и БЕЗ ПАРОЛЯ — кто угодно в сети получит рабочий стол"
 fi
 
-if [[ -n "$PASSFILE" && -r "$PASSFILE" ]]; then
+if [[ -n "$PASSFILE" ]]; then
+    # Файл пароля объявлен, но не читается — ОТКАЗ, а не `-nopw`.
+    #
+    # Файл лежит 0600 и принадлежит пользователю, которому его передаёт
+    # configure.sh на первой загрузке (см. его hand_over_passfile). Если
+    # чтение не удалось, значит передача не состоялась, и молчаливый откат
+    # на `-nopw` поднял бы рабочий стол БЕЗ пароля там, где пароль задали
+    # явно, — при `X11VNC_LISTEN=all` это открытая сессия в сети. Цикл
+    # рестарта со строкой в журнале виден хотя бы через `systemctl status`,
+    # открытый рабочий стол не виден никак.
+    if [[ ! -r "$PASSFILE" ]]; then
+        log_error "файл пароля $PASSFILE не читается пользователем '$USERNAME'"
+        log_error "сервер без пароля не поднимаю: пароль задан X11VNC_PASSWORD"
+        log_error "починить: chown $USERNAME $PASSFILE && chmod 0600 $PASSFILE"
+        exit 1
+    fi
     args+=(-rfbauth "$PASSFILE")
     log_info "пароль из $PASSFILE"
 else
