@@ -26,7 +26,12 @@ CAMERA_DST="$ROOTFS/opt/sensing"
 # версий JetPack, собранные Image и DTB и история git. Внутрь образа едет
 # только одна папка — иначе system.img распухает на гигабайты, а на плате
 # невозможно понять, какая из версий драйверов настоящая.
-CAMERA_PKG_REL="${CAMERA_PKG_REL:-Jetson AGX Orin Devkit/SG8A-AGON-G2Y-A1/JetPack6.2/SG8A_AGON_G2Y_A1_AGX_Orin_YUV_JP6.2_L4TR36.4.3}"
+#
+# Умолчание обязано совпадать с 02-fetch-camera-drivers.sh: там же записано,
+# почему пакет _GMSL2x8_, а не _YUV_ (с YUV камера SG2-AR0233C-5200-G2A
+# не работает — sensor_probe detect error на всех восьми портах). Разойдутся
+# умолчания — 02 скачает один пакет, а на плату уедет другой.
+CAMERA_PKG_REL="${CAMERA_PKG_REL:-Jetson AGX Orin Devkit/SG8A-AGON-G2Y-A1/JetPack6.2/SG8A_AGON_G2Y_A1_AGX_Orin_GMSL2x8_JP6.2_L4TR36.4.3}"
 
 # Пакеты для работы с камерами: v4l-utils даёт v4l2-ctl (перечислить сенсоры,
 # выставить формат), gstreamer — конвейер для проверки картинки, v4l2loopback
@@ -34,6 +39,18 @@ CAMERA_PKG_REL="${CAMERA_PKG_REL:-Jetson AGX Orin Devkit/SG8A-AGON-G2Y-A1/JetPac
 CAMERA_PACKAGES="v4l-utils gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad v4l2loopback-utils"
 
 step() { echo; echo "=== $* ==="; }
+
+# Стоит ли пакет в ЦЕЛЕВОМ дереве. Спрашиваем базу dpkg нативно, через
+# --admindir, а не через `chroot dpkg-query`: ответ нужен и тогда, когда
+# эмуляция aarch64 не работает, — именно в этом случае важнее всего честно
+# сказать, что в образе нет ничего. Формат базы тот же: rootfs L4T 36.x —
+# это jammy, как и сама станция. Любой сбой опроса читается как
+# «не установлен», то есть в сторону лишней работы, а не тихого пропуска.
+pkg_installed() {
+    [ -d "$ROOTFS/var/lib/dpkg" ] || return 1
+    dpkg-query --admindir="$ROOTFS/var/lib/dpkg" -W -f='${Status}' "$1" 2>/dev/null \
+        | grep -q 'install ok installed'
+}
 
 usage() {
     cat <<'USAGE'
@@ -51,6 +68,11 @@ usage() {
 Переменные окружения:
   WORK        рабочий каталог станции (умолчание /srv/jetson)
   CAMERA_SRC  распакованные драйверы камер (умолчание $WORK/camera-drivers)
+  CAMERA_PKG_REL
+              путь к пакету драйверов внутри клона Sensing. Умолчание —
+              пакет GMSL2x8 под SG8A-AGON-G2Y-A1 и JetPack 6.2; менять его
+              нужно при смене камер, и тем же значением в 02-fetch-camera-
+              drivers.sh
 USAGE
 }
 
@@ -131,29 +153,136 @@ else
 fi
 
 # Проверяем результат по факту, а не по имени файла-маркера: имена юнитов
-# oem-config между выпусками L4T менялись, а вопрос всегда один — остались ли
-# в автозапуске юниты первичной настройки.
-OEM_LEFT=$(find "$ROOTFS/etc/systemd/system" -name '*oem-config*' 2>/dev/null | head -5)
+# oem-config между выпусками L4T менялись, а вопрос всегда один — взведён ли
+# мастер первичной настройки.
+#
+# Факт — это ОДИН симлинк: /etc/systemd/system/default.target ->
+# nv-oem-config.target, он перекрывает штатный
+# /lib/systemd/system/default.target -> graphical.target. Именно его снимает
+# tools/l4t_create_default_user.sh («remove default.target symlink to bypass
+# oem config setup»). А сами юниты nv-oem-config.* лежат в rootfs ВСЕГДА,
+# поэтому прежний поиск по имени (`find -name '*oem-config*'`) давал ложную
+# тревогу на каждом прогоне: файлы есть, а мастер не взведён — проверено
+# 2026-09-11 на прошитой плате (default.target отсутствует,
+# `systemctl get-default` = graphical.target, nv-oem-config.service inactive).
+OEM_LEFT=""
+OEM_DEFAULT_TARGET="$ROOTFS/etc/systemd/system/default.target"
+if [ -L "$OEM_DEFAULT_TARGET" ]; then
+    # readlink БЕЗ -f: цель симлинка абсолютна внутри дерева платы
+    # (/lib/systemd/system/nv-oem-config.target), и -f разрешал бы её
+    # по корню СТАНЦИИ, то есть смотрел бы не туда.
+    OEM_TARGET_LINK="$(readlink "$OEM_DEFAULT_TARGET")"
+    case "$(basename "$OEM_TARGET_LINK")" in
+        *oem-config*) OEM_LEFT="default.target -> $OEM_TARGET_LINK" ;;
+    esac
+elif [ -e "$OEM_DEFAULT_TARGET" ]; then
+    # Не симлинк, а подложенный файл юнита — такое же переопределение
+    # штатного default.target, поэтому смотрим в содержимое.
+    if grep -q 'oem-config' "$OEM_DEFAULT_TARGET" 2>/dev/null; then
+        OEM_LEFT="default.target (файл юнита, ссылается на oem-config)"
+    fi
+fi
+
 if [ -n "$OEM_LEFT" ]; then
-    echo "ПРЕДУПРЕЖДЕНИЕ: в автозапуске остались юниты первичной настройки:"
-    echo "$OEM_LEFT" | sed "s|$ROOTFS||;s|^|  |"
-    echo "Первая загрузка может снова потребовать монитор и клавиатуру."
+    echo "ПРЕДУПРЕЖДЕНИЕ: мастер первичной настройки взведён — $OEM_LEFT"
+    echo "Первая загрузка потребует монитор и клавиатуру."
+    echo "Поправить: rm -f $OEM_DEFAULT_TARGET"
+elif [ -e "$OEM_DEFAULT_TARGET" ] || [ -L "$OEM_DEFAULT_TARGET" ]; then
+    echo "oem-config не взведён: default.target ведёт не на него" \
+         "($(readlink "$OEM_DEFAULT_TARGET" 2>/dev/null || echo 'файл юнита'))"
 else
-    echo "oem-config отключён: юнитов *oem-config* в /etc/systemd/system нет"
+    echo "oem-config не взведён: /etc/systemd/system/default.target нет,"
+    echo "  значит действует штатный /lib/systemd/system/default.target -> graphical.target"
 fi
 
 # --------------------------------------------------------------------------
 step "2. Пакеты для камер внутрь rootfs (эмуляция aarch64)"
-# Шаг НЕОБЯЗАТЕЛЬНЫЙ по последствиям: те же пакеты ставятся и на плате,
-# apt там работает. Поэтому отсутствие binfmt — предупреждение и пропуск,
-# а не останов: ронять подготовку прошивки из-за необязательного удобства
-# значило бы менять цену отказа местами.
+# Две правки дерева, которые нужны ВСЕГДА, а не только когда работает
+# эмуляция: каждая ломает apt и внутри chroot, и потом на самой плате.
+
+# (а) /dev/null. В распакованном sample rootfs это обычный пустой файл
+# с правами 644, а не символьное устройство. apt-key работает от
+# непривилегированного пользователя _apt, пишет в /dev/null и получает
+# Permission denied, а наружу это выходит ЛОЖНЫМ сообщением
+# «E: gpgv, gpgv2 or gpgv1 required for verification, but neither seems
+# installed» — при том, что /usr/bin/gpgv в дереве есть. Подписи в итоге
+# не проверяются, apt-get update падает (замер 2026-09-11).
+#
+# Узел остаётся в дереве, в конце шага он НЕ снимается — в отличие от
+# /dev/random и /dev/urandom ниже. Довод: random/urandom создаёт
+# эмулированный apt, в исходном дереве их не было, и они ломают упаковку
+# в system.img; /dev/null же есть в любом нормальном rootfs, на загруженной
+# плате он всё равно перекрыт devtmpfs, а снять его значило бы вернуть
+# в дерево тот самый битый файл-заглушку — и следующий chroot (повторный
+# прогон 04, ручная правка оператором) наступил бы на то же место.
+mkdir -p "$ROOTFS/dev"
+if [ -c "$ROOTFS/dev/null" ]; then
+    echo "/dev/null в rootfs: символьное устройство — как надо"
+else
+    rm -f "$ROOTFS/dev/null"
+    if mknod -m 666 "$ROOTFS/dev/null" c 1 3; then
+        echo "/dev/null в rootfs: создан узел c 1 3 (был обычный файл — из-за него apt-key ломал проверку подписей)"
+    else
+        # Узел не создался (root есть — значит дело в файловой системе дерева).
+        # Возвращаем пустой файл: дерево остаётся ровно таким, каким было,
+        # и в chroot «>/dev/null» хотя бы не отказывает с «нет такого файла».
+        : > "$ROOTFS/dev/null" 2>/dev/null || true
+        chmod 666 "$ROOTFS/dev/null" 2>/dev/null || true
+        echo "ПРЕДУПРЕЖДЕНИЕ: не удалось создать узел $ROOTFS/dev/null —"
+        echo "  apt в chroot будет ложно жаловаться на отсутствие gpgv"
+    fi
+fi
+
+# (б) <SOC> в источнике apt NVIDIA. В
+# /etc/apt/sources.list.d/nvidia-l4t-apt-source.list лежит буквальный шаблон
+# «jetson/<SOC>»: подстановку делает postinst пакета nvidia-l4t-apt-source,
+# а под qemu он до неё не доходит. Итог — apt возвращает 100 («does not have
+# a Release file»), а так как ниже стоит «apt-get update && apt-get install»,
+# установка не запускается ВООБЩЕ и пакеты камер молча не попадают в образ
+# (замер 2026-09-11).
+#
+# Значение берём из самого postinst, а не хардкодим: t234 — это Tegra234,
+# то есть именно Orin, а расширение называется nvidia-jetpack, и на другой
+# плате (Xavier — t194, TX2 — t186) верным было бы другое. postinst лежит
+# в этом же дереве и является тем самым кодом NVIDIA, который должен был
+# отработать, — поэтому он и есть источник истины. Фолбэк t234 стоит потому,
+# что вся цепочка станции (01-03 и CAMERA_PKG_REL) прибита к AGX Orin
+# на JetPack 6.2.
+NV_APT_LIST="$ROOTFS/etc/apt/sources.list.d/nvidia-l4t-apt-source.list"
+if [ -f "$NV_APT_LIST" ] && grep -q '<SOC>' "$NV_APT_LIST"; then
+    NV_POSTINST="$ROOTFS/var/lib/dpkg/info/nvidia-l4t-apt-source.postinst"
+    NV_SOC=""
+    if [ -f "$NV_POSTINST" ]; then
+        NV_SOC=$(sed -n 's|.*s/<SOC>/\([a-z0-9][a-z0-9]*\)/g.*|\1|p' "$NV_POSTINST" | head -1)
+    fi
+    if [ -n "$NV_SOC" ]; then
+        echo "источник apt NVIDIA: SOC взят из postinst пакета — $NV_SOC"
+    else
+        NV_SOC="t234"
+        echo "ПРЕДУПРЕЖДЕНИЕ: подстановку <SOC> в postinst не нашёл — беру $NV_SOC (Tegra234, AGX Orin)"
+    fi
+    sed -i "s/<SOC>/$NV_SOC/g" "$NV_APT_LIST"
+    sed -n '/^deb /p' "$NV_APT_LIST" | sed 's|^|  |'
+elif [ -f "$NV_APT_LIST" ]; then
+    echo "источник apt NVIDIA: <SOC> уже подставлен"
+fi
+
+# Установка пакетов — шаг НЕОБЯЗАТЕЛЬНЫЙ по последствиям: те же пакеты
+# ставятся и на плате, apt там работает. Поэтому отсутствие binfmt —
+# предупреждение и пропуск, а не останов: ронять подготовку прошивки
+# из-за необязательного удобства значило бы менять цену отказа местами.
 SKIP_PKGS=0
 if [ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
     echo "ПРЕДУПРЕЖДЕНИЕ: binfmt для aarch64 не зарегистрирован"
     echo "  (/proc/sys/fs/binfmt_misc/qemu-aarch64 отсутствует)"
-    echo "  Поправить: apt-get install -y qemu-user-static binfmt-support"
-    echo "  и systemctl restart systemd-binfmt"
+    # binfmt-support здесь НЕ советуем намеренно: именно его конфликт
+    # с systemd-binfmt стоял первым в списке отказов 2026-09-09
+    # («chroot: failed to run command 'dpkg': Exec format error»).
+    # Регистрацию на станцию кладёт install.sh расширения —
+    # /etc/binfmt.d/qemu-aarch64.conf, его применяет systemd-binfmt.
+    echo "  Поправить на станции:"
+    echo "    ls /etc/binfmt.d/qemu-aarch64.conf   # должен быть от расширения"
+    echo "    systemctl restart systemd-binfmt"
     SKIP_PKGS=1
 elif [ ! -x "$ROOTFS/usr/bin/qemu-aarch64-static" ]; then
     # apply_binaries кладёт интерпретатор внутрь дерева сам; если его там нет,
@@ -203,7 +332,7 @@ if [ "$SKIP_PKGS" -eq 0 ]; then
     # ни платить получасом эмулированного apt за ничего.
     missing=""
     for p in $CAMERA_PACKAGES; do
-        if chroot "$ROOTFS" dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'install ok installed'; then
+        if pkg_installed "$p"; then
             printf '  %-32s уже стоит\n' "$p"
         else
             printf '  %-32s нужен\n' "$p"
@@ -292,12 +421,25 @@ else
         echo "пакет опознан поиском: ${CAMERA_PKG#"$CAMERA_SRC"/}"
     else
         # Молча выбрать один из нескольких — значит увезти на плату
-        # драйверы не под ту версию JetPack и узнать об этом уже на столе.
+        # драйверы не под ту камеру и узнать об этом уже на столе.
+        # Фильтр по версии L4T однозначности НЕ даёт: под одну плату и одну
+        # версию JetPack у Sensing лежат четыре пакета (YUV, GMSL2x8,
+        # AR2020MX4_VB1940X4, SDV11NM1x2_SHW3Gx4), и все четыре содержат
+        # L4TR36.4.3. Поэтому он только сужает список, а выбирает оператор:
+        # взять «последний подошедший» значило бы с равной вероятностью
+        # увезти неработающий YUV.
+        L4T_MATCH=()
         for d in "${FOUND[@]}"; do
-            case "$d" in *L4TR36.4.3*) CAMERA_PKG="$d" ;; esac
+            case "$d" in *L4TR36.4.3*) L4T_MATCH+=("$d") ;; esac
         done
-        if [ -n "$CAMERA_PKG" ]; then
-            echo "кандидатов несколько, выбран по L4TR36.4.3: ${CAMERA_PKG#"$CAMERA_SRC"/}"
+        if [ "${#L4T_MATCH[@]}" -eq 1 ]; then
+            CAMERA_PKG="${L4T_MATCH[0]}"
+            echo "кандидатов несколько, единственный под L4T 36.4.3: ${CAMERA_PKG#"$CAMERA_SRC"/}"
+        elif [ "${#L4T_MATCH[@]}" -gt 1 ]; then
+            echo "ПРЕДУПРЕЖДЕНИЕ: под L4T 36.4.3 подходит несколько пакетов —"
+            echo "  они отличаются набором камер, и выбрать за оператора нельзя:"
+            printf '    %s\n' "${L4T_MATCH[@]#"$CAMERA_SRC"/}"
+            echo "  Укажи нужный явно: CAMERA_PKG_REL='...' $0 -u ... -p ..."
         else
             echo "ПРЕДУПРЕЖДЕНИЕ: кандидатов несколько, ни один не про L4T 36.4.3:"
             printf '    %s\n' "${FOUND[@]#"$CAMERA_SRC"/}"
@@ -338,10 +480,29 @@ if [ -n "$OEM_LEFT" ]; then
 else
     echo "oem-config:        отключён — первая загрузка идёт сразу в систему"
 fi
-if [ "$SKIP_PKGS" -eq 0 ]; then
-    echo "пакеты камер:      в rootfs ($CAMERA_PACKAGES)"
+# Печатаем ФАКТ, а не содержимое CAMERA_PACKAGES: до 2026-09-11 здесь стояла
+# сама переменная, и при провале apt табличка показывала пакеты как
+# установленные. На живой прошивке это стоило разбора уже у платы.
+CAM_HAVE=""
+CAM_MISSING=""
+for p in $CAMERA_PACKAGES; do
+    if pkg_installed "$p"; then
+        CAM_HAVE="$CAM_HAVE $p"
+    else
+        CAM_MISSING="$CAM_MISSING $p"
+    fi
+done
+if [ -n "$CAM_HAVE" ]; then
+    echo "пакеты камер, есть:$CAM_HAVE"
 else
-    echo "пакеты камер:      ПРОПУЩЕНЫ — доставить на плате"
+    echo "пакеты камер, есть: НИ ОДНОГО"
+fi
+if [ -n "$CAM_MISSING" ]; then
+    echo "пакеты камер, НЕТ:$CAM_MISSING"
+    if [ "$SKIP_PKGS" -ne 0 ]; then
+        echo "  (шаг установки пропущен — см. предупреждение выше)"
+    fi
+    echo "  доставить на плате: sudo apt-get install -y$CAM_MISSING"
 fi
 if [ -d "$CAMERA_DST" ]; then
     echo "/opt/sensing:      $(find "$CAMERA_DST" -type f | wc -l) файлов, $(du -sh "$CAMERA_DST" | cut -f1)"

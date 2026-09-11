@@ -291,7 +291,10 @@ if [ "$RC" -eq 0 ]; then
         lsblk                       # / должен быть на nvme0n1p1, НЕ на mmcblk0p1
   3. Пользователь и пароль — те, что заданы в 04-customize-rootfs.sh;
      мастера первичной настройки быть не должно.
-  4. Драйверы камер лежат в /opt/sensing (quick_bring_up.sh).
+  4. Драйверы камер лежат в /opt/sensing, но НЕ установлены: ставит их
+     ./install.sh, затем нужен DTB-оверлей и перезагрузка, и только
+     потом ./quick_bring_up.sh. Порядок и диагностика —
+     в разделе «Камеры» файла /opt/nvidia-jetpack/README.md.
 OK
 else
     cat <<'FAIL'

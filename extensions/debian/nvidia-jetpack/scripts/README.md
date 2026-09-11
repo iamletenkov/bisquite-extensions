@@ -33,16 +33,29 @@
 | `MIN_FREE_GIB` | `40` в `05`, `15` в `06` | `05`, `06` | порог свободного места, ниже которого шаг отказывает |
 | `BOARD_TARGET` | `jetson-agx-orin-devkit` | `05`, `06` | цель L4T, последний аргумент `l4t_initrd_flash.sh` |
 | `CAMERA_SRC` | `$WORK/camera-drivers` | `04` | где лежит клон репозитория Sensing |
-| `CAMERA_PKG_REL` | `Jetson AGX Orin Devkit/SG8A-AGON-G2Y-A1/JetPack6.2/SG8A_AGON_G2Y_A1_AGX_Orin_YUV_JP6.2_L4TR36.4.3` | `04` | путь к пакету драйверов внутри клона |
+| `CAMERA_PKG_REL` | `Jetson AGX Orin Devkit/SG8A-AGON-G2Y-A1/JetPack6.2/SG8A_AGON_G2Y_A1_AGX_Orin_GMSL2x8_JP6.2_L4TR36.4.3` | `02`, `04` | путь к пакету драйверов внутри клона |
 
 `APP_SIZE` и `BOARD_TARGET` обязаны совпадать у `05` и `06`: заливка ищет
 файлы, собранные с теми же параметрами. Под `sudo` переменные передаются
 ключом `-E` — `APP_SIZE=200GiB sudo -E ./05-generate-images.sh`.
 
+`CAMERA_PKG_REL` читают **оба** шага, и умолчание у них одно: `02` по нему
+проверяет клон, `04` кладёт этот каталог в `/opt/sensing` образа. Задавать
+надо обоим — иначе скачан будет один пакет, а на плату уедет другой.
+
+Под нашу плату и JetPack 6.2 у Sensing лежат **четыре** пакета, и различаются
+они не версией L4T, а набором камер: `_YUV_`, `_GMSL2x8_`,
+`_AR2020MX4_VB1940X4_`, `_SDV11NM1x2_SHW3Gx4_`. С камерами
+`SG2-AR0233C-5200-G2A` работает **`_GMSL2x8_`** — это умолчание. Раньше здесь
+был зашит `_YUV_`: с ним `sensor_probe camera sgx-yuv-gmsl2-N detect error`
+на всех восьми портах, `/dev/video*` появляются, но поток пустой. Подробный
+разбор различий — в шапке `02-fetch-camera-drivers.sh`.
+
 Если `CAMERA_PKG_REL` не найден, `04` ищет пакет по признаку — каталогу
-с `quick_bring_up.sh`, — и при нескольких кандидатах выбирает тот, в имени
-которого есть `L4TR36.4.3`. Не выбрал ни одного — предупреждает и идёт
-дальше без драйверов камер, а не падает.
+с `quick_bring_up.sh`. Фильтр по `L4TR36.4.3` при этом только сужает список:
+все четыре пакета под JetPack 6.2 его содержат, поэтому при нескольких
+подошедших `04` печатает список и **не выбирает** — идёт дальше без драйверов
+камер, а не падает и не увозит случайный пакет.
 
 ## Быстрый путь
 
@@ -138,32 +151,184 @@ sudo apt-mark hold nvidia-l4t-kernel nvidia-l4t-kernel-dtbs nvidia-l4t-initrd
 ## Камеры
 
 Пакет драйверов уже лежит на плате в `/opt/sensing` — скачивать ничего
-не нужно. Запускается **в два прогона с перезагрузкой между ними**:
+не нужно. Ставится он **один раз**, и ставит его `install.sh`, а не
+`quick_bring_up.sh`: последний ничего не устанавливает, он только грузит
+модули, настраивает `v4l2-ctl` и запускает `gst-launch`. Порядок у вендора
+такой: `install.sh` → оверлей DTB → перезагрузка → `quick_bring_up.sh`
+(однократно).
 
 ```bash
 cd /opt/sensing
-sudo ./quick_bring_up.sh     # 1 -> sgx-yuv-gmsl2, ставит Image и DTB
+
+# 1. Бэкап ядра. Вендор его не делает, а install.sh ПЕРЕЗАПИСЫВАЕТ /boot/Image
+#    своей сборкой — без копии отката не будет.
+sudo cp -n /boot/Image /boot/Image.backup
+
+# 2. Установка: .ko в /lib/modules, .dtbo в /boot, своё /boot/Image
+sudo ./install.sh
+
+# 3. Подключить DTB-оверлей (см. следующий раздел) — БЕЗ ЭТОГО ШАГА
+#    камеры не появятся вовсе
+
 sudo reboot
-sudo ./quick_bring_up.sh     # 1 -> модель AR0233 -> порт 0..7
+
+# 4. После перезагрузки — один прогон
+cd /opt/sensing && sudo ./quick_bring_up.sh
 ```
 
-В меню модель называется **`SG2-AR0233-5300-GMSL2`**, хотя камеры `-5200-`:
-средняя цифра — модель ISP (GW5200 против GW5300). Выбирать пункт с AR0233.
+В `quick_bring_up.sh` из пакета GMSL2x8 наша камера — пункт
+**`3 : SG2-AR0233-5200-G-Hxxx`**, имя совпадает с маркировкой. На вопросы
+про GMSL1 и про GMSL2 3 Гбит/с отвечать **пусто** (Enter), если камеры
+в режиме 6 Гбит/с по умолчанию: скрипт задаёт режим линка по портам
+(`GMSLMODE_0=`/`GMSLMODE_1=`), и пустой ответ означает «все порты 6G».
+Дальше он спрашивает номер порта — как его узнать, ниже.
 
-Проверка:
+### Подключение DTB-оверлея
+
+Вендор предлагает `jetson-io`:
 
 ```bash
-lsmod | grep -E 'max9295|max9296|sgx'
-v4l2-ctl --list-devices
-gst-launch-1.0 v4l2src device=/dev/video0 ! xvimagesink -ev
-
-# по SSH без монитора:
-gst-launch-1.0 v4l2src device=/dev/video0 num-buffers=10 ! jpegenc ! multifilesink location=frame_%02d.jpg
+sudo /opt/nvidia/jetson-io/jetson-io.py
+#   Configure Jetson AGX CSI Connector
+#   → Configure for compatible hardware
+#   → Jetson Sensing SG8A-AGON-G2Y-A1 YUV GMSLx8
 ```
 
+**На нашей плате этого пункта в списке не оказалось.** Оверлей при этом
+корректен: `compatible = nvidia,p3737-0000+p3701-0000` совпадает с платой,
+`overlay-name` на месте, `jetson-header-name = Jetson AGX CSI Connector`
+тоже. Причина, по которой `jetson-io` его не показал, **не установлена** —
+не ищи в этом смысла, которого мы не нашли.
+
+Рабочий путь — ручная правка `/boot/extlinux/extlinux.conf`; вендор её тоже
+описывает как вариант на этот случай. У нас сработало так:
+
+```
+TIMEOUT 30
+DEFAULT JetsonIO
+
+MENU TITLE L4T boot options
+
+LABEL primary
+      MENU LABEL primary kernel
+      LINUX /boot/Image
+      FDT /boot/dtb/kernel_tegra234-p3737-0000+p3701-0000-nv.dtb
+      INITRD /boot/initrd
+      APPEND ${cbootargs} root=PARTUUID=<СВОЙ, см. ниже> rw rootwait ...
+
+LABEL JetsonIO
+      MENU LABEL Custom Header Config: CSI SG8A-AGON-G2Y-A1
+      LINUX /boot/Image
+      FDT /boot/dtb/kernel_tegra234-p3737-0000+p3701-0000-nv.dtb
+      INITRD /boot/initrd
+      OVERLAYS /boot/tegra234-camera-yuv-gmsl2x8-overlay.dtbo
+      APPEND <ТА ЖЕ строка APPEND, что у primary, целиком>
+
+LABEL backup
+      MENU LABEL backup kernel
+      LINUX /boot/Image.backup
+      FDT /boot/dtb/kernel_tegra234-p3737-0000+p3701-0000-nv.dtb
+      INITRD /boot/initrd
+      APPEND <ТА ЖЕ строка APPEND, что у primary, целиком>
+```
+
+Три предупреждения, каждое из которых стоит одной неудачной загрузки:
+
+- **`root=PARTUUID=` бери с машины, а не из документации.** В примерах
+  вендора стоит чужой UUID, и с ним плата не загрузится. Свой:
+  `lsblk -o NAME,PARTUUID` — нужен PARTUUID раздела APP (`nvme0n1p1`).
+  Проще всего скопировать строку `APPEND` у пункта `primary` целиком.
+- **Пункт `backup` должен нести ПОЛНЫЙ `APPEND`.** У вендора в примере
+  он идёт без `root=` — то есть не загрузился бы, и запасного пути
+  на деле нет. Смысл пункта — вернуться на `/boot/Image.backup`, если
+  ядро от Sensing не поднимется.
+- **Имя файла оверлея у пакетов YUV и GMSL2x8 совпадает**
+  (`tegra234-camera-yuv-gmsl2x8-overlay.dtbo`). Это удобно при переходе —
+  `extlinux.conf` править не надо, — но означает, что по `extlinux.conf`
+  нельзя понять, какой пакет установлен.
+
+### Какой разъём — какой `/dev/video*`
+
+Из `Readme_yuv.md` пакета GMSL2x8, подтверждено железом:
+
+```
+CN1 (CAM0..CAM3) -> /dev/video0..video3   дешериализатор Der-0, шина i2c-9
+CN2 (CAM4..CAM7) -> /dev/video4..video7   дешериализатор Der-1, шина i2c-10
+```
+
+`CN1` и `CN2` — это **гнёзда под fan-out кабель на четыре камеры каждое**,
+а не разъёмы одной камеры. Номер отвода кабеля номеру порта **не равен**:
+единственная камера во «втором кабеле» (CN2) оказалась на `CAM6`, то есть
+`/dev/video6`. Перебор наугад тут стоит много времени — ищи по признакам.
+
+### Как найти порт камеры
+
+```bash
+# рабочий порт — тот, где НЕТ detect error
+sudo dmesg | grep -E 'sensor_probe|dser_link_check'
+```
+
+- `sensor_probe camera sgx-yuv-gmsl2-N detect error` — на порту `N` камеры
+  нет (или пакет драйверов не тот — тогда ошибка на всех восьми сразу).
+- `dser_link_check link:` с **ненулевой** маской — линк поднят; у нас было
+  `0xc8`.
+
+Второй признак — формат: у живой камеры родное разрешение, у пустого порта
+остаётся дефолт.
+
+```bash
+v4l2-ctl -d /dev/video6 --get-fmt-video   # 1280x960 у AR0233; 1280x720 = пусто
+```
+
+### Проверка потока без монитора
+
+`quick_bring_up.sh` заканчивается `gst-launch-1.0 ... ! xvimagesink`,
+которому нужен X. По SSH он падает с `Could not open display (null)` —
+**это не неудача**: модули остаются загружены, поток работает. Проверить,
+что они действительно загружены, и снять кадры самому:
+
+```bash
+lsmod | grep -E 'max96712|sgx_yuv_gmsl2|sgcam_gmsl2'
+v4l2-ctl --list-devices
+
+gst-launch-1.0 v4l2src device=/dev/video6 num-buffers=10 \
+    ! jpegenc ! multifilesink location=/tmp/f_%02d.jpg
+md5sum /tmp/f_*.jpg
+ls -l /tmp/f_*.jpg
+```
+
+Как отличить живой поток от пустого:
+
+| | размер кадра | хеши |
+|---|---|---|
+| пустой порт | все ~41 КБ, одинаковые | один и тот же |
+| живая камера | ~170 КБ | **все разные** |
+
+Предупреждение `Signal lost` от gstreamer остаётся и при рабочем потоке —
+само по себе оно не значит ничего. Судить надо по хешам.
+
+### Диагностика по I2C
+
+Отделяет «камеры нет» от «драйвер не тот»: ответы ниже приходят от железа
+и от драйверов не зависят.
+
+```bash
+# сериализатор ВНУТРИ камеры, шина 10 (CN2); 0x91 = DEV_ID max9295
+i2ctransfer -y -f 10 w2@0x40 0x00 0x0d r1
+
+# дешериализаторы на адаптере; 0xa0 = DEV_ID max96712
+i2ctransfer -y -f 9  w2@0x29 0x00 0x0d r1
+i2ctransfer -y -f 10 w2@0x2d 0x00 0x0d r1
+```
+
+Сериализатор доступен **только через поднятый GMSL-линк**, поэтому его
+ответ `0x91` доказывает сразу три вещи: камера подключена, питание по
+коаксиалу подано, линк поднят. Отвечают дешериализаторы, а камера нет —
+дело в кабеле или в камере, а не в драйвере.
+
 Номера I²C-шин на схеме платы **не совпадают** с номерами в софте — это
-оговорено в документации Sensing. Порты перебирать `video0` … `video7`.
-Стабильно работает только YUV422; RAW12 заявлен недоступным.
+оговорено в документации Sensing; в софте это `i2c-9` (CN1) и `i2c-10`
+(CN2). Стабильно работает только YUV422; RAW12 заявлен недоступным.
 
 ## Известные ограничения
 
