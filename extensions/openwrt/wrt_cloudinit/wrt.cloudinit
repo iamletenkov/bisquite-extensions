@@ -104,29 +104,44 @@ apply_user_data() {
 	ci_user=$(awk -F': *' '$1=="user"{print $2;exit}' "$ud" | tr -d ' "')
 	ci_pass=$(awk -F': *' '$1=="password"{print $2;exit}' "$ud" | tr -d ' "')
 
-	if [ -n "$ci_user" ] && [ -n "$ci_pass" ]; then
-		create_ci_admin "$ci_user" "$ci_pass" || \
-			logger -t "$PROG" "failed to provision user $ci_user"
-		install_ssh_keys "$ci_user" "$ud"
-		return 0
-	elif [ -n "$ci_user" ] && [ -z "$ci_pass" ]; then
-		logger -t "$PROG" "user '$ci_user' requested but password missing"
-		return 0
-	fi
-
-	# Список `users:` — стандартный cloud-config, его пишет `bs device write`.
-	# `create_ci_admin` готовый хеш пропускает как есть: `prepare_password_hash`
-	# отдаёт без изменений всё, что начинается с `$`.
-	parse_users "$ud" | while IFS='|' read -r name hash; do
-		[ -n "$name" ] || continue
-		if [ -z "$hash" ]; then
-			logger -t "$PROG" "user '$name' requested but password missing"
-			continue
+	# Пользователей задаёт ОДИН из двух диалектов, и плоский побеждает список
+	# `users:` — так было и раньше. Изменилось другое: прежде плоская ветка
+	# выходила из функции целиком (`return 0`), унося с собой не только список
+	# `users:`, но и `apply_root_password`, и `stage_runcmd` внизу. Сид, где
+	# рядом с плоским `user:` стоит `chpasswd:` или `runcmd:`, применялся
+	# не полностью — и молчал об этом, а тихо недоприменённый сид тут самый
+	# дорогой вид отказа.
+	#
+	# Цену надо назвать честно: ни один из двух поддерживаемых путей этим
+	# не бился. `bs compose up` ставит пароль root на сборке через
+	# `virt-customize`, а не сидом, и кладёт firstboot-команды прямо
+	# в $FIRSTBOOT_SCRIPT; `bs device write` пишет список `users:`, а не
+	# плоский ключ, то есть шёл второй веткой и до низа функции доходил.
+	# Это была ловушка для сида, написанного руками или смешанного, а не
+	# действующий отказ.
+	if [ -n "$ci_user" ]; then
+		if [ -n "$ci_pass" ]; then
+			create_ci_admin "$ci_user" "$ci_pass" || \
+				logger -t "$PROG" "failed to provision user $ci_user"
+			install_ssh_keys "$ci_user" "$ud"
+		else
+			logger -t "$PROG" "user '$ci_user' requested but password missing"
 		fi
-		create_ci_admin "$name" "$hash" || \
-			logger -t "$PROG" "failed to provision user $name"
-		install_ssh_keys "$name" "$ud"
-	done
+	else
+		# Список `users:` — стандартный cloud-config, его пишет `bs device write`.
+		# `create_ci_admin` готовый хеш пропускает как есть: `prepare_password_hash`
+		# отдаёт без изменений всё, что начинается с `$`.
+		parse_users "$ud" | while IFS='|' read -r name hash; do
+			[ -n "$name" ] || continue
+			if [ -z "$hash" ]; then
+				logger -t "$PROG" "user '$name' requested but password missing"
+				continue
+			fi
+			create_ci_admin "$name" "$hash" || \
+				logger -t "$PROG" "failed to provision user $name"
+			install_ssh_keys "$name" "$ud"
+		done
+	fi
 
 	apply_root_password "$ud"
 	stage_runcmd "$ud"
@@ -174,6 +189,14 @@ stage_runcmd() {
 # Раньше `ssh_authorized_keys` не обрабатывался вовсе: ключи из манифеста
 # бисквита доезжали до карты и там оставались. Ключи кладутся и пользователю,
 # и root — dropbear на OpenWrt читает authorized_keys обоих.
+#
+# Что означает второй каталог, и это решение, а не деталь: ключ пользователя,
+# положенный в `/etc/dropbear/authorized_keys`, даёт вход ПОД ROOT. Так ведёт
+# себя код с самого начала, записи об умысле в репозитории нет, и эта работа
+# поведение не меняет — только перестаёт его удваивать. Развести два хранилища
+# (ключи пользователя — только в его `~/.ssh`) или оставить как есть — решение
+# владельца; до него `/etc/dropbear` читается как «любой пользователь из сида
+# получает root по своему ключу».
 install_ssh_keys() {
 	local user=$1 file=$2 home keys dir
 
@@ -185,7 +208,11 @@ install_ssh_keys() {
 
 	for dir in "$home/.ssh" /etc/dropbear; do
 		[ -d "$dir" ] || mkdir -p "$dir" || continue
-		printf '%s\n' "$keys" >> "$dir/authorized_keys"
+		# Не `>>`: при повторном провижне дописывание удваивало строки.
+		# Почему не `>` — см. merge_authorized_keys в lib/authkeys.sh:
+		# /etc/dropbear/authorized_keys общий на всех пользователей сида.
+		merge_authorized_keys "$dir/authorized_keys" "$keys" || \
+			logger -t "$PROG" "failed to write $dir/authorized_keys"
 		chmod 0700 "$dir" 2>/dev/null || true
 		chmod 0600 "$dir/authorized_keys" 2>/dev/null || true
 	done
@@ -383,7 +410,21 @@ rpcd_acl_present() {
 configure_rpcd_login() {
 	local user=$1 section pass_ref
 	pass_ref="\$p\$${user}"
-	section="${RPCD_SECTION_PREFIX}${user}"
+	# Имя секции — само имя пользователя. Здесь стояло
+	# `section="${RPCD_SECTION_PREFIX}${user}"`, но эта переменная не
+	# присваивалась нигде: ни в этом файле, ни в `lib/`, ни в окружении, —
+	# то есть секция всегда была просто `rpcd.<имя>`. Замысла в истории тоже
+	# нет: `git log -S RPCD_SECTION_PREFIX --all` даёт один коммит, `28b1561
+	# refactor: group extensions by OS`, которым файл и приехал в репозиторий.
+	#
+	# Префикс задавать НЕЛЬЗЯ, и это не стилистика. Префикс — это
+	# ПЕРЕИМЕНОВАНИЕ секции UCI: устройство, провижненное прежним кодом,
+	# несёт `rpcd.<имя>`, повторный провижн создал бы `rpcd.<префикс><имя>`,
+	# а прежняя секция осталась бы на месте — два входа в LuCI на одного
+	# пользователя. Вводить префикс можно только вместе с удалением прежней
+	# секции, то есть отдельным осознанным решением о миграции, а не
+	# вдогонку опечатке.
+	section="$user"
 
 	uci -q delete rpcd."$section" || true
 	uci_cmd set rpcd."$section"=login || return 1
