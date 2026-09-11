@@ -40,23 +40,48 @@ fi
 # имя ПЛАТЫ, и знать про внутреннюю раскладку /boot ему незачем.
 FDT="/boot/${BOARD%.dtb}-kvm.dtb"
 
-if [[ ! -f "$FDT" ]]; then
-    log_error "дерево $FDT в образе не найдено"
-    log_error "в этом образе есть:"
-    find /boot -maxdepth 1 -name 'tegra210-*-kvm.dtb' -printf '  %f\n' 2>/dev/null \
-        | sed 's/-kvm\.dtb$//' | sort >&2 || true
-    log_error "если список пуст — базовый образ собран без l4t-kernel-kvm"
-    exit 1
-fi
-
+# ПОРЯДОК ПРОВЕРОК НЕСУЩИЙ, и держится он на одном: «собран ли базовый образ
+# с l4t-kernel-kvm» отвечает запись `LABEL kvm` в extlinux.conf, а не маска
+# имён файлов в /boot. Поэтому сначала идёт она.
+#
+# Пока отказ про ненайденное дерево стоял первым, он отвечал на этот вопрос
+# сам — и отвечал маской `tegra210-*-kvm.dtb`. Маска прибита к семейству SoC,
+# поэтому на образе другой Tegra список выходил пустым, а следующая строка
+# объявляла «базовый образ собран без l4t-kernel-kvm» — утверждение о том,
+# чего она не проверяла. Отказ здесь ради объяснения и заведён (см. шапку,
+# «ПОЧЕМУ НЕ ПАРА RUN_COMMAND»): ложная подсказка обесценивает ровно то,
+# ради чего файл существует.
 if [[ ! -f "$EXTLINUX" ]]; then
     log_error "нет $EXTLINUX — это не L4T-образ"
     exit 1
 fi
 
-if ! grep -q '^LABEL kvm$' "$EXTLINUX"; then
+# Отступ незначащий — так же, как у разбора ниже и у l4t-kernel-kvm.
+if ! grep -qE '^[[:space:]]*LABEL kvm[[:space:]]*$' "$EXTLINUX"; then
     log_error "в $EXTLINUX нет записи 'LABEL kvm'"
     log_error "базовый образ собран без l4t-kernel-kvm — выбирать нечего"
+    exit 1
+fi
+
+if [[ ! -f "$FDT" ]]; then
+    log_error "дерево $FDT в образе не найдено"
+    # Маска — по суффиксу `-kvm`, который ставит l4t-kernel-kvm
+    # (l4t-kernel-kvm/install.sh, шаг 6), а НЕ по семейству SoC: суффикс
+    # наш и известен, семейство — нет.
+    mapfile -t available < <(find /boot -maxdepth 1 -name '*-kvm.dtb' -printf '%f\n' 2>/dev/null \
+                             | sed 's/-kvm\.dtb$//' | sort)
+    if (( ${#available[@]} )); then
+        log_error "в этом образе есть:"
+        printf '  %s\n' "${available[@]}" >&2
+        log_error "L4T_BOARD должен совпадать с одним из имён выше"
+    else
+        # Сюда приходят, когда `LABEL kvm` в загрузчике есть, а деревьев нет.
+        # Это не «собран без l4t-kernel-kvm» — про это сказано выше и раньше;
+        # это деревья, удалённые или переименованные после сборки базы.
+        log_error "деревьев с суффиксом -kvm в /boot нет ни одного,"
+        log_error "хотя запись 'LABEL kvm' в $EXTLINUX есть — значит ядро kvm"
+        log_error "в образе стоит, а деревья из /boot удалены или переименованы"
+    fi
     exit 1
 fi
 
