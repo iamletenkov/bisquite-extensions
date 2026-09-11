@@ -16,6 +16,18 @@ fallback_user() {
     local candidate
     for candidate in $(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}'); do
         if [[ -d "/home/${candidate}" ]]; then
+            # Сказать вслух, что пошли запасным путём, и какую учётку выбрали.
+            #
+            # Единственное место, где эти два факта известны разом. Раньше
+            # запасной путь молчал, и настройка «не того» пользователя
+            # выглядела снаружи как успешная: журнал говорил, что автологин
+            # настроен, а настроен он был вендорской учётке, которая в
+            # /etc/passwd оказалась раньше cloud-init-овской.
+            #
+            # В stderr, а не в stdout: stdout — это возвращаемое имя, и
+            # подмешивать в него диагностику значит ломать вызывающих,
+            # которые читают его как $(get_cloud_user).
+            echo "Note: cloud-init user unavailable; falling back to '${candidate}' (uid $(id -u "$candidate" 2>/dev/null || echo '?'))" >&2
             echo "$candidate"
             return 0
         fi
