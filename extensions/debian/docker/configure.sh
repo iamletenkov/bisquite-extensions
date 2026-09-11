@@ -13,20 +13,37 @@ log_warn(){ >&2 echo -e "${YELLOW}[WARN]${NC} $*"; }
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The account name comes from the shared get_cloud_user.sh, and this script
+# keeps NO fallback of its own.
+#
+# The local copy removed here ("first account with uid >= 1000 and a home
+# directory") is the one that moved into lib/get_cloud_user.sh: measurement
+# 2026-09-04 on a live Jetson, vendor image built without cloud-init — vino-vnc
+# and jetson-stats configured nothing, docker configured fine, because docker
+# was the only one carrying a fallback. The reason is recorded in the library
+# itself: it was centralised so that nine diverging copies would not exist.
+#
+# The copy had DIVERGED, and in the worse direction. The shared script tells
+# two cases apart: cloud-init absent (-> fallback) and cloud-init present but
+# userdata not ready yet (-> refuse, because the vendor account is not the one
+# cloud-init is about to create). The copy made no such distinction and in that
+# race handed the docker group to the vendor account.
+#
+# stderr is NOT silenced: fallback_user() says there that it took the fallback
+# path and which account it picked — exactly what has to be in the journal when
+# the group went to an unexpected user.
 user=""
 if [[ -x "$HERE/get_cloud_user.sh" ]]; then
-    user="$("$HERE/get_cloud_user.sh" 2>/dev/null || true)"
+    user="$("$HERE/get_cloud_user.sh" || true)"
 fi
 
 if [[ -z "$user" ]]; then
-    # Fallback: the first regular login account with a home directory.
-    for candidate in $(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}'); do
-        [[ -d "/home/${candidate}" ]] && { user="$candidate"; break; }
-    done
-fi
-
-if [[ -z "$user" ]]; then
+    # Not a failure: Docker itself works without this, the group is a
+    # convenience. There is no wait loop here, and none is needed — the unit is
+    # Type=oneshot and runs on every boot, while cloud-init's userdata stays in
+    # /var/lib/cloud/instance, so a first-boot race resolves on the next boot.
     log_warn "пользователь не определился, группа docker не назначена"
+    log_warn "на первой загрузке это может быть гонка с cloud-init — группа назначится на следующей"
 else
     if id -nG "$user" | tr ' ' '\n' | grep -qx docker; then
         log_info "'$user' уже в группе docker"
