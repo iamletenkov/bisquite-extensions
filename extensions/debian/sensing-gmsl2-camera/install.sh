@@ -59,9 +59,24 @@ log_info "плата: $(head -n1 /etc/nv_tegra_release)"
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
-log_info "клонирую $REPO_URL — весь репозиторий Sensing, там пакеты под"
-log_info "несколько плат и версий JetPack, а нужна ровно одна папка ниже"
-git clone --depth 1 "$REPO_URL" "$WORKDIR/repo"
+# НЕ --depth 1 обычный clone: он тянет ВСЕ платы и версии JetPack целиком
+# (замер 2026-09-12 — репозиторий больше 380 МБ), а нужна ровно одна папка
+# ниже. Внутри virt-customize это клонируется НА ДИСК СОБИРАЕМОГО ОБРАЗА
+# (mktemp -d резолвится в /tmp гостя), а не хоста — и там места мало
+# по конструкции (базовый образ компактный, см. RESIZE в VMFILE). Первая
+# попытка (обычный --depth 1 clone) упала на "No space left on device"
+# на 8-гигабайтном APP с ~180 МБ свободного места.
+#
+# Частичный клон (--filter=blob:none, без чекаута) + sparse-checkout
+# в режиме cone — тот же приём, каким чинили этот класс проблемы уже
+# в проекте (nvidia-jetpack/scripts/02-fetch-camera-drivers.sh: «внутрь
+# образа едет только одна папка»), только здесь дерево ещё и физически
+# теснее.
+log_info "клонирую $REPO_URL (частично: только $PKG_REL)"
+git clone --no-checkout --depth 1 --filter=blob:none "$REPO_URL" "$WORKDIR/repo"
+git -C "$WORKDIR/repo" sparse-checkout init --cone
+git -C "$WORKDIR/repo" sparse-checkout set "$PKG_REL"
+git -C "$WORKDIR/repo" checkout
 
 PKG="$WORKDIR/repo/$PKG_REL"
 if [[ ! -d "$PKG" ]]; then
