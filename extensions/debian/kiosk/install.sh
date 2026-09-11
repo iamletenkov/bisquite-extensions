@@ -22,6 +22,8 @@ log_error() {
     >&2 echo -e "${RED}[ERROR]${NC} $*"
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 log_info "Starting kiosk extension installation..."
 
 # Update package lists
@@ -45,26 +47,47 @@ log_info "Installing Chromium browser..."
 apt-get install -y chromium chromium-driver || exit 1
 log_info "Chromium installed successfully"
 
-# Install systemd unit files from extension directory if present
-if [[ -f "/opt/vmsetup/kiosk/configure-kiosk.service" ]]; then
-    install -m 0644 /opt/vmsetup/kiosk/configure-kiosk.service /etc/systemd/system/configure-kiosk.service || true
-else
-    log_warn "configure-kiosk.service not found in /opt/vmsetup/kiosk/"
-fi
+# --- Файлы, без которых первой загрузки не будет ------------------------------
+#
+# Отсутствие любого из них — ОТКАЗ СБОРКИ, а не предупреждение. Раньше юниты
+# «не нашлись» тихо (log_warn плюс `|| true`), сборка оставалась зелёной,
+# а юнита в образе не было — и узнавал об этом тот, кто включил плату без
+# монитора. Из двух отказов дешевле тот, который читает собиравший: он чинит
+# за минуту на своей машине. То же направление у всей остальной инфраструктуры
+# bisquite — fail-closed у детектора устройств, preflight утилит до `dd`.
+# Образец — vino-vnc/install.sh. Отказ на `run-kiosk.sh` здесь был и раньше,
+# то есть внутри одного файла стояли оба подхода: обёртка важнее юнита,
+# который её запускает, — такого порядка быть не может.
+#
+# Ищем рядом с собой ($SCRIPT_DIR), а не по зашитому /opt/vmsetup/kiosk/:
+# проверка обязана отвечать на вопрос «файл приехал рядом со мной?», а не
+# «раскладка EXTENSION всё ещё такая?». Скрипт запускается из того самого
+# каталога, куда его скопировали, поэтому $SCRIPT_DIR верен при любой
+# раскладке, и её смена не уронит все сборки разом.
+#
+# config.yaml и get_cloud_user.sh в списке потому, что без них `configure.sh`
+# откажет на первой загрузке (его check_prereqs), — то есть их отсутствие
+# стоит ровно столько же, сколько отсутствие юнита.
+for f in configure-kiosk.service kiosk-chromium@.service run-kiosk.sh \
+         configure.sh config.yaml get_cloud_user.sh; do
+    if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
+        log_error "рядом нет $f — настройка киоска на первой загрузке не состоится,"
+        log_error "а без неё браузер не развернётся ни при какой конфигурации"
+        exit 1
+    fi
+done
 
-if [[ -f "/opt/vmsetup/kiosk/kiosk-chromium@.service" ]]; then
-    install -m 0644 /opt/vmsetup/kiosk/kiosk-chromium@.service /etc/systemd/system/kiosk-chromium@.service || true
-else
-    log_warn "kiosk-chromium@.service not found in /opt/vmsetup/kiosk/"
-fi
+# Без `|| true`: файл нашёлся, а копирование провалилось — исход ровно тот же,
+# что и у ненайденного файла, значит и отказ тот же.
+install -m 0644 "$SCRIPT_DIR/configure-kiosk.service" \
+    /etc/systemd/system/configure-kiosk.service
+install -m 0644 "$SCRIPT_DIR/kiosk-chromium@.service" \
+    /etc/systemd/system/kiosk-chromium@.service
 
-# Обёртка, которая ищет X authority в рантайме и запускает chromium.
-if [[ -f "/opt/vmsetup/kiosk/run-kiosk.sh" ]]; then
-    chmod +x /opt/vmsetup/kiosk/run-kiosk.sh || true
-else
-    log_error "run-kiosk.sh не найден рядом — kiosk-chromium@.service не запустится"
-    exit 1
-fi
+# Обёртка, которая ищет X authority в рантайме и запускает chromium. Юнит
+# зовёт её через `/bin/bash`, то есть бит исполнения ему не нужен; он нужен
+# человеку, который запустит обёртку руками при диагностике.
+chmod +x "$SCRIPT_DIR/run-kiosk.sh"
 
 # Reload systemd and enable configuration service
 systemctl daemon-reload || true

@@ -202,6 +202,24 @@ hide_desktop_ui(){
 
   log_info "Hiding desktop UI for minimal kiosk experience"
 
+  # Конфиги ниже перезаписываются БЕЗУСЛОВНО, на каждой загрузке, и это
+  # решение, а не недосмотр. Юнит `Type=oneshot` с `RemainAfterExit=yes`
+  # перезагрузку не переживает, то есть скрипт отрабатывает каждый раз.
+  #
+  # Граница «своего» файла проходит не по «кто его создал», а по «кому
+  # разрешено его менять». `xfce4-desktop.xml` и `xfce4-panel.xml` пишет
+  # сторонний компонент (xfconf), и на рабочем столе человека их затирать
+  # нельзя — так же, как lxde не вправе затирать `desktop.conf` сессии.
+  # Но здесь весь сеанс — продукт расширения: панель и рабочий стол киоска
+  # и ЕСТЬ то, что расширение делает, человек в них ничего не настраивает,
+  # а уехавший конфиг панели ломает сам киоск (панель поверх браузера).
+  # Настраивать эти два файла здесь некому, поэтому безусловная запись —
+  # правильный исход того же правила, а не исключение из него.
+  #
+  # Разрешение «безусловно» ограничено двумя этими каналами: строками выше
+  # (ветка `desktop != xfce4`) записано, что под GNOME и LXDE раскладка тех
+  # же файлов была мусором в ~/.config, выглядящим как настройка.
+
   # Create XFCE4 config directory
   local xfce_config_dir="$user_home/.config/xfce4/xfconf/xfce-perchannel-xml"
   mkdir -p "$xfce_config_dir"
@@ -241,6 +259,39 @@ XFCE_PANEL_EOF
 
   chown -R "$cloud_user:$cloud_user" "$user_home/.config/xfce4"
   log_info "XFCE4 desktop UI hidden (black background, no panels)"
+}
+
+# Гасим прежние экземпляры шаблона при смене пользователя.
+#
+# `systemctl enable kiosk-chromium@<user>` кладёт симлинк в
+# graphical.target.wants/ (шаблон объявлен WantedBy=graphical.target), а
+# `disable` прежнего не делал никто. После смены ключа `USER` в config.yaml
+# — а ключ этот живой, см. resolve_user — там оставались ОБА экземпляра,
+# и на следующей загрузке поднимались два браузера на один дисплей :0,
+# оба с `Restart=always`.
+#
+# Ищем именно в graphical.target.wants/, потому что это единственный
+# надёжный список ВКЛЮЧЁННЫХ экземпляров: сам шаблон ничего не помнит,
+# а `systemctl list-units 'kiosk-chromium@*'` показывает запущенные.
+#
+# Уже прошитое устройство эта правка не лечит: симлинк лежит в его образе,
+# и снять его можно только перезаписью носителя или `systemctl disable`
+# руками.
+disable_stale_instances(){
+  local keep="$1"
+  local wants_dir=/etc/systemd/system/graphical.target.wants
+  local unit name
+
+  [[ -d "$wants_dir" ]] || return 0
+
+  shopt -s nullglob
+  for unit in "$wants_dir"/'kiosk-chromium@'*.service; do
+    name="$(basename "$unit")"
+    [[ "$name" == "kiosk-chromium@${keep}.service" ]] && continue
+    log_info "гашу прежний экземпляр $name"
+    systemctl disable --now "$name" || log_warn "не удалось погасить $name"
+  done
+  shopt -u nullglob
 }
 
 configure_kiosk_service(){
@@ -303,6 +354,7 @@ EOF
   log_info "Created kiosk configuration at $kiosk_config_dir/config"
 
   # Enable and start kiosk-chromium service for user
+  disable_stale_instances "$cloud_user"
   systemctl enable "kiosk-chromium@${cloud_user}.service" || true
   systemctl restart "kiosk-chromium@${cloud_user}.service" || true
 
