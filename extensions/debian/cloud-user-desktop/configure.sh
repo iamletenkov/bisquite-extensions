@@ -64,21 +64,133 @@ for grp in video render audio pulse input dialout plugdev; do
     fi
 done
 
-changed=0
-if [[ -f /etc/gdm3/custom.conf ]]; then
-    sed -i -e "s/^\s*AutomaticLoginEnable\s*=.*/AutomaticLoginEnable=True/" \
-           -e "s/^\s*AutomaticLogin\s*=.*/AutomaticLogin=${user}/" \
-           /etc/gdm3/custom.conf
-    grep -q "^AutomaticLogin=${user}$" /etc/gdm3/custom.conf || \
-        printf 'AutomaticLogin=%s\n' "$user" >> /etc/gdm3/custom.conf
-    changed=1
-    log_info "gdm3: автологин включён для $user"
+# ЗАПИСЬ КЛЮЧА INI — НА МЕСТЕ, В СВОЮ СЕКЦИЮ И С ПРОВЕРКОЙ РЕЗУЛЬТАТА.
+#
+# Три дефекта, которые это заменяет, и все три — в одну сторону «молча
+# не сделали»:
+#
+# 1. `sed -i 's/^\s*AutomaticLoginEnable\s*=.*/…/'` правит ключ ТОЛЬКО там,
+#    где он уже есть. В gdm3 от Debian ключи поставляются закомментированными
+#    (`#  AutomaticLoginEnable = true`), а `#` — не пробел, то есть для `sed`
+#    ключа нет. Дописывался при этом один `AutomaticLogin=<user>`, и автологин
+#    оставался выключенным.
+# 2. Дописывать `>>` в конец файла нельзя: у gdm3 файл многосекционный
+#    (`[daemon]`, `[security]`, `[xdmcp]`, `[chooser]`, `[debug]` — см.
+#    `../gnome/daemon.conf`), и ключ, приписанный в конец, попадает в
+#    `[debug]`, где GDM его не ищет. Отсюда аргумент `section`.
+# 3. `changed=1` ставился по факту ВЫЗОВА `sed`, а не по факту записи:
+#    у lightdm при отсутствующем `autologin-user` файл не менялся вовсе,
+#    а в журнал уходило «автологин включён». Отказ не молчал, а врал.
+#    Поэтому функция заканчивается проверкой результата и её код возврата
+#    — единственное основание для `changed=1`.
+#
+# Значение пишется ровно так, как в шаблоне `../gnome/daemon.conf`
+# (`AutomaticLoginEnable=true`, строчными): это единственное написание
+# в дереве, про которое известно, что оно применяется на обоих замеренных
+# дистрибутивах, и держать рядом второе незачем.
+set_ini_key(){
+    local file="$1" section="$2" key="$3" value="$4" tmp
+    tmp="$(mktemp)" || return 1
+    awk -v want="$section" -v key="$key" -v value="$value" '
+        function emit() { print key "=" value; done = 1 }
+        /^[[:space:]]*\[/ {
+            # Ушли из нужной секции, а ключа в ней не было — дописываем
+            # перед заголовком следующей, то есть внутрь нужной.
+            if (cur == want && !done) emit()
+            line = $0
+            sub(/^[[:space:]]*\[/, "", line)
+            sub(/\].*$/, "", line)
+            cur = line
+            print
+            next
+        }
+        {
+            # Закомментированный ключ — это тоже «ключа нет», и заменить его
+            # целиком правильнее, чем оставить рядом с новым.
+            if (cur == want && !done && $0 ~ "^[[:space:]]*#*[[:space:]]*" key "[[:space:]]*=") {
+                emit()
+                next
+            }
+            print
+        }
+        END {
+            if (!done) {
+                if (cur == want) emit()
+                else { print ""; print "[" want "]"; emit() }
+            }
+        }
+    ' "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+    # Усечение на месте, а не `mv`: у файла остаются его владелец и права.
+    cat "$tmp" > "$file" || { rm -f "$tmp"; return 1; }
+    rm -f "$tmp"
+    grep -qxF "${key}=${value}" "$file"
+}
+
+# lightdm переименовал `[SeatDefaults]` в `[Seat:*]`, старое имя понимает
+# до сих пор, и вендорские drop-in'ы его несут. Дописать `[Seat:*]` в файл,
+# настроенный через `[SeatDefaults]`, значило бы оставить в нём две секции
+# с одним ключом и неочевидным порядком слияния — поэтому пишем в ту
+# секцию, которая в файле уже есть.
+lightdm_seat_section(){
+    local file="$1"
+    if grep -q '^[[:space:]]*\[SeatDefaults\]' "$file" \
+       && ! grep -q '^[[:space:]]*\[Seat:\*\]' "$file"; then
+        echo 'SeatDefaults'
+    else
+        echo 'Seat:*'
+    fi
+}
+
+# КАКОЙ ФАЙЛ ЧИТАЕТ GDM, РЕШАЕТСЯ НА СБОРКЕ ПАКЕТА, и дистрибутивы
+# расходятся. Замер 2026-09-03 распаковкой пакетов записан в
+# `../gnome/configure.sh:18-38`: Debian 13 несёт `/etc/gdm3/daemon.conf`,
+# Ubuntu 24.04 — `/etc/gdm3/custom.conf`. Здесь знали только про второй,
+# то есть на Debian не правилось ничего и молчало об этом.
+#
+# В отличие от `gnome/configure.sh`, который выбирает ОДИН файл и пишет его
+# целиком из шаблона, здесь правка идёт по ключам в уже существующих файлах,
+# поэтому правим ВСЕ, какие нашлись: лишний файл GDM просто не прочитает
+# (запись в него не ошибка и предупреждения не даёт), а промах по нужному
+# стоит рабочего стола. Заодно это тот случай, про который пишет
+# `install.sh`: вендорские сборки нередко несут конфиг и того менеджера,
+# который не запущен.
+gdm_confs=()
+for conf in /etc/gdm3/daemon.conf /etc/gdm3/custom.conf; do
+    [[ -f "$conf" ]] && gdm_confs+=("$conf")
+done
+if (( ${#gdm_confs[@]} == 0 )) \
+   && { command -v gdm3 >/dev/null 2>&1 || command -v gdm >/dev/null 2>&1; }; then
+    # GDM стоит, а ни одного знакомого файла нет — дистрибутив, которого мы
+    # не замеряли. Заводим тот, что несёт Debian 13: без файла автологина
+    # не будет вовсе, а лишний файл безвреден.
+    log_warn "gdm3 есть, а ни daemon.conf, ни custom.conf нет — создаю daemon.conf"
+    install -D -m 0644 /dev/null /etc/gdm3/daemon.conf
+    printf '[daemon]\n' > /etc/gdm3/daemon.conf
+    gdm_confs=(/etc/gdm3/daemon.conf)
 fi
+
+changed=0
+for conf in "${gdm_confs[@]:-}"; do
+    [[ -n "$conf" ]] || continue
+    if set_ini_key "$conf" daemon AutomaticLoginEnable true \
+       && set_ini_key "$conf" daemon AutomaticLogin "$user"; then
+        changed=1
+        log_info "gdm3: автологин включён для $user ($conf)"
+    else
+        log_error "gdm3: не удалось записать автологин в $conf"
+        exit 1
+    fi
+done
 for conf in /etc/lightdm/lightdm.conf /etc/lightdm/lightdm.conf.d/*.conf; do
     [[ -f "$conf" ]] || continue
-    sed -i "s/^\s*autologin-user\s*=.*/autologin-user=${user}/" "$conf"
-    changed=1
-    log_info "lightdm: автологин включён для $user ($conf)"
+    section="$(lightdm_seat_section "$conf")"
+    if set_ini_key "$conf" "$section" autologin-user "$user"; then
+        changed=1
+        log_info "lightdm: автологин включён для $user ($conf, [$section])"
+    else
+        log_error "lightdm: не удалось записать autologin-user в $conf"
+        exit 1
+    fi
 done
 (( changed )) || { log_warn "менеджера входа не нашлось — автологин не потребовался"; exit 0; }
 

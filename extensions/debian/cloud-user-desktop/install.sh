@@ -57,10 +57,25 @@ fi
 # Правятся оба менеджера: вендорские сборки нередко несут конфиг того,
 # который не запущен. На Jetson Nano автологин был прописан И в
 # lightdm.conf, И в gdm3/custom.conf, а работал gdm3.
-if [[ -f /etc/gdm3/custom.conf ]]; then
-    sed -i "s/^\s*AutomaticLoginEnable\s*=.*/AutomaticLoginEnable=False/" /etc/gdm3/custom.conf
-    log_info "gdm3: автологин выключен до первой загрузки"
-fi
+#
+# И оба файла gdm3, а не один `custom.conf`: какой из них читает GDM,
+# решается на сборке пакета (замер 2026-09-03 в `../gnome/configure.sh:18-38`
+# — Debian 13 несёт `daemon.conf`, Ubuntu 24.04 `custom.conf`). Знать только
+# про `custom.conf` значило на Debian 13 оставить включённым автологин
+# удалённой учётки — то есть ровно то, что этот блок и гасит.
+#
+# Здесь, в отличие от `configure.sh`, достаточно правки существующего ключа:
+# отсутствующий или закомментированный `AutomaticLoginEnable` — это уже
+# выключенный автологин, дописывать `false` незачем.
+#
+# Написание строчными — такое же, как у `configure.sh` и у шаблона
+# `../gnome/daemon.conf`: два написания одного ключа в одном дереве читаются
+# как недосмотр, а не как решение.
+for conf in /etc/gdm3/daemon.conf /etc/gdm3/custom.conf; do
+    [[ -f "$conf" ]] || continue
+    sed -i "s/^\s*AutomaticLoginEnable\s*=.*/AutomaticLoginEnable=false/" "$conf"
+    log_info "gdm3: автологин выключен до первой загрузки ($conf)"
+done
 for conf in /etc/lightdm/lightdm.conf /etc/lightdm/lightdm.conf.d/*.conf; do
     [[ -f "$conf" ]] || continue
     sed -i "s/^\s*autologin-user\s*=.*/autologin-user=/" "$conf"
