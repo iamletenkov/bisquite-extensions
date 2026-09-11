@@ -1,0 +1,16 @@
+name: cuda-toolkit
+version: 1.0.0
+family: deb
+# Только arm64: расширение ставит из репозитория jetson/common, который
+# кладёт в rootfs nvidia-l4t-apt-source (часть BSP L4T) — на не-Jetson его
+# просто нет, и apt-get update отказал бы раньше, чем install.sh дошёл бы
+# до сути. Amd64/CUDA — отдельная задача: там источники NVIDIA другие
+# (cuda-repo-*, не jetson/*), общего кода с этим расширением нет.
+arch: [arm64]
+# Только build: cuda-toolkit не персонален — ни одного шага, зависящего
+# от пользователя cloud-init, у него нет. PATH/LD_LIBRARY_PATH прописаны
+# системно через /etc/profile.d, а не в чей-то домашний .bashrc.
+phase: build
+provides: [cuda]
+requires: []
+conflicts: []

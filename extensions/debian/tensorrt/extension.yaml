@@ -1,0 +1,15 @@
+name: tensorrt
+version: 1.0.0
+family: deb
+# Тот же источник, тот же довод, что у cuda-toolkit: пакет живёт только
+# в jetson/common, который на не-Jetson не подключён вовсе.
+arch: [arm64]
+phase: build
+provides: [tensorrt]
+# TensorRT не работает без CUDA-рантайма (nvidia-l4t-cuda в базовом образе
+# есть всегда), но НЕ требует cuda-toolkit: apt сам подтянет нужные
+# библиотеки как зависимости пакета tensorrt. requires не объявлен по той
+# же причине, по которой его нет у cuda-toolkit — это не порядок слоёв,
+# а зависимость пакетов, которую решает apt, а не резолвер VMFILE.
+requires: []
+conflicts: []

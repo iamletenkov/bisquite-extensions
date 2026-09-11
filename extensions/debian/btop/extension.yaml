@@ -1,0 +1,14 @@
+name: btop
+version: 1.0.0
+family: deb
+# Обычный apt-пакет из universe, ничего платформенного: проверено на
+# живом Jetson (jammy/arm64) 2026-09-12, версия 1.2.3-2. Не ограничено
+# одним Jetson — btop общий монитор ресурсов, не Tegra-специфичный
+# (в отличие от jetson-stats, который читает tegrastats и sysfs Tegra).
+arch: [amd64, arm64]
+# Только build: btop — интерактивная TUI-команда, автозапускать нечего,
+# персональной настройки под пользователя cloud-init не требуется.
+phase: build
+provides: [system-monitor]
+requires: []
+conflicts: []
