@@ -47,11 +47,17 @@ resolve_target(){
   return 1
 }
 
+# `yq` ЗДЕСЬ НЕ ПРОВЕРЯЕТСЯ, И ЭТО РЕШЕНИЕ. Этот скрипт `yq` не вызывает ни
+# разу; он нужен единственному потребителю — `get_cloud_user.sh`, — а тот
+# объявил его необязательным: нет `yq` — идём в `fallback_user()`, которая
+# говорит в stderr, что пошла запасным путём и какую учётку выбрала. Прежний
+# `exit 1` на `command -v yq` закрывал эту работающую дорогу и отказывался
+# настраивать рабочий стол из-за инструмента, без которого тот настраивается.
+# Цена решения названа вслух: без `yq` имя берётся «первая учётка с uid ≥ 1000
+# и домашним каталогом», и на образе с вендорской учёткой это может быть не
+# тот пользователь — поэтому `EXTENSION yq` из VMFILE не убран, он остался
+# условием того, что настроят именно пользователя cloud-init.
 check_prereqs(){
-  if ! command -v yq >/dev/null 2>&1; then
-    log_error "yq is not installed"
-    exit 1
-  fi
   if [[ ! -x "$SCRIPT_DIR/get_cloud_user.sh" ]]; then
     log_error "get_cloud_user.sh not found or not executable at $SCRIPT_DIR/get_cloud_user.sh"
     exit 1
