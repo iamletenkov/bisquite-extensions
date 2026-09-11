@@ -24,7 +24,16 @@ for f in "$LIB"/*.sh; do . "$f"; done
 for f in "$LIB"/*.sh; do
 	shellcheck -s dash "$f" || die "shellcheck $f"
 done
-shellcheck -s dash -e SC1090,SC1091,SC2034 "$ROOT/wrt.cloudinit" || die "shellcheck wrt.cloudinit"
+# `-o check-unassigned-uppercase` включает SC2154 («referenced but not
+# assigned»). Без него линтер молчит о неопределённых переменных в верхнем
+# регистре совсем: SC2154 — не обычная проверка, а опциональная, и выключена
+# она по умолчанию, а не исключениями из списка `-e`. Именно так в файл
+# приехало обращение к `$RPCD_SECTION_PREFIX`, которого никто не присваивал:
+# секция UCI собиралась из пустоты, а прогон был зелёным.
+# Почему не `--enable=all`: он даёт 1621 строку замечаний о стиле, то есть
+# сторож утонул бы в шуме. Этот флаг находит ровно тот класс и ничего больше.
+shellcheck -s dash -o check-unassigned-uppercase -e SC1090,SC1091,SC2034 \
+	"$ROOT/wrt.cloudinit" || die "shellcheck wrt.cloudinit"
 sh -n "$ROOT/wrt.cloudinit" || die "sh -n wrt.cloudinit"
 
 # --- parse_netcfg ---
@@ -85,6 +94,101 @@ ssh-rsa AAAAB3Nza second@host" \
 
 assert_eq "parse_ssh_keys: чужой пользователь → пусто" "" \
 "$(parse_ssh_keys "$BSW/user-data" nobody)"
+
+# --- parse_root_password ---
+# Парсер без единой проверки до 2026-09-11, при том что именно его отсутствие
+# однажды дало устройство с ПУСТЫМ паролем root (см. wrt.cloudinit:136-138).
+# Хеш берётся из `chpasswd: list:`, а не из списка `users:`, и делится только
+# первое двоеточие: sha512-crypt сам полон `$`.
+case "$(parse_root_password "$BSW/user-data")" in
+	\$6\$*\$*) pass "parse_root_password: хеш root из chpasswd" ;;
+	*)         die  "parse_root_password: хеш root не распознан" ;;
+esac
+
+# Контроль: в сиде Proxmox блока `chpasswd:` нет — парсер обязан вернуть
+# пусто, а не подставить что-нибудь. Пустой вывод здесь значит «пароль root
+# не задан», и apply_root_password на нём не трогает /etc/shadow.
+assert_eq "parse_root_password: без chpasswd → пусто" "" \
+"$(parse_root_password "$FIX/wan-static-lan-static/meta-data")"
+
+# --- read_dns_v2 / read_dns_any ---
+# `read_dns` разбирает v1 (Proxmox), `read_dns_v2` — v2 (бисквит), а
+# `read_dns_any` выбирает по версии файла. Проверяются все три конца: обе
+# реализации напрямую и диспетчер, иначе правка диспетчера прошла бы молча.
+assert_eq "read_dns_v2 bisquite (первый адрес, search нет)" "8.8.8.8|" \
+"$(read_dns_v2 "$BSW/network-config")"
+
+assert_eq "read_dns_any v2 → идёт в read_dns_v2" "8.8.8.8|" \
+"$(read_dns_any "$BSW/network-config")"
+
+assert_eq "read_dns_any v1 → идёт в read_dns" "1.1.1.1|lan" \
+"$(read_dns_any "$FIX/wan-dhcp-lan-static/network-config")"
+
+# --- parse_runcmd ---
+# Вторая фикстура, а не дописанный блок в первой. Решение: фикстура
+# bisquite-device-write/ НЕ пересъёмывается — на ней восемь действующих
+# проверок, и пересъёмка ради одного блока `runcmd:` рискует изменить
+# network-config и уронить зелёные тесты. Блока `runcmd:` там нет, потому что
+# у манифеста не было `firstboot-commands`: генератор ключ не пишет вовсе,
+# если команд нет.
+#
+# Снята тем же способом, что и первая, — настоящим `CloudInitGenerator`
+# (src/bisquite/infrastructure/device/cloud_init.py), вызванным из .venv
+# трёхстрочным скриптом на манифесте с `firstboot-commands`. Не
+# `bs device write --dry-run`: тот сид на диск не оставляет, то есть снимать
+# было бы нечего. Манифест повторяет первый, поэтому network-config у двух
+# фикстур совпадает байт в байт, а разница — ровно блок `runcmd:`.
+#
+# Вес проверки: отсутствие этого парсера один раз уже дало устройство
+# с невыполненными командами первой загрузки (lib/parse.sh:235-237).
+BSWR="$FIX/bisquite-device-write-runcmd"
+
+assert_eq "parse_runcmd: обе команды, порядок сохранён" \
+"uci set system.@system[0].notes='provisioned by bisquite'
+/etc/init.d/uhttpd restart" \
+"$(parse_runcmd "$BSWR/user-data")"
+
+# Контроль: у сида без `firstboot-commands` ключа `runcmd:` нет — парсер
+# обязан молчать. Пустой вывод здесь несущий: на нём stage_runcmd не создаёт
+# /usr/libexec/bisquite-firstboot.sh, то есть пустой скрипт не подменяет
+# тот, что мог положить адаптер Proxmox.
+assert_eq "parse_runcmd: без runcmd → пусто" "" \
+"$(parse_runcmd "$BSW/user-data")"
+
+# Контроль версии: тот же парсер не должен путать `runcmd:` с соседними
+# списками — у фикстуры с runcmd есть ещё `users:`, `chpasswd:` и `growpart:`.
+assert_eq "parse_root_password: работает и на второй фикстуре" "0" \
+"$(parse_root_password "$BSWR/user-data" | grep -cv '^\$6\$')"
+
+# --- merge_authorized_keys ---
+# Ключи записываются, а не дописываются: при повторном провижне (новый
+# instance-id) `>>` удваивал строки. Прогон именно повторный — один вызов
+# удвоения и не показал бы.
+AKT=$(mktemp -d)
+AKF="$AKT/authorized_keys"
+AKK="ssh-ed25519 AAAAC3Nz probe@host
+ssh-rsa AAAAB3Nza second@host"
+printf 'ssh-rsa AAAAwhatever baked@image\n' > "$AKF"
+merge_authorized_keys "$AKF" "$AKK" || die "merge_authorized_keys: первый вызов"
+merge_authorized_keys "$AKF" "$AKK" || die "merge_authorized_keys: второй вызов"
+merge_authorized_keys "$AKF" "$AKK" || die "merge_authorized_keys: третий вызов"
+assert_eq "merge_authorized_keys: три прогона не удваивают ключи" "2" \
+"$(grep -c 'probe@host\|second@host' "$AKF")"
+# Чужая строка на месте: /etc/dropbear/authorized_keys общий на всех
+# пользователей сида, и в образе там может лежать ключ от сборки. Затирание
+# обменяло бы удвоение на потерю ключей.
+assert_eq "merge_authorized_keys: чужая строка сохранена" "1" \
+"$(grep -c 'baked@image' "$AKF")"
+# Второй пользователь дописывается, а не вытесняет первого.
+merge_authorized_keys "$AKF" "ssh-ed25519 AAAAC3Nz third@host" || \
+	die "merge_authorized_keys: второй пользователь"
+assert_eq "merge_authorized_keys: ключи второго пользователя рядом, не вместо" "3" \
+"$(grep -c 'probe@host\|second@host\|third@host' "$AKF")"
+# Пустой список ключей файла не трогает.
+merge_authorized_keys "$AKF" "" || die "merge_authorized_keys: пустые ключи"
+assert_eq "merge_authorized_keys: пустой список ничего не меняет" "4" \
+"$(wc -l < "$AKF" | tr -d ' ')"
+rm -rf "$AKT"
 
 # --- read_dns ---
 assert_eq "read_dns wan-dhcp-lan-static" "1.1.1.1|lan" \
