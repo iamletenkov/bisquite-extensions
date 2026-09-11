@@ -1,6 +1,17 @@
 WINDOW_MODE: 'fullscreen' # In what mode to run, one of hidden|automaticvisibility|windowed|minimized|maximized|fullscreen
 TOUCHSCREEN: true # Enables support for touchscreen
-HOME_PAGE: 'http://192.168.202.78/'  # Url to load as homepage
+# Url to load as homepage.
+#
+# Здесь стоял адрес частной сети, в которой файл когда-то писали (какой
+# именно — в README, раздел про конфигурацию). У любого другого оператора
+# он недостижим, и недостижим МОЛЧА: киоск показывает ошибку сети, то есть
+# дефект конфигурации читается как неисправность железа. Взято то же значение, что и у соседнего
+# расширения kiosk (его configure.sh, раздел про умолчания), — чтобы во всей
+# цепочке умолчание было одно, а не два разных.
+#
+# Это умолчание, а не рекомендация: свой адрес подставляют своим config.yaml
+# (см. README, раздел про конфигурацию).
+HOME_PAGE: 'https://github.com/iamletenkov/bisquite'
 
 IDLE_TIME: 0 # Seconds, How log must be kiosk idle to redirect to HOME_PAGE, 0=disabled
 WHITE_LIST:
@@ -34,11 +45,21 @@ EXTRA_ARGUMENTS: "--disable-pinch --overscroll-history-navigation=0" # Pass extr
 
 # Allowed features in browser
 # Uncomment feature you want to enable
-ALLOWED_FEATURES:
+#
+# `invalid-certificate` был здесь ВКЛЮЧЁН по умолчанию, то есть браузер,
+# который показывает одну страницу и целиком от неё зависит, принимал любой
+# сертификат. Для стенда с самоподписанным HTTPS это осмысленно — но тогда
+# это надо написать в своём config.yaml, а не получить молча: снятая
+# проверка TLS не должна приезжать вместе с умолчанием.
+#
+# Пустой список задан ЯВНО (`[]`), а не оставлен пустым ключом: `ALLOWED_FEATURES:`
+# без значения — это YAML null, и пакету достался бы не «ничего не
+# разрешено», а отсутствие значения.
+ALLOWED_FEATURES: []
 #  - desktop-audio-video-capture  # Allows recording desktop audio and video
 #  - desktop-video-capture  # Allows recording desktop video
 #  - geolocation  # Allows geolocation
-  - invalid-certificate  # Ignores invalid certificate
+#  - invalid-certificate  # Ignores invalid certificate
 #  - media-audio-capture  # Allows recording audio from capture device (MIC)
 #  - media-audio-video-capture  # Allows recording audio and video from capture device (Camera w/ MIC)
 #  - media-video-capture  # Allows recording vide from capture device (Camera)
