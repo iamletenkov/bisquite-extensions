@@ -51,15 +51,42 @@ check_dependencies() {
         missing_deps+=("code-server")
     fi
 
-    if ! command -v yq >/dev/null 2>&1; then
-        missing_deps+=("yq")
-    fi
-
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
         log_error "Missing required dependencies: ${missing_deps[*]}"
         log_error "Please run install.sh first"
         exit 1
     fi
+}
+
+# Чтение одного скалярного поля из config.yaml.
+#
+# ПОЧЕМУ ЗДЕСЬ ЗАПАСНОЙ ПУТЬ, А НЕ ТРЕБОВАНИЕ yq. Асимметрия между фазами
+# была багом: install.sh (сборка) с самого начала читает ЭТОТ ЖЕ файл через
+# grep/sed, когда yq недоступен, — с комментарием «yq может не быть
+# установлен на ранних этапах». А configure.sh на тех же четырёх полях
+# падал с "Missing required dependencies: yq".
+#
+# Воспроизведено 2026-09-12 на живой плате AGX Orin: code-server и mkcert
+# установились, служба configure-code-server упала на первой загрузке,
+# и code-server остался ненастроенным и незапущенным. Узнать об этом можно
+# было только на устройстве — то есть худший из возможных моментов.
+#
+# Требовать `requires: [yq]` было бы вторым решением, и оно хуже: yq тянет
+# бинарь с GitHub, и каждый профиль с code-server обязан был бы нести это
+# расширение ради чтения четырёх скаляров.
+#
+# Разбор grep/sed достаточен, потому что файл НАШ и плоский: его пишет
+# install.sh рядом, поля скалярные, без вложенности и многострочных
+# значений. yq, если он есть, по-прежнему используется первым.
+read_config_value() {
+    local key="$1" file="$2" value=""
+    if command -v yq >/dev/null 2>&1; then
+        value=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb \
+            yq -r ".${key} // \"\"" "$file" 2>/dev/null || true)
+    else
+        value=$(sed -n "s/^${key}:[[:space:]]*//p" "$file" | head -n1 | tr -d "\"'" || true)
+    fi
+    printf '%s' "$value"
 }
 
 # Чтение конфигурации из config.yaml
@@ -72,11 +99,12 @@ read_config() {
         exit 1
     fi
 
-    # Читаем значения с помощью yq в чистом окружении
-    CODE_USER=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.USER // ""' "$config_file" 2>/dev/null || echo "")
-    CODE_PASSWORD=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.PASSWORD // ""' "$config_file" 2>/dev/null || echo "none")
-    CODE_PORT=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.PORT // ""' "$config_file" 2>/dev/null || echo "9001")
-    CODE_BIND=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb yq -r '.BIND // ""' "$config_file" 2>/dev/null || echo "")
+    CODE_USER=$(read_config_value USER "$config_file")
+    CODE_PASSWORD=$(read_config_value PASSWORD "$config_file")
+    CODE_PASSWORD="${CODE_PASSWORD:-none}"
+    CODE_PORT=$(read_config_value PORT "$config_file")
+    CODE_PORT="${CODE_PORT:-9001}"
+    CODE_BIND=$(read_config_value BIND "$config_file")
     # Умолчание историческое: до появления параметра адрес был прибит
     # к 0.0.0.0, и образы, собранные раньше, обязаны вести себя как прежде.
     CODE_BIND="${CODE_BIND:-0.0.0.0}"
