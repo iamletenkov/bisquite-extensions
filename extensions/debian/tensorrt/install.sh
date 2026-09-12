@@ -51,10 +51,37 @@ fi
 log_info "apt-get update"
 apt_retry apt-get update -q || exit 1
 
-log_info "ставлю tensorrt и python3-libnvinfer (может занять несколько минут)"
-apt_retry apt-get install "${APT_OPTS[@]}" tensorrt python3-libnvinfer || {
+# ПОЧЕМУ ЕЩЁ И `nvidia-l4t-dla-compiler`. Без него `import tensorrt`
+# падает с `ImportError: libnvdla_compiler.so: cannot open shared object
+# file`, хотя C++-часть полностью на месте. Зависимостью пакета `tensorrt`
+# он НЕ тянется — проверено на собранном образе 2026-09-12: 19 пакетов
+# TensorRT, libnvinfer.so.10 есть, а Python-биндинг не импортируется.
+#
+# Питон тут не «ещё один способ» — это основной способ: Jetson берут под
+# инференс, и выглядит такой образ полностью рабочим ровно до первой
+# попытки что-нибудь запустить.
+log_info "ставлю tensorrt, python3-libnvinfer и компилятор DLA"
+apt_retry apt-get install "${APT_OPTS[@]}" \
+    tensorrt python3-libnvinfer nvidia-l4t-dla-compiler || {
     log_error "tensorrt не установился"
     exit 1
 }
+
+# LDCONFIG ЯВНО, А НЕ НАДЕЯСЬ НА ТРИГГЕР ПАКЕТА.
+#
+# libnvdla_compiler.so ложится в /usr/lib/aarch64-linux-gnu/nvidia — путь
+# объявлен в /etc/ld.so.conf.d/nvidia-tegra.conf, но КЕШ после установки
+# не перестраивается. Замер на живой плате: `ldconfig -p | grep -c nvdla`
+# давал 1 до и 2 после ручного `ldconfig`, и ровно между этими числами
+# лежала разница между падающим и работающим `import tensorrt`.
+# Внутри virt-customize триггеры и подавно не отрабатывают штатно.
+ldconfig || log_warn "ldconfig отработал с ошибкой"
+
+if ldconfig -p 2>/dev/null | grep -q "libnvdla_compiler.so"; then
+    log_info "libnvdla_compiler.so виден загрузчику"
+else
+    log_error "libnvdla_compiler.so не виден загрузчику — import tensorrt упадёт"
+    exit 1
+fi
 
 log_info "готово: $(dpkg-query -W -f='${Version}' tensorrt 2>/dev/null || echo '?')"
