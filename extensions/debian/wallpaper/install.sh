@@ -51,6 +51,13 @@ fi
 #
 # ОТСУТСТВИЕ ФАЙЛА РЯДОМ — ОТКАЗ СБОРКИ, а не предупреждение: иначе юнита
 # в образе не будет, а узнать об этом можно только на устройстве.
+# КОПИРОВАТЬ configure.sh И get_cloud_user.sh НЕ НАДО, И ЭТО НЕ ЭКОНОМИЯ.
+#
+# Каталог расширения целиком кладёт в гостя сам bisquite — в
+# /opt/vmsetup/<имя>/, оттуда же он и запускает этот install.sh. То есть
+# SCRIPT_DIR УЖЕ равен /opt/vmsetup/wallpaper, и `install` из него туда же
+# отказывает: «are the same file». Проверено отказом сборки 2026-09-12.
+# Юнит поэтому ставится один, а ExecStart указывает прямо в этот каталог.
 for f in configure-wallpaper.service configure.sh get_cloud_user.sh; do
     if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
         log_error "рядом нет $f — обои не применятся на первой загрузке"
@@ -58,9 +65,6 @@ for f in configure-wallpaper.service configure.sh get_cloud_user.sh; do
     fi
 done
 
-install -d /opt/vmsetup/wallpaper
-install -m 0755 "$SCRIPT_DIR/configure.sh" /opt/vmsetup/wallpaper/
-install -m 0755 "$SCRIPT_DIR/get_cloud_user.sh" /opt/vmsetup/wallpaper/
 install -m 0644 "$SCRIPT_DIR/configure-wallpaper.service" \
     /etc/systemd/system/configure-wallpaper.service
 systemctl enable configure-wallpaper.service \
