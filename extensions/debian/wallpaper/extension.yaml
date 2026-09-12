@@ -1,0 +1,20 @@
+name: wallpaper
+version: 1.0.0
+family: deb
+# Обе оси: расширение кладёт картинку и правит dconf — ничего
+# машинно-зависимого в нём нет.
+arch: [amd64, arm64]
+# build     — install.sh кладёт файл в /usr/share/backgrounds;
+# firstboot — configure.sh прописывает его пользователю cloud-init.
+#
+# Вторая фаза здесь не для полноты: gsettings пишет в dconf КОНКРЕТНОГО
+# пользователя (~/.config/dconf/user), а его имя на сборке неизвестно —
+# учётку создаёт cloud-init. Тот же довод, что у vino-vnc и автологина.
+phase: [build, firstboot]
+provides: [wallpaper]
+# Нужен рабочий стол: без него ключи org.gnome.desktop.background просто
+# некому прочитать. Объявляем явно, чтобы отказ пришёл на СБОРКЕ.
+# Урок свежий: у code-server зависимость от yq не была объявлена, и
+# узналось это отказом службы на живой плате (2026-09-12).
+requires: [desktop-session]
+conflicts: []

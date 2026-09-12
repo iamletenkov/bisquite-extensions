@@ -1,0 +1,36 @@
+[Unit]
+Description=Set desktop wallpaper for the cloud-init user
+# ПОСЛЕ cloud-final, а не cloud-init.
+#
+# `cloud-init.service` — вторая стадия из четырёх, и пользователя на ней
+# ещё нет: его создаёт `cloud-config`, а заканчивает всё `cloud-final`.
+# Замер 2026-09-06 на Jetson Nano: службы с `After=cloud-init.service`
+# отсчитывали 40 попыток по 3 секунды и сдавались ЗА ДВЕ СЕКУНДЫ до
+# финиша `cloud-final`.
+After=cloud-final.service
+Wants=cloud-final.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/vmsetup/wallpaper/configure.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=configure-wallpaper
+TimeoutStartSec=300
+
+[Install]
+# ПРИВЯЗКА К cloud-init.target, А НЕ К multi-user.target.
+#
+# С `After=cloud-final.service` привязка к multi-user даёт цикл, потому
+# что сам `cloud-final` объявлен `After=multi-user.target`:
+#
+#     multi-user.target → тянет эту службу → ждёт cloud-final
+#                       → ждёт multi-user.target
+#
+# systemd разрывает кольцо, МОЛЧА выбрасывая нашу задачу. Замер
+# 2026-09-06 на Jetson Nano: так выбросило сразу три службы.
+#
+# `cloud-init.target` для этого и существует: он объявлен
+# `After=cloud-final.service`.
+WantedBy=cloud-init.target
