@@ -77,7 +77,15 @@ apt_retry apt-get install "${APT_OPTS[@]}" \
 # Внутри virt-customize триггеры и подавно не отрабатывают штатно.
 ldconfig || log_warn "ldconfig отработал с ошибкой"
 
-if ldconfig -p 2>/dev/null | grep -q "libnvdla_compiler.so"; then
+# ВЫВОД СНАЧАЛА В ПЕРЕМЕННУЮ. Было `ldconfig -p | grep -q …`, и под
+# `set -o pipefail` это ловушка: grep выходит по первому совпадению
+# и закрывает канал, ldconfig получает SIGPIPE и умирает с кодом 141,
+# конвейер считается неуспешным — проверка сообщает «библиотеки нет» при
+# том, что она есть. Чем длиннее вывод, тем вернее срабатывает: у
+# `ldconfig -p` это тысячи строк, поэтому здесь отказ был не случайным,
+# а стабильным (сборка 2026-09-12 упала именно так).
+LDCACHE="$(ldconfig -p 2>/dev/null || true)"
+if grep -q "libnvdla_compiler.so" <<<"$LDCACHE"; then
     log_info "libnvdla_compiler.so виден загрузчику"
 else
     log_error "libnvdla_compiler.so не виден загрузчику — import tensorrt упадёт"
