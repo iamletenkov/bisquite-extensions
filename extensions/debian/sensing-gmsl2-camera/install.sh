@@ -109,7 +109,58 @@ if [[ ! -d "$MODDIR_CAMERA" || ! -d "$MODDIR_NVCSI" ]]; then
 fi
 cp -f "$PKG/ko/tegra-camera.ko" "$MODDIR_CAMERA/"
 cp -f "$PKG/ko/nvhost-nvcsi-t194.ko" "$MODDIR_NVCSI/"
+
+# ОСТАЛЬНЫЕ МОДУЛИ ПАКЕТА — ТОЖЕ, И ЭТО НЕ ПОЛНОТА РАДИ ПОЛНОТЫ.
+#
+# Установщик самой Sensing (install.sh в пакете) кладёт только два модуля
+# выше и УДАЛЯЕТ штатный max96712.ko — в расчёте на то, что их замена
+# встроена в их же ядро. На нашем образе это не так: замер на живой плате
+# 2026-09-13 показал `grep -c max96712 /proc/kallsyms` = 0, драйвер
+# не зарегистрирован, и вся цепочка мертва:
+#
+#     pca954x 2-0070: probe failed        ← мультиплексор без драйвера
+#     /dev/video* — нет вовсе
+#
+# При этом в ko/ пакета лежат готовые модули под ЭТО ЖЕ ядро: max96712.ko
+# (дешериализатор), sgx-yuv-gmsl2.ko (сенсор), sgcam-gmsl2.ko, pwm-gpio.ko.
+# После их установки и depmod всё поднимается с первой загрузки:
+#
+#     pca954x 2-0070: registered 2 multiplexed busses for I2C switch pca9543
+#     max96712 9-0029: max96712_probe: probe success
+#     max96712 10-002d: max96712_probe: probe success
+#     /dev/video0 … /dev/video7
+#
+# Штатный max96712.ko всё равно удаляем: он от другого железа и конфликтует
+# с одноимённым модулем Sensing.
 rm -f "/lib/modules/${KERNEL_VERSION}/updates/drivers/media/i2c/max96712.ko"
+
+MODDIR_I2C="/lib/modules/${KERNEL_VERSION}/updates/drivers/media/i2c"
+MODDIR_PWM="/lib/modules/${KERNEL_VERSION}/updates/drivers/pwm"
+install -d "$MODDIR_I2C" "$MODDIR_PWM"
+for ko in max96712 sgx-yuv-gmsl2 sgcam-gmsl2; do
+    if [[ -f "$PKG/ko/$ko.ko" ]]; then
+        install -m 0644 "$PKG/ko/$ko.ko" "$MODDIR_I2C/"
+    else
+        log_error "в пакете нет ko/$ko.ko — камеры не поднимутся"
+        exit 1
+    fi
+done
+if [[ -f "$PKG/ko/pwm-gpio.ko" ]]; then
+    install -m 0644 "$PKG/ko/pwm-gpio.ko" "$MODDIR_PWM/"
+else
+    log_warn "в пакете нет ko/pwm-gpio.ko — внешняя синхронизация камер работать не будет"
+fi
+
+# DEPMOD ОБЯЗАТЕЛЕН. Без него modules.dep не знает о новых файлах, и ядро
+# не найдёт драйвер по alias'у устройства — модули просто лежат на диске.
+if ! depmod "$KERNEL_VERSION"; then
+    log_error "depmod ${KERNEL_VERSION} не отработал — модули не будут найдены"
+    exit 1
+fi
+shopt -s nullglob
+installed_ko=("$MODDIR_I2C"/*.ko "$MODDIR_PWM"/*.ko)
+shopt -u nullglob
+log_info "модули: ${#installed_ko[@]} файлов, depmod прошёл"
 
 # --- 4. DTB-оверлей -----------------------------------------------------------
 shopt -s nullglob
