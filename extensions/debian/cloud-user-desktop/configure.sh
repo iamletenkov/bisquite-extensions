@@ -52,6 +52,9 @@ fi
 # audio с pulse — звук, input — устройства ввода, render — DRI,
 # dialout и plugdev — типовые для рабочей станции. Несуществующие
 # группы пропускаются: состав зависит от дистрибутива.
+# Факт изменения запоминаем: от него зависит, надо ли перезапускать
+# менеджер пользователя (разбор — ниже, у блока перезапуска).
+groups_changed=0
 for grp in video render audio pulse input dialout plugdev; do
     getent group "$grp" >/dev/null 2>&1 || continue
     if id -nG "$user" | tr ' ' '\n' | grep -qx "$grp"; then
@@ -59,6 +62,7 @@ for grp in video render audio pulse input dialout plugdev; do
     fi
     if usermod -aG "$grp" "$user" 2>/dev/null; then
         log_info "'$user' добавлен в группу $grp"
+        groups_changed=1
     else
         log_warn "не удалось добавить '$user' в группу $grp"
     fi
@@ -222,10 +226,58 @@ for _sid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}')
         break
     fi
 done
-if (( graphical_user_session )); then
+# ОТКРЫТАЯ СЕССИЯ БЫВАЕТ ДВУХ СОРТОВ, И ОДИН ИЗ НИХ — СЛОМАННАЯ.
+#
+# Щадить чужую сессию правильно, пока она рабочая. Но есть случай, когда
+# «не трогаем» означает «оставляем нерабочий рабочий стол»: `systemd
+# --user` НАВСЕГДА забирает список групп, который был в момент его
+# старта. Успел он до того, как этот скрипт внёс пользователя в `video` —
+# сессия останется без доступа к GPU:
+#
+#     NvRmMemInitNvmap failed with Permission denied
+#     Unable to initialize the Clutter backend: no available drivers found
+#
+# и на экране «Oh no! Something has gone wrong».
+#
+# Замер на живой плате 2026-09-12: user@1000.service стартовал в 16:01:16,
+# /etc/group дописан в 16:01:28 — разрыв 12 секунд. Процесс сессии имел
+# `Groups: 27 1001` вместо `20 27 29 44 46 101 104 125 1000 1001`. Это
+# ГОНКА: пока загрузка была короче, менеджер успевал позже групп, и всё
+# работало; выросла загрузка — отказ стал воспроизводиться каждый раз.
+#
+# РЕШАЕМ ПО ФАКТУ ПРАВКИ, А НЕ ПО ОСМОТРУ СЕССИИ. Соблазн посмотреть
+# `/proc/<gnome-shell>/status` и сверить gid проверен и отброшен: когда
+# сессия сломана по-настоящему, gnome-shell крутится в цикле падений и
+# в момент проверки его может не быть вовсе — тогда осмотр молча решает,
+# что всё хорошо. А вот `groups_changed` — факт: если группы дописаны
+# ЭТИМ прогоном, значит запущенный менеджер пользователя их не видел.
+#
+# ПОЧЕМУ НЕ ЧЕРЕЗ systemd-упорядочение. Очевидный ход — drop-in для gdm3
+# с `After=configure-cloud-user-desktop.service` — даёт кольцо, и systemd
+# МОЛЧА выбрасывает gdm целиком:
+#
+#     Found ordering cycle on gdm.service/start
+#     Job gdm.service/start deleted to break ordering cycle
+#
+# Проверено на той же плате: после такого drop-in менеджер входа не
+# стартовал вовсе, экран остался чёрным. Тот же класс граблей, что описан
+# в configure-jetson-stats.service.
+if (( graphical_user_session )) && (( ! groups_changed )); then
     log_warn "графическая сессия уже открыта — менеджер входа не перезапускаю"
     log_warn "автологин для '$user' применится со следующей загрузки"
     exit 0
+fi
+
+# Сломанную сессию мало перезапустить менеджером входа: список групп
+# держит `systemd --user`, и он переживает рестарт gdm. Останавливаем его
+# явно — при следующем входе он поднимется заново и прочитает группы.
+if (( groups_changed )); then
+    _uid="$(id -u "$user" 2>/dev/null)"
+    if [[ -n "$_uid" ]]; then
+        systemctl stop "user@${_uid}.service" 2>/dev/null \
+            || log_warn "user@${_uid}.service не остановился"
+        log_info "менеджер пользователя остановлен — группы перечитаются"
+    fi
 fi
 
 for dm in gdm3 lightdm; do
