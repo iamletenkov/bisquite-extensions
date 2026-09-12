@@ -24,30 +24,32 @@ apt-get install -y \
   xorg xinput dconf-cli \
   usbutils dbus-x11 || exit 1
 
-# Браузер ставится ОТДЕЛЬНО и не обязателен.
+# Браузер ставится ОТДЕЛЬНО, не обязателен, и ТОЛЬКО нативный.
 #
-# Имя пакета различается: в Debian это `chromium`, в Ubuntu его нет вовсе
-# (замер 2026-09-10 на jammy: `E: Package 'chromium' has no installation
-# candidate`), а есть `chromium-browser` — переходник на snap. Пока браузер
-# стоял в общем списке с `|| exit 1`, установка ВСЕГО десктопа падала на
-# Ubuntu из-за одного пакета, хотя ни gdm3, ни gnome-shell от него
-# не зависят.
+# Имя пакета различается: в Debian это `chromium` — настоящий браузер,
+# обычный deb. В Ubuntu пакета `chromium` нет вовсе (замер 2026-09-10
+# на jammy: `E: Package 'chromium' has no installation candidate`), а
+# `chromium-browser` — переходник на snap, и ставить его НЕЛЬЗЯ.
 #
-# Поэтому: перебираем известные имена, ставим первое доступное, и отсутствие
-# любого — предупреждение, а не отказ. Сессия GNOME поднимется и без браузера.
-browser_installed=""
-for browser in chromium chromium-browser; do
-    if apt-get install -y "$browser" >/dev/null 2>&1; then
-        browser_installed="$browser"
-        break
-    fi
-done
-
-if [[ -n "$browser_installed" ]]; then
-    log_info "Browser installed: $browser_installed"
+# Почему нельзя (замер 2026-09-12 на собранном образе AGX Orin). Переходник
+# тянет за собой `snapd` со всеми его юнитами, а сам браузер не появляется:
+# постинст зовёт `snap install chromium`, но внутри virt-customize нет
+# работающего systemd, и снап не ставится. Итог — в образе лежит `snapd`,
+# `/snap` пуст, браузера нет. Довести дело можно только на первой загрузке
+# и только при живой сети, а образы едут на машины, где сети может не быть:
+# там это не отказывает громко, а молча не доезжает.
+#
+# Поэтому откат на `chromium-browser` убран. На Debian поведение прежнее,
+# на Ubuntu сессия GNOME поднимается без браузера — ни gdm3, ни gnome-shell
+# от него не зависят, и `task-gnome-desktop` тоже (проверено:
+# `apt-cache rdepends chromium-browser` не содержит ни одного из них).
+# Нужен браузер на Ubuntu — ставь `epiphany-browser` (WebKitGTK, 6 пакетов)
+# или `falkon` (QtWebEngine, то есть Chromium внутри) отдельным `INSTALL`.
+if apt-get install -y chromium >/dev/null 2>&1; then
+    log_info "Browser installed: chromium"
 else
-    log_warn "No chromium package available in this distribution"
-    log_warn "GNOME session works without it; install a browser manually if needed"
+    log_warn "нативного пакета chromium в этом дистрибутиве нет"
+    log_warn "сессия GNOME работает без него; переходник на snap не ставим"
 fi
 
 # Ensure Xorg configuration directory exists
