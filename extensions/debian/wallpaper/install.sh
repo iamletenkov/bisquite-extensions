@@ -19,12 +19,39 @@ log_warn(){ >&2 echo -e "${YELLOW}[WARN]${NC} wallpaper: $*"; }
 log_error(){ >&2 echo -e "${RED}[ERROR]${NC} wallpaper: $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE_SRC="$SCRIPT_DIR/wallpaper.jpg"
+
+# КАКУЮ КАРТИНКУ КЛАСТЬ — ПАРАМЕТР СЛОЯ.
+#
+# Путь ОТНОСИТЕЛЬНЫЙ, от каталога расширения: держать картинки внутри
+# расширения — единственный способ довезти их до гостя, потому что
+# bisquite копирует в образ именно этот каталог целиком, а до путей
+# хост-машины изнутри virt-customize не дотянуться.
+#
+# Задаётся из VMFILE:
+#     EXTENSION wallpaper WALLPAPER_IMAGE=images/dst_1080.jpg
+#
+# Абсолютный путь отвергается намеренно: он указывал бы на файловую
+# систему ГОСТЯ, а не хоста, и «работал» бы ровно до первого чужого
+# образа, где такого файла нет.
+WALLPAPER_IMAGE="${WALLPAPER_IMAGE:-images/dst_1080.jpg}"
+if [[ "$WALLPAPER_IMAGE" = /* ]]; then
+    log_error "WALLPAPER_IMAGE обязан быть относительным путём от каталога расширения"
+    log_error "получено: $WALLPAPER_IMAGE"
+    exit 1
+fi
+IMAGE_SRC="$SCRIPT_DIR/$WALLPAPER_IMAGE"
 IMAGE_DST="/usr/share/backgrounds/bisquite-wallpaper.jpg"
 
 # --- 1. Картинка -------------------------------------------------------------
+#
+# Отсутствие файла — ОТКАЗ СБОРКИ, а не предупреждение. Слой ставят ровно
+# затем, чтобы на рабочем столе была заданная картинка; молча собрать образ
+# без неё значит отдать роботу не то, что просили, и узнать об этом на
+# экране устройства.
 if [[ ! -f "$IMAGE_SRC" ]]; then
-    log_error "рядом нет wallpaper.jpg — класть в систему нечего"
+    log_error "нет файла: $IMAGE_SRC"
+    log_error "WALLPAPER_IMAGE=$WALLPAPER_IMAGE ищется от каталога расширения"
+    log_error "положи картинку туда или поправь параметр слоя в VMFILE"
     exit 1
 fi
 
@@ -32,7 +59,7 @@ install -d /usr/share/backgrounds
 # 0644: читать должен любой пользователь, включая того, кого создаст
 # cloud-init, и greeter дисплей-менеджера.
 install -m 0644 "$IMAGE_SRC" "$IMAGE_DST"
-log_info "картинка: $IMAGE_DST ($(du -h "$IMAGE_DST" | cut -f1))"
+log_info "картинка: $WALLPAPER_IMAGE -> $IMAGE_DST ($(du -h "$IMAGE_DST" | cut -f1))"
 
 # --- 2. Инструменты для первой загрузки -------------------------------------
 #
