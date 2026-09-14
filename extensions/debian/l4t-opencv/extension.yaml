@@ -1,0 +1,14 @@
+name: l4t-opencv
+version: 1.0.0
+family: deb
+# Только arm64: пакеты OpenCV от NVIDIA лежат в jetson/common, который
+# подключён только в образе L4T.
+arch: [arm64]
+phase: build
+provides: [opencv]
+# GStreamer-бэкенд OpenCV (cv2.CAP_GSTREAMER) собран в самой библиотеке
+# и работает на голом libgstreamer1.0, но аппаратный путь с камеры —
+# nvvidconv — даёт только l4t-gstreamer. Требованием это не объявлено:
+# OpenCV без него импортируется и работает, просто медленнее на входе.
+requires: []
+conflicts: []
