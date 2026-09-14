@@ -200,6 +200,33 @@ write_files:
 | поменять порт, адрес, пароль **насовсем** | `/opt/vmsetup/code-server/config.yaml` в госте | `sudo systemctl restart configure-code-server.service` |
 | поправить что-то в конфиге самого code-server | `<домашний каталог>/.config/code-server/config.yaml` (каталог — из `getent passwd`) | `sudo systemctl restart code-server@<пользователь>.service` |
 
+### Из манифеста записи — только первый путь
+
+`firstboot-commands` манифеста `bs device write` уезжают в `runcmd`
+cloud-init, то есть выполняются внутри `cloud-final.service`. Юнит
+`configure-code-server.service` объявлен `After=cloud-final.service`, и
+это значит: команды манифеста идут **гарантированно раньше**, а
+пользовательского `~/.config/code-server/config.yaml` в этот момент ещё
+не существует.
+
+Замер на AGX Orin 2026-09-14: `cloud-final` закончил в `02:12:24.277`,
+`configure-code-server` стартовал в `02:12:24.288` и создал
+пользовательский конфиг в `02:12:27`. `sed` по этому пути из манифеста
+правил несуществующий файл, `|| true` это проглатывал, служба писала
+свой адрес — и открытие наружу молча не доезжало.
+
+Правильная строка манифеста правит ручку сборки, и перезапускать ничего
+не надо: служба ещё не стартовала и прочитает правку сама.
+
+```yaml
+firstboot-commands:
+  - "sed -i 's/^BIND:.*/BIND: 0.0.0.0/' /opt/vmsetup/code-server/config.yaml"
+```
+
+`|| true` тут лишний: файл кладёт расширение на сборке, и его отсутствие
+означает, что образ собран не тем, чем думали, — такое обязано быть
+громким.
+
 Первый путь работает потому, что `configure.sh` сравнивает mtime своего
 `config.yaml` с меткой `/var/lib/code-server/last-config-time`: правка файла
 и есть сигнал «переконфигурируй». Замер 2026-09-06 на Jetson Nano — до этой
