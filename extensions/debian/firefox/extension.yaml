@@ -1,0 +1,14 @@
+name: firefox
+version: 1.0.0
+family: deb
+# Mozilla публикует amd64 и arm64 в packages.mozilla.org; arm64 проверен
+# на AGX Orin (jammy) 2026-09-14 — Firefox 155.0.1.
+arch: [amd64, arm64]
+# Только build: пакет и репозиторий кладутся в образ, первая загрузка
+# в сеть не ходит. Обновляется Firefox дальше обычным apt upgrade.
+phase: build
+# Способность — браузер в системе, а не рабочий стол: X-сервер или
+# сеанс сюда не входят, их даёт gnome/xfce4/lxde.
+provides: [web-browser]
+requires: []
+conflicts: []

@@ -224,9 +224,10 @@ apt и systemd, а libguestfs не умеет ставить в OpenWrt firstboo
 Chromium для arm64 нет ни в Ubuntu ports, ни в репозиториях NVIDIA —
 `chromium-browser` там транзитный пакет к снапу, `firefox` на jammy устроен
 так же, — то есть зависимость была не в реализации, а в самом пакете.
-Расширение удалено, и браузером без снапа остаются `epiphany-browser`
-(WebKitGTK) и `falkon` (QtWebEngine, то есть Chromium внутри) — оба
-ставятся в `build` обычным `INSTALL`.
+Расширение удалено. Браузер без снапа даёт расширение `firefox`: Mozilla
+собирает amd64 и arm64 сама и публикует `.deb` в `packages.mozilla.org`,
+установка идёт в `build` (проверено на AGX Orin 2026-09-14). Из репозиториев
+дистрибутива остаются `epiphany-browser` (WebKitGTK) и `falkon` (QtWebEngine).
 
 Практическое следствие для нового расширения: если работа требует
 скачивания, ей место в `build`, а `firstboot` пусть доводит уже лежащее
@@ -600,6 +601,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `cuda` | `cuda-toolkit` | `cuda-toolkit-12-6` из `jetson/common`, `nvcc` в `/usr/local/cuda/bin` |
 | `tensorrt` | `tensorrt` | мета-пакет `tensorrt` плюс `python3-libnvinfer` и `nvidia-l4t-dla-compiler` |
 | `web-remote-desktop` | `selkies` | Selkies 2.0 (AppImage) на существующем X-дисплее, WebSocket на `127.0.0.1:8080`; `selkies@.service` от пользователя сессии |
+| `web-browser` | `firefox` | `firefox` из `packages.mozilla.org` с пином 1000 поверх транзитного пакета снапа |
 | `l4t-boot-verify` | `l4t-boot-verify` | `bisquite-l4t-boot-verify.service` — `nvbootctrl verify` на каждой загрузке; вендорская `nv-l4t-bootloader-config` заглушена |
 | `gmsl2-camera` | `sensing-gmsl2-camera` | ядро и модули Sensing, DTB-оверлей, запуск камер на каждой загрузке (`modprobe.d`, правило udev, `bisquite-sensing-clock.service`) |
 | `gstreamer` | `l4t-gstreamer` | `gstreamer1.0-tools` и плагины base/good/bad/ugly/libav, RTSP-сервер, `gstreamer1.0-nice`, `python3-gst-1.0` |
