@@ -21,3 +21,4 @@ extensions/debian/cloud-user-desktop  # configure.sh:16 — чей рабочи�
 extensions/debian/docker         # configure.sh — пользователь cloud-init
 extensions/debian/jetson-stats  # configure.sh — кого вносить в группу jtop
 extensions/debian/vino-vnc      # configure.sh — чей dconf и чей ~/.config/autostart
+extensions/debian/wallpaper       # configure.sh:54 — чей рабочий стол и чьи gsettings
