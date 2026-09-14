@@ -1,0 +1,13 @@
+name: l4t-pytorch
+version: 1.0.0
+family: deb
+# Только arm64 и только L4T: колесо torch — сборка NVIDIA под JetPack,
+# с PyPI-колесом aarch64 оно несовместимо (PyPI-сборка без CUDA).
+arch: [arm64]
+phase: build
+provides: [pytorch]
+# cuda — не порядок ради порядка. torchvision собирается из исходников
+# с FORCE_CUDA=1, и ему нужен nvcc из cuda-toolkit; сам torch грузит
+# libcublas, libcufft, libcusparse и прочие библиотеки тулкита.
+requires: [cuda]
+conflicts: []
