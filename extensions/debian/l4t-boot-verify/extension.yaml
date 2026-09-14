@@ -1,0 +1,9 @@
+name: l4t-boot-verify
+version: 1.0.0
+family: deb
+# Только L4T: nvbootctrl и переменные UEFI RootfsRetryCount* есть только на Jetson.
+arch: [arm64]
+phase: build
+provides: [l4t-boot-verify]
+requires: []
+conflicts: []

@@ -1,0 +1,13 @@
+[Unit]
+Description=Mark L4T boot successful (nvbootctrl verify)
+# Та же точка, что у вендорской nv-l4t-bootloader-config.service: она зовёт
+# nv-l4t-bootloader-config.sh -v, а тот в конце — `nvbootctrl verify`.
+After=nv.service nvgetty.service l4t-rootfs-validation-config.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nvbootctrl verify
+
+[Install]
+WantedBy=multi-user.target
