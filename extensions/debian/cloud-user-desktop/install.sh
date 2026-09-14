@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Фаза сборки: убрать вендорскую учётку и погасить автологин.
+# Фаза сборки: убрать вендорскую учётку и поставить ручки рабочего стола.
 set -euo pipefail
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 log_info(){ >&2 echo -e "${GREEN}[INFO]${NC} cloud-user-desktop: $*"; }
@@ -71,25 +71,23 @@ fi
 # Написание строчными — такое же, как у `configure.sh` и у шаблона
 # `../gnome/daemon.conf`: два написания одного ключа в одном дереве читаются
 # как недосмотр, а не как решение.
-for conf in /etc/gdm3/daemon.conf /etc/gdm3/custom.conf; do
-    [[ -f "$conf" ]] || continue
-    sed -i "s/^\s*AutomaticLoginEnable\s*=.*/AutomaticLoginEnable=false/" "$conf"
-    log_info "gdm3: автологин выключен до первой загрузки ($conf)"
-done
-for conf in /etc/lightdm/lightdm.conf /etc/lightdm/lightdm.conf.d/*.conf; do
-    [[ -f "$conf" ]] || continue
-    sed -i "s/^\s*autologin-user\s*=.*/autologin-user=/" "$conf"
-    log_info "lightdm: автологин выключен до первой загрузки ($conf)"
-done
-
-# --- служба первой загрузки ---------------------------------------------------
-if [[ -f "$HERE/configure-cloud-user-desktop.service" ]]; then
-    install -m 0644 "$HERE/configure-cloud-user-desktop.service" \
-        /etc/systemd/system/configure-cloud-user-desktop.service
-    systemctl enable configure-cloud-user-desktop.service >/dev/null 2>&1 || \
-        log_warn "служба не включилась — проверьте на первой загрузке"
-    log_info "служба первой загрузки установлена"
-else
-    log_error "рядом нет configure-cloud-user-desktop.service"
+# --- ручки рабочего стола ----------------------------------------------------
+#
+# Автологин переводится на пользователя cloud-init НЕ этим расширением,
+# а общей службой bisquite-desktop.service — на каждой загрузке ДО менеджера
+# входа, вместе с группами видеоядра. Прежде это делала служба первой
+# загрузки после cloud-final, то есть уже после старта gdm, и первая загрузка
+# Jetson проигрывала гонку: Xorg автологина без группы `video` падал
+# («Failed to initialize the NVIDIA graphics device», 52 попытки), и gdm
+# показывал экран входа (AGX Orin, 2026-09-14).
+#
+# Здесь ручки ставятся потому, что вендорский рабочий стол (Jetson Nano,
+# Raspberry Pi OS) приходит без расширения gnome/xfce4/lxde — ставить
+# bisquite-desktop больше некому. Автологин по умолчанию выключен; вендорский
+# автологин на вендорскую учётку гасится первым же применением ручек.
+if [[ ! -x "$HERE/bisquite-desktop" ]]; then
+    log_error "рядом нет bisquite-desktop — автологина на пользователя cloud-init не будет"
     exit 1
 fi
+apt-get install -y x11-xserver-utils >/dev/null 2>&1 || log_warn "x11-xserver-utils не поставился — xset для DESKTOP_DISABLE_SCREEN_BLANK не будет"
+"$HERE/bisquite-desktop" install "$HERE" || exit 1

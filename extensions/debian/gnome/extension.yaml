@@ -1,11 +1,13 @@
 name: gnome
-version: 1.0.0
+version: 2.0.0
 family: deb
 # Ставится только apt-пакетами, ничего не качает по фиксированной ссылке.
 arch: [amd64, arm64]
-# build     — install.sh ставит task-gnome-desktop/gdm3 и включает юниты;
-# firstboot — configure-gnome.service гоняет configure.sh: автологин под
-#             пользователем, которого создаёт cloud-init (при сборке он неизвестен).
+# build     — install.sh ставит task-gnome-desktop/gdm3, выключает Wayland
+#             и ставит bisquite-desktop (ручки DESKTOP_*);
+# firstboot — bisquite-desktop.service на устройстве, на КАЖДОЙ загрузке до
+#             gdm: группы пользователя cloud-init, автологин, блокировка и
+#             затемнение по ручкам. 2.0.0: всё это по умолчанию ВЫКЛЮЧЕНО.
 phase: [build, firstboot]
 # xorg xinput          -> x11-server     (install.sh:21)
 # gdm3 + set-default graphical.target -> display-manager (install.sh:38-39)

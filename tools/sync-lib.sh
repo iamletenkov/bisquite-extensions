@@ -23,13 +23,13 @@ esac
 changed=0
 total=0
 
-while read -r target; do
-    dir="$REPO_ROOT/$target"
-    if [[ ! -d "$dir" ]]; then
-        echo "ОШИБКА: в tools/lib-targets.txt указан несуществующий каталог: $target" >&2
-        exit 1
-    fi
-    for name in "${VENDORED_FILES[@]}"; do
+for name in "${VENDORED_FILES[@]}"; do
+  while read -r target; do
+        dir="$REPO_ROOT/$target"
+        if [[ ! -d "$dir" ]]; then
+            echo "ОШИБКА: в списке получателей lib/$name указан несуществующий каталог: $target" >&2
+            exit 1
+        fi
         src="$LIB_DIR/$name"
         [[ -f "$src" ]] || { echo "ОШИБКА: нет источника $src" >&2; exit 1; }
         dst="$dir/$name"
@@ -50,8 +50,8 @@ while read -r target; do
             rm -f "$tmp"
             echo "записан: $target/$name"
         fi
-    done
-done < <(lib_targets)
+  done < <(lib_targets "$name")
+done
 
 if (( DRY_RUN )); then
     echo "итого: $changed из $total копий разошлись с lib/"

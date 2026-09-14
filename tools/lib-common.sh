@@ -11,21 +11,34 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LIB_DIR="$REPO_ROOT/lib"
-TARGETS_FILE="$REPO_ROOT/tools/lib-targets.txt"
+# Files vendored out of lib/, each into ITS OWN list of target directories.
+#
+# Список у каждого файла свой: get_cloud_user.sh нужен всем, кто ищет
+# пользователя cloud-init, а bisquite-desktop — только расширениям рабочего
+# стола. Общий список разложил бы CLI рабочего стола в docker и code-server.
+VENDORED_FILES=(get_cloud_user.sh bisquite-desktop)
 
-# Files vendored out of lib/ into every target directory.
-VENDORED_FILES=(get_cloud_user.sh)
+targets_file_for() {
+    case "$1" in
+        get_cloud_user.sh) echo "$REPO_ROOT/tools/lib-targets.txt" ;;
+        bisquite-desktop)  echo "$REPO_ROOT/tools/lib-targets-desktop.txt" ;;
+        *) echo "ОШИБКА: у lib/$1 нет списка получателей в lib-common.sh" >&2; return 1 ;;
+    esac
+}
 
 # Header injected right after the shebang of every generated copy.
+# Текст для get_cloud_user.sh — прежний байт в байт: существующие копии
+# не переписываются из-за того, что заголовок стал параметром.
 vendored_header() {
-    cat <<'HDR'
+    local name="$1"
+    cat <<HDR
 #
 # ============================================================================
-#  СГЕНЕРИРОВАНО ИЗ lib/get_cloud_user.sh — РУКАМИ НЕ ПРАВИТЬ.
+#  СГЕНЕРИРОВАНО ИЗ lib/${name} — РУКАМИ НЕ ПРАВИТЬ.
 #
 #  Копия лежит рядом со скриптами расширения потому, что до гостя доезжает
-#  только каталог одного расширения (`COPY_IN <ext>:/opt/vmsetup/`), а
-#  потребители ищут файл как `$SCRIPT_DIR/get_cloud_user.sh`.
+#  только каталог одного расширения (\`COPY_IN <ext>:/opt/vmsetup/\`), а
+#  потребители ищут файл как \`\$SCRIPT_DIR/${name}\`.
 #
 #  Правь источник и запусти tools/sync-lib.sh.
 #  Расхождение источника и копий ловит tools/check-lib.sh.
@@ -37,11 +50,13 @@ HDR
 render_vendored() {
     local src="$1"
     head -n 1 "$src"
-    vendored_header
+    vendored_header "$(basename "$src")"
     tail -n +2 "$src"
 }
 
-# Emit target directories (repo-relative), comments and blank lines stripped.
+# Emit target directories of lib/$1 (repo-relative), comments and blanks stripped.
 lib_targets() {
-    sed -e 's/#.*$//' -e 's/[[:space:]]*$//' "$TARGETS_FILE" | grep -v '^$'
+    local file
+    file="$(targets_file_for "$1")" || return 1
+    sed -e 's/#.*$//' -e 's/[[:space:]]*$//' "$file" | grep -v '^$'
 }

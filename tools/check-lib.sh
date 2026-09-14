@@ -16,10 +16,10 @@ err() { echo "FAIL: $*" >&2; fail=1; }
 
 declare -A expected=()
 
-while read -r target; do
-    dir="$REPO_ROOT/$target"
-    [[ -d "$dir" ]] || { err "в tools/lib-targets.txt указан несуществующий каталог: $target"; continue; }
-    for name in "${VENDORED_FILES[@]}"; do
+for name in "${VENDORED_FILES[@]}"; do
+  while read -r target; do
+        dir="$REPO_ROOT/$target"
+        [[ -d "$dir" ]] || { err "в списке получателей lib/$name указан несуществующий каталог: $target"; continue; }
         src="$LIB_DIR/$name"
         [[ -f "$src" ]] || { err "нет источника lib/$name"; continue; }
         dst="$dir/$name"
@@ -36,15 +36,15 @@ while read -r target; do
         fi
         rm -f "$tmp"
         [[ -x "$dst" ]] || err "копия не исполняемая: $target/$name"
-    done
-done < <(lib_targets)
+  done < <(lib_targets "$name")
+done
 
 # Незарегистрированные копии.
 for name in "${VENDORED_FILES[@]}"; do
     while read -r found; do
         rel="${found#"$REPO_ROOT/"}"
         if [[ -z "${expected[$rel]:-}" ]]; then
-            err "копия lib/$name лежит вне tools/lib-targets.txt: $rel"
+            err "копия lib/$name лежит вне своего списка получателей ($(basename "$(targets_file_for "$name")")): $rel"
         fi
     done < <(find "$REPO_ROOT/extensions" -type f -name "$name" | sort)
 done

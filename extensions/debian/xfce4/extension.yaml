@@ -1,7 +1,12 @@
 name: xfce4
-version: 1.0.0
+version: 2.0.0
 family: deb
 arch: [amd64, arm64]
+# build     — install.sh ставит Xfce4 и lightdm, пишет lightdm.conf и ставит
+#             bisquite-desktop (ручки DESKTOP_*);
+# firstboot — bisquite-desktop.service на устройстве, на КАЖДОЙ загрузке до
+#             lightdm. 2.0.0: автологин, отключение блокировки и затемнения
+#             по умолчанию ВЫКЛЮЧЕНЫ.
 phase: [build, firstboot]
 # xorg xinput                          -> x11-server     (install.sh:21)
 # lightdm + set-default graphical.target -> display-manager (install.sh:38-39)
