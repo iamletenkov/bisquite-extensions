@@ -178,6 +178,41 @@ Nano: сборка дошла до расширения `vino-vnc` и упала
 Неустановившийся `nvidia-container-toolkit` — предупреждение, а не отказ:
 Docker работает, GPU в контейнерах не будет.
 
+## Ядро без таблицы iptables raw
+
+Docker 28+ ставит в `raw/PREROUTING` правило DROP на пакеты, адресованные
+прямо IP контейнера мимо `docker0`. Если в ядре нет таблицы raw, он не
+снимает защиту сам, а **отказывает в запуске любого контейнера в bridge-сети**:
+
+```
+failed to set up container networking: … Unable to enable DIRECT ACCESS
+FILTERING - DROP rule: … can't initialize iptables table `raw'
+```
+
+Замер 2026-09-14, Jetson AGX Orin, ядро Sensing поверх L4T 36.4.3:
+`# CONFIG_IP_NF_RAW is not set`, модуля `iptable_raw` нет. Работало только
+`--network host`.
+
+Расширение кладёт `ExecStartPre` для `docker.service`
+(`/usr/local/libexec/bisquite-docker-iptables-raw-check`): перед каждым
+стартом dockerd он пробует `modprobe iptable_raw` и `iptables -t raw -L`,
+и **только если таблицы нет** выставляет `DOCKER_INSECURE_NO_IPTABLES_RAW=1`
+через `/run/bisquite-docker/iptables-raw.env`. На обычном ядре защита
+остаётся. Проверка — на старте, а не на сборке: внутри `virt-customize`
+ядро не загружено, а ядро образа может смениться после.
+
+Чем платите на таком ядре: соседи по сети, которые пропишут маршрут
+к `172.17.0.0/16` через эту машину, достанут до портов контейнеров
+напрямую, в том числе неопубликованных. Решение в журнале видно:
+
+```bash
+journalctl -u docker -b | grep "iptables raw"
+```
+
+Проверено на плате: без правки `docker run` падал, с ней контейнер
+стартует в bridge-сети, работают DNS, `apt-get update` внутри и проброс
+порта — и с платы, и по сети.
+
 ## OpenWrt
 
 Сюда не входит: там `opkg` (24.10) или `apk` (25.12) и нет systemd, то есть

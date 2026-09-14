@@ -1,0 +1,41 @@
+#!/bin/bash
+# Перед стартом dockerd: умеет ли ядро таблицу iptables raw.
+#
+# Docker 28+ ставит в raw/PREROUTING правило DROP на пакеты, адресованные
+# прямо IP контейнера мимо docker0 (защита от соседей по сети, которые
+# маршрутизируют к 172.17.0.0/16 через эту машину). Если таблицы нет,
+# он не отключает защиту, а ОТКАЗЫВАЕТ в запуске любого контейнера
+# в bridge-сети:
+#
+#   failed to set up container networking: … Unable to enable DIRECT ACCESS
+#   FILTERING - DROP rule: … can't initialize iptables table `raw'
+#
+# Замер 2026-09-14, Jetson AGX Orin, ядро Sensing поверх L4T 36.4.3:
+# `# CONFIG_IP_NF_RAW is not set`, модуля iptable_raw нет. Контейнеры
+# запускались только с --network host.
+#
+# Лечение Docker предусмотрел сам — DOCKER_INSECURE_NO_IPTABLES_RAW=1:
+# защита снимается, сеть работает. Выставляем её ТОЛЬКО там, где таблицы
+# действительно нет: на обычном ядре защита остаётся на месте. Решение
+# принимается на каждом старте, потому что ядро образа может смениться
+# (замена ядра — ровно то, что делает sensing-gmsl2-camera).
+#
+# Файл окружения пишется в /run: он производный, и оставлять его
+# на диске значило бы пережить смену ядра старым ответом.
+set -u
+ENV_DIR=/run/bisquite-docker
+ENV_FILE="$ENV_DIR/iptables-raw.env"
+mkdir -p "$ENV_DIR"
+
+# Модуль мог быть просто не загружен — это нормальный путь, а не обход.
+modprobe -q iptable_raw 2>/dev/null || true
+
+if iptables -t raw -L -n >/dev/null 2>&1; then
+    : > "$ENV_FILE"
+    echo "таблица iptables raw есть — защита Docker остаётся включённой"
+else
+    echo "DOCKER_INSECURE_NO_IPTABLES_RAW=1" > "$ENV_FILE"
+    echo "в ядре нет таблицы iptables raw (CONFIG_IP_NF_RAW) — dockerd запускается с DOCKER_INSECURE_NO_IPTABLES_RAW=1;" \
+         "контейнеры в bridge-сети работают, но прямой доступ соседей к IP контейнеров не фильтруется"
+fi
+exit 0

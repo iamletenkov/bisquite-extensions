@@ -240,6 +240,18 @@ NVSOURCES
     fi
 fi
 
+# --- ядро без таблицы iptables raw ---------------------------------------------
+# Docker 28+ без таблицы raw отказывает в запуске ЛЮБОГО контейнера
+# в bridge-сети (замер на Jetson AGX Orin: CONFIG_IP_NF_RAW не собран,
+# работал только --network host). Проверка — на каждом старте dockerd,
+# а не здесь: внутри virt-customize ядро не загружено, а ядро образа
+# может смениться после сборки. Разбор — в самом скрипте.
+install -D -m 0755 "$HERE/docker-iptables-raw-check" \
+    /usr/local/libexec/bisquite-docker-iptables-raw-check
+install -D -m 0644 "$HERE/10-bisquite-iptables-raw.conf" \
+    /etc/systemd/system/docker.service.d/10-bisquite-iptables-raw.conf
+log_info "проверка таблицы iptables raw перед стартом dockerd установлена"
+
 # --- сервис донастройки при первом запуске -----------------------------------
 if [[ -f "$HERE/configure-docker.service" ]]; then
     install -m 0644 "$HERE/configure-docker.service" \
