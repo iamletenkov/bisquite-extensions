@@ -106,10 +106,21 @@ export PATH="$PREFIX/usr/conda/bin:$PATH"
 export SELKIES_INTERPOSER="$PREFIX/usr/lib/selkies_joystick_interposer.so"
 export SELKIES_WEBCAM_INTERPOSER="$PREFIX/usr/lib/selkies_v4l2_interposer.so"
 
-# Звук — только если PulseAudio пользователя уже есть; свой не поднимаем.
-if [[ ! -S "$PULSE_RUNTIME_PATH/native" && "${SELKIES_AUDIO_ENABLED:-true}" == true ]]; then
-    log_warn "нет $PULSE_RUNTIME_PATH/native — звук выключен"
-    export SELKIES_AUDIO_ENABLED=false
+# Звук — только PulseAudio пользователя; свой не поднимаем. Сокет появляется
+# вместе с user@<uid>.service, а X-сессия автологина бывает готова раньше —
+# ждём до 30 с, а не выключаем звук на первой проверке. Захват — monitor
+# источника по умолчанию: имя Selkies «output.monitor» есть только в его
+# AppRun, и pcmflux откатывается на monitor sink'а по умолчанию
+# (замер на AGX Orin: alsa_output.platform-sound.analog-stereo.monitor).
+if [[ "${SELKIES_AUDIO_ENABLED:-true}" == true ]]; then
+    for _ in $(seq 1 30); do
+        [[ -S "$PULSE_RUNTIME_PATH/native" ]] && break
+        sleep 1
+    done
+    if [[ ! -S "$PULSE_RUNTIME_PATH/native" ]]; then
+        log_warn "нет $PULSE_RUNTIME_PATH/native за 30 с — звук выключен"
+        export SELKIES_AUDIO_ENABLED=false
+    fi
 fi
 
 # HTTPS: браузер даёт буфер обмена, микрофон, камеру и геймпады только

@@ -64,7 +64,7 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
 | `SELKIES_ENABLE_RESIZE` | `false` | **иначе Selkies меняет разрешение монитора** под окно браузера |
 | `SELKIES_ENCODER` | `h264enc` | NVENC/VA-API, если есть, иначе x264 |
 | `SELKIES_FRAMERATE` | `30,8-60` | 30 при старте, пользователь может поднять до 60 |
-| `SELKIES_AUDIO_ENABLED` | `true` | только если у пользователя уже работает PulseAudio |
+| `SELKIES_AUDIO_ENABLED` | `true` | звук сессии: monitor sink'а по умолчанию PulseAudio пользователя; обёртка ждёт его сокет до 30 с |
 | `SELKIES_ENABLE_CLIPBOARD` | `true` | обе стороны; `in`/`out`/`false` — по направлениям |
 | `SELKIES_FILE_TRANSFERS` | `upload,download` | в `~/Downloads` пользователя (`SELKIES_FILE_MANAGER_PATH`) |
 | `SELKIES_MICROPHONE_ENABLED`, `SELKIES_WEBCAM_ENABLED`, `SELKIES_GAMEPAD_ENABLED` | `false` | роботу не нужны |
