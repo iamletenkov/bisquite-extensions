@@ -1,0 +1,3 @@
+# Профиль камеры Sensing на каждый появившийся video-узел. Не Sensing
+# (USB-камера и т.п.) скрипт опознаёт сам и пропускает.
+ACTION=="add", SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="bisquite-sensing-camera@%k.service"

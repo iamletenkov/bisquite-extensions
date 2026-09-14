@@ -1,0 +1,65 @@
+#!/bin/bash
+# Доводка камер Sensing GMSL2 на работающей плате — то, что вендорский
+# quick_bring_up.sh делает интерактивно, без вопросов и на каждой загрузке.
+#
+#   bisquite-sensing-camera-ctl videoN      профиль камеры на один узел
+#   bisquite-sensing-camera-ctl --boost-clock   частоты VI/ISP/NVCSI/EMC на максимум
+#
+# Зовут его юниты, а не человек: bisquite-sensing-camera@videoN.service
+# (по правилу udev, на появление узла) и bisquite-sensing-clock.service.
+#
+# Настройка — /etc/default/bisquite-sensing-camera. Правка применяется
+# перезапуском юнитов, перезагрузка не нужна; режим GMSL живёт отдельно,
+# в /etc/modprobe.d/bisquite-sensing-gmsl2.conf, потому что это параметр
+# модуля, и меняется только его перезагрузкой.
+set -uo pipefail
+
+CONF=/etc/default/bisquite-sensing-camera
+SENSING_CAMERA_CONTROLS="sensor_mode=1,trig_mode=0,trig_pin=0x00020007"
+SENSING_BOOST_CLOCK=1
+# shellcheck source=/dev/null
+[[ -r "$CONF" ]] && . "$CONF"
+
+case "${1:-}" in
+    --boost-clock)
+        if [[ "$SENSING_BOOST_CLOCK" != 1 ]]; then
+            echo "SENSING_BOOST_CLOCK=$SENSING_BOOST_CLOCK — частоты не трогаю"
+            exit 0
+        fi
+        clk=/sys/kernel/debug/bpmp/debug/clk
+        rc=0
+        for c in vi isp nvcsi emc; do
+            if [[ ! -d "$clk/$c" ]]; then
+                echo "нет $clk/$c — debugfs не смонтирован или это не Tegra" >&2
+                rc=1; continue
+            fi
+            echo 1 > "$clk/$c/mrq_rate_locked" || rc=1
+            cat "$clk/$c/max_rate" > "$clk/$c/rate" || rc=1
+            echo "$c: $(cat "$clk/$c/rate")"
+        done
+        exit "$rc"
+        ;;
+    video[0-9]*)
+        dev="/dev/$1"
+        # Узел не Sensing (USB-камера, кодек, loopback) — не наш, молча мимо.
+        # Отличаем по имени субустройства: у сенсоров Sensing оно
+        # "vi-output, sgx-yuv-gmsl2 <шина>-<адрес>".
+        info="$(v4l2-ctl -d "$dev" --info 2>/dev/null || true)"
+        if ! grep -q "sgx-yuv-gmsl2" <<<"$info"; then
+            exit 0
+        fi
+        # На порту без камеры команда тоже проходит (замер 2026-09-14,
+        # video0 при detect error: rc=0), поэтому ставим на ВСЕ узлы
+        # драйвера, а не угадываем, где камера: номер порта знать не нужно.
+        if v4l2-ctl -d "$dev" -c "$SENSING_CAMERA_CONTROLS"; then
+            echo "$1: $SENSING_CAMERA_CONTROLS"
+        else
+            echo "$1: v4l2-ctl не принял '$SENSING_CAMERA_CONTROLS'" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "использование: $0 videoN | --boost-clock" >&2
+        exit 2
+        ;;
+esac

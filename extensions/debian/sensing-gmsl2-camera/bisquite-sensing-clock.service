@@ -1,0 +1,14 @@
+[Unit]
+Description=Sensing GMSL2 camera: lock VI/ISP/NVCSI/EMC clocks at max rate
+# Частоты — в debugfs, его монтирует systemd. Своих зависимостей от
+# камер у шага нет: это настройка SoC, и вендор делает её первым делом.
+Requires=sys-kernel-debug.mount
+After=sys-kernel-debug.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/bisquite-sensing-camera-ctl --boost-clock
+
+[Install]
+WantedBy=multi-user.target

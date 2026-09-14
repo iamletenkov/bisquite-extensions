@@ -1,0 +1,14 @@
+[Unit]
+Description=Sensing GMSL2 camera profile on /dev/%i
+# Запускается правилом udev на появление узла (ENV{SYSTEMD_WANTS}), а не
+# целью загрузки. Так профиль доезжает и после `rmmod`/`modprobe` модуля
+# на работающей машине: драйвер сбрасывает контролы, узел появляется
+# заново, udev снова зовёт службу. Ожидание в цикле «пока появится
+# /dev/video0» было бы гонкой с другой стороны.
+BindsTo=dev-%i.device
+After=dev-%i.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/bisquite-sensing-camera-ctl %i

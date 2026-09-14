@@ -7,13 +7,11 @@
 # Базовый образ (jetson-orin-base) остаётся общим для всего флота; этот
 # слой ложится только на VMFILE тех машин, где адаптер физически есть.
 #
-# ЧТО ДЕЛАЕТ И ЧЕГО НЕ ДЕЛАЕТ. Копирует файлы и правит extlinux.conf —
-# ровно то, что раньше делалось руками по ssh на уже прошитой плате
-# (2026-09-11, воспроизведено и задокументировано). НЕ вызывает
-# quick_bring_up.sh: выбор модели камеры и номера порта — это то, что
-# станет известно только на конкретной сборке адаптера (см. README,
-# «номер отвода кабеля не равен номеру порта»), и автоматизировать это
-# на сборке значило бы дать ложное чувство готовности.
+# ЧТО ДЕЛАЕТ. Копирует файлы и правит extlinux.conf — то, что раньше
+# делалось руками по ssh на уже прошитой плате (2026-09-11), — и кладёт
+# неинтерактивную замену quick_bring_up.sh: режим линка, профиль камеры
+# и частоты SoC применяются сами на каждой загрузке (шаг 7). Сам
+# quick_bring_up.sh по-прежнему не вызывается: он спрашивает с tty.
 #
 # ПОЧЕМУ НЕ 5.15.148-tegra ИЗ uname -r ХОСТА. Внутри virt-customize
 # гость не загружен — это chroot поверх файловой системы образа, а не
@@ -36,6 +34,30 @@ REPO_URL="https://github.com/SENSING-Technology/nvidia-jetson-camera-drivers"
 # scripts/02-fetch-camera-drivers.sh) — _YUV_ на этой камере не работает,
 # см. README и коммит 8f3212a истории расширений.
 PKG_REL="${SENSING_CAMERA_PKG_REL:-Jetson AGX Orin Devkit/SG8A-AGON-G2Y-A1/JetPack6.2/SG8A_AGON_G2Y_A1_AGX_Orin_GMSL2x8_JP6.2_L4TR36.4.3}"
+
+# Режим линка на каждом из 8 портов, через запятую: 0=GMSL1, 1=GMSL2 6 Гбит/с,
+# 2=GMSL2 3 Гбит/с. Умолчание 1 — то же, что предлагает вендорский
+# quick_bring_up.sh, если на его вопросы ответить Enter.
+SENSING_GMSLMODE="${SENSING_GMSLMODE:-1,1,1,1,1,1,1,1}"
+# Профиль камеры (контролы v4l2), ставится на все узлы драйвера. Умолчание —
+# пункт 3 вендорского меню, SG2-AR0233-5200-G-Hxxx. Другая модель — строка
+# из quick_bring_up.sh для её номера.
+SENSING_CAMERA_CONTROLS="${SENSING_CAMERA_CONTROLS:-sensor_mode=1,trig_mode=0,trig_pin=0x00020007}"
+SENSING_BOOST_CLOCK="${SENSING_BOOST_CLOCK:-1}"
+
+if [[ ! "$SENSING_GMSLMODE" =~ ^[012](,[012]){7}$ ]]; then
+    log_error "SENSING_GMSLMODE='$SENSING_GMSLMODE': нужно 8 значений 0/1/2 через запятую"
+    exit 1
+fi
+if [[ ! "$SENSING_CAMERA_CONTROLS" =~ ^[a-z_]+=[0-9a-fx]+(,[a-z_]+=[0-9a-fx]+)*$ ]]; then
+    log_error "SENSING_CAMERA_CONTROLS='$SENSING_CAMERA_CONTROLS': ожидали имя=число[,имя=число…]"
+    exit 1
+fi
+if [[ "$SENSING_BOOST_CLOCK" != 0 && "$SENSING_BOOST_CLOCK" != 1 ]]; then
+    log_error "SENSING_BOOST_CLOCK='$SENSING_BOOST_CLOCK': только 0 или 1"
+    exit 1
+fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- 1. Опознать плату ------------------------------------------------------
 #
@@ -241,6 +263,68 @@ if ! grep -q "^LABEL backup" "$EXTLINUX"; then
     log_error "резервная запись backup не появилась в extlinux.conf"
     exit 1
 fi
+
+# --- 7. Запуск камер на каждой загрузке ---------------------------------------
+#
+# БЕЗ ЭТОГО ШАГА КАДРОВ НЕТ НИ НА ОДНОМ ПОРТУ, хотя всё выглядит исправным.
+#
+# Замер на плате 2026-09-14, образ без этого шага: `/dev/video0..7` есть,
+# `max96712_probe: probe success` на обоих дешериализаторах — и на всех
+# восьми портах `sensor_probe … detect error` с `link:0x02`, а кадры —
+# одна и та же заглушка по 24 КБ. Модули ядро грузит само, по дереву
+# устройств, и без параметров: `GMSLMODE_0=0,0,0,0`, то есть GMSL1 на
+# всех портах, а камеры — GMSL2.
+#
+# Вендор делает это интерактивно, в quick_bring_up.sh: `insmod` с
+# GMSLMODE, boost_clock.sh, `v4l2-ctl -c sensor_mode=…` на выбранный
+# порт. Раньше расширение это сознательно пропускало: считалось, что
+# порт и модель известны только на месте. Порт знать не нужно — профиль
+# ставится на все узлы драйвера, на пустом порту команда проходит без
+# вреда (rc=0). Модель на роботах одного профиля одна, и она параметр.
+#
+# После этого шага, той же платой после перезагрузки: `link:0xc8` без
+# `detect error` на порту камеры, 10 разных кадров по ~217 КБ.
+#
+# Три части, и у каждой свой механизм — потому что меняются они по-разному:
+#   режим линка   /etc/modprobe.d  параметр модуля, живёт до его выгрузки
+#   профиль       правило udev     узел может появиться заново (rmmod)
+#   частоты SoC   служба загрузки  не связано с узлами вовсе
+log_info "режим GMSL по портам: $SENSING_GMSLMODE"
+IFS=, read -r -a _m <<<"$SENSING_GMSLMODE"
+install -d /etc/modprobe.d
+cat > /etc/modprobe.d/bisquite-sensing-gmsl2.conf <<EOF
+# Положено расширением sensing-gmsl2-camera (параметр SENSING_GMSLMODE).
+# 0=GMSL1, 1=GMSL2 6 Гбит/с, 2=GMSL2 3 Гбит/с; порты 0-3, затем 4-7.
+# Применяется при загрузке модуля: после правки — перезагрузка платы.
+options sgx_yuv_gmsl2 GMSLMODE_0=${_m[0]},${_m[1]},${_m[2]},${_m[3]} GMSLMODE_1=${_m[4]},${_m[5]},${_m[6]},${_m[7]}
+EOF
+
+cat > /etc/default/bisquite-sensing-camera <<EOF
+# Положено расширением sensing-gmsl2-camera. Ручка на работающей машине:
+# после правки — sudo systemctl restart 'bisquite-sensing-camera@*' bisquite-sensing-clock
+SENSING_CAMERA_CONTROLS=${SENSING_CAMERA_CONTROLS}
+SENSING_BOOST_CLOCK=${SENSING_BOOST_CLOCK}
+EOF
+
+# v4l2-ctl — единственная утилита скрипта. В базе L4T она есть не всегда.
+if ! command -v v4l2-ctl >/dev/null 2>&1; then
+    log_info "ставлю v4l-utils"
+    DEBIAN_FRONTEND=noninteractive apt-get install -q -y v4l-utils || {
+        log_error "v4l-utils не установился — профиль камер ставить будет нечем"
+        exit 1
+    }
+fi
+
+install -m 0755 "$SCRIPT_DIR/bisquite-sensing-camera-ctl" /usr/local/sbin/
+install -m 0644 "$SCRIPT_DIR/bisquite-sensing-camera@.service" \
+    "$SCRIPT_DIR/bisquite-sensing-clock.service" /etc/systemd/system/
+install -m 0644 "$SCRIPT_DIR/99-bisquite-sensing-camera.rules" /etc/udev/rules.d/
+# Включение ссылкой, а не `systemctl enable`: внутри virt-customize systemd
+# не запущен (тот же приём, что у маскирования в jetson-orin-camera.vmfile).
+install -d /etc/systemd/system/multi-user.target.wants
+ln -sf /etc/systemd/system/bisquite-sensing-clock.service \
+    /etc/systemd/system/multi-user.target.wants/bisquite-sensing-clock.service
+log_info "профиль камер: $SENSING_CAMERA_CONTROLS; частоты на максимум: $SENSING_BOOST_CLOCK"
 
 log_info "готово: ядро заменено, модули на месте, extlinux → JetsonIO"
 log_info "откат при проблемах — выбрать пункт backup в загрузочном меню"
