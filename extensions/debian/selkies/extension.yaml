@@ -1,0 +1,16 @@
+name: selkies
+version: 1.0.0
+family: deb
+# AppImage публикуется для x86_64 и aarch64; install.sh выбирает по dpkg-архитектуре.
+arch: [amd64, arm64]
+# build     — install.sh скачивает AppImage (закреплённая версия, sha256),
+#             распаковывает, кладёт юниты и /etc/default/bisquite-selkies;
+# firstboot — configure.sh включает selkies@<пользователь cloud-init>.
+#             Сети первая загрузка не требует.
+phase: [build, firstboot]
+provides: [web-remote-desktop]
+# x11-server      — Selkies снимает экран существующего X-дисплея (XShm);
+# display-manager — сессию пользователя открывает менеджер входа, и без
+#                   DESKTOP_AUTOLOGIN=1 до входа человека показывать нечего.
+requires: [x11-server, display-manager]
+conflicts: []

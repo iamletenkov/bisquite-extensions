@@ -599,6 +599,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `jetson-monitor` | `jetson-stats` | `jtop` из PyPI плюс `jtop.service`; данные идут из `tegrastats` и sysfs Tegra, а не из NVML |
 | `cuda` | `cuda-toolkit` | `cuda-toolkit-12-6` из `jetson/common`, `nvcc` в `/usr/local/cuda/bin` |
 | `tensorrt` | `tensorrt` | мета-пакет `tensorrt` плюс `python3-libnvinfer` и `nvidia-l4t-dla-compiler` |
+| `web-remote-desktop` | `selkies` | Selkies 2.0 (AppImage) на существующем X-дисплее, WebSocket на `127.0.0.1:8080`; `selkies@.service` от пользователя сессии |
 | `l4t-boot-verify` | `l4t-boot-verify` | `bisquite-l4t-boot-verify.service` — `nvbootctrl verify` на каждой загрузке; вендорская `nv-l4t-bootloader-config` заглушена |
 | `gmsl2-camera` | `sensing-gmsl2-camera` | ядро и модули Sensing, DTB-оверлей, запуск камер на каждой загрузке (`modprobe.d`, правило udev, `bisquite-sensing-clock.service`) |
 | `gstreamer` | `l4t-gstreamer` | `gstreamer1.0-tools` и плагины base/good/bad/ugly/libav, RTSP-сервер, `gstreamer1.0-nice`, `python3-gst-1.0` |
@@ -614,6 +615,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `x11vnc` | `x11-server`, `display-manager` | `x11vnc@.service` — `Requires=display-manager.service` и `DISPLAY=:0`. Путь к X authority в юните НЕ зашит: он разный под LightDM и GDM, и обёртка ищет его в рантайме |
 | `kiosk` | `x11-server`, `display-manager` | `install.sh` ставит клиентские утилиты X, но **не** `xorg`; `kiosk-chromium@.service` — `DISPLAY=:0`; `configure-kiosk.service:3` — `After=graphical.target … display-manager.service`. Путь к X authority в юните, как и у `x11vnc`, НЕ зашит — его ищет обёртка `run-kiosk.sh` |
 | `vino-vnc` | `x11-server`, `display-manager` | vino живёт ВНУТРИ пользовательской сессии: `configure.sh` пишет `gsettings` в dconf пользователя и кладёт автозапуск в его `~/.config/autostart`, а сессию открывает дисплей-менеджер. Системного юнита и поиска X authority здесь нет вовсе — этим он и отличается от `x11vnc` |
+| `selkies` | `x11-server`, `display-manager` | `run-selkies.sh` снимает экран существующего X-дисплея и ждёт сессию пользователя; без автологина показывать нечего |
 | `l4t-pytorch` | `cuda` | `install.sh` отказывает без `/usr/local/cuda/bin/nvcc`: им собирается torchvision с `FORCE_CUDA=1`; сам torch грузит `libcublas`, `libcufft` и прочие библиотеки тулкита |
 | `l4t-tensorflow` | `cuda` | `install.sh` отказывает без `/usr/local/cuda/lib64`: TF грузит библиотеки тулкита |
 | остальные | — | ничего не требуют по коду |

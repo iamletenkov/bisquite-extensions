@@ -22,3 +22,4 @@ extensions/debian/docker         # configure.sh — пользователь clo
 extensions/debian/jetson-stats  # configure.sh — кого вносить в группу jtop
 extensions/debian/vino-vnc      # configure.sh — чей dconf и чей ~/.config/autostart
 extensions/debian/wallpaper       # configure.sh:54 — чей рабочий стол и чьи gsettings
+extensions/debian/selkies        # configure.sh — кому включить selkies@

@@ -1,0 +1,16 @@
+[Unit]
+Description=Selkies web remote desktop for user %i
+After=graphical.target display-manager.service
+Requires=display-manager.service
+
+[Service]
+Type=simple
+User=%i
+EnvironmentFile=-/etc/default/bisquite-selkies
+# Ждать сессию обёртка умеет сама и отказывает громко — см. её шапку.
+ExecStart=/bin/bash /opt/vmsetup/selkies/run-selkies.sh %i
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target
