@@ -1,0 +1,15 @@
+name: l4t-gstreamer
+version: 1.0.0
+family: deb
+# Только arm64: аппаратные плагины (nvv4l2*, nvvidconv, nvarguscamerasrc)
+# лежат в репозитории jetson/common, который подключён только в образе L4T.
+# install.sh вдобавок отказывает на образе без /etc/nv_tegra_release.
+arch: [arm64]
+# Только build: ни одного шага, зависящего от пользователя cloud-init.
+phase: build
+provides: [gstreamer, hw-video-codec]
+# Десктоп не нужен: безголовому роботу аппаратный кодек и RTSP нужнее,
+# чем машине с мышью. Плагины вывода на экран (nveglglessink, xvimagesink)
+# ставятся всё равно — без X они просто не используются.
+requires: []
+conflicts: []
