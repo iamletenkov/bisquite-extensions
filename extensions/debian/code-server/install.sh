@@ -346,6 +346,21 @@ CSCONF
   unset _cs_pass
 fi
 
+# Declaration for teleport-agent: publish code-server as a Teleport app.
+# Only NAME and URI — who may open it is decided by the operator's env label,
+# not here. Harmless without teleport-agent. configure.sh always serves TLS
+# (mkcert), hence https; loopback works whatever BIND says.
+_cs_decl_port="$(sed -n 's/^PORT:[[:space:]]*//p' "$SCRIPT_DIR/config.yaml" 2>/dev/null | head -1)"
+if [[ "$_cs_decl_port" =~ ^[0-9]{1,5}$ ]]; then
+  install -d -m 0755 /etc/bisquite/teleport/apps.d
+  install -m 0644 /dev/null /etc/bisquite/teleport/apps.d/code-server.conf
+  printf 'NAME=code-server\nURI=https://127.0.0.1:%s\n' "$_cs_decl_port" \
+    > /etc/bisquite/teleport/apps.d/code-server.conf
+  log_info "объявлен для Teleport: apps.d/code-server.conf (https://127.0.0.1:${_cs_decl_port})"
+else
+  log_warn "порт в config.yaml не прочитан — объявление для Teleport не положено"
+fi
+
 systemctl daemon-reload || true
 systemctl enable configure-code-server.service || true
 

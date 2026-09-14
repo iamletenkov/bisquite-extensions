@@ -240,6 +240,27 @@ firstboot-commands:
 Правка того же `config.yaml` в кеше источников **на хосте** не делает ничего:
 в образе уже лежит копия.
 
+## Веб-приложение Teleport
+
+С 1.1.0 `install.sh` кладёт объявление для расширения `teleport-agent`:
+
+```
+/etc/bisquite/teleport/apps.d/code-server.conf
+NAME=code-server
+URI=https://127.0.0.1:<PORT>
+```
+
+Порт — из `config.yaml` после параметров VMFILE; схема `https`, потому что
+`configure.sh` всегда выпускает сертификат mkcert. Файл безвреден без
+`teleport-agent`. С ним code-server публикуется как
+`https://code-server.<нода>.<хост прокси>` — через Teleport, при
+`CODE_SERVER_BIND=127.0.0.1` и без пароля: доступ решает метка `env` ноды
+и `tpApps` пользователя, а не code-server. Не публиковать —
+`bisquite-teleport set TELEPORT_APPS_DISABLE=code-server`.
+
+Порт, сменённый на живой машине в `~/.config/code-server/config.yaml`,
+объявление не догоняет — поправьте и файл в `apps.d`.
+
 ## Повторные загрузки
 
 `configure.sh` ничего не делает, если ни `user-data`, ни его `config.yaml`

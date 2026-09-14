@@ -1,5 +1,5 @@
 name: code-server
-version: 1.0.0
+version: 1.1.0
 family: deb
 # amd64 и arm64. Ограничение вносил не code-server, а mkcert: install.sh
 # качал его по прибитой ссылке mkcert-v1.4.4-linux-amd64 и валидировал ELF,
