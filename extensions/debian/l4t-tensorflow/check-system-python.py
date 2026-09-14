@@ -21,8 +21,16 @@ import sys
 APT_ROOT = "/usr/lib/python3/"
 # apt-cache depends cloud-init на jammy: python3-requests, -jinja2, -yaml,
 # -jsonschema, -jsonpatch, -oauthlib, -configobj, -serial, -debconf.
-CLOUD_INIT_DEPS = ("requests", "jinja2", "yaml", "jsonschema", "jsonpatch",
-                   "oauthlib", "configobj", "serial")
+CLOUD_INIT_DEPS = (
+    "requests",
+    "jinja2",
+    "yaml",
+    "jsonschema",
+    "jsonpatch",
+    "oauthlib",
+    "configobj",
+    "serial",
+)
 
 failed = []
 for name in CLOUD_INIT_DEPS:

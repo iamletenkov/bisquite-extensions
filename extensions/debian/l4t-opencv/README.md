@@ -26,12 +26,13 @@ GStreamer, FFmpeg и V4L2. **Без CUDA.**
 
 ```python
 import cv2
+
 pipeline = (
     "v4l2src device=/dev/video6 ! video/x-raw,format=UYVY,width=1920,height=1080 "
     "! nvvidconv ! video/x-raw,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! appsink"
 )
 cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-ok, frame = cap.read()   # frame.shape == (1080, 1920, 3)
+ok, frame = cap.read()  # frame.shape == (1080, 1920, 3)
 ```
 
 ## Чего нет: CUDA
