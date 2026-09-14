@@ -9,7 +9,7 @@ User=%i
 Environment=DISPLAY=:0
 # Параметры пишет install.sh из переменных окружения VMFILE; дефис означает
 # «нет файла — не ошибка», умолчания живут в самой обёртке.
-EnvironmentFile=-/etc/default/bisquite-x11vnc
+EnvironmentFile=-/etc/bisquite/x11vnc/config
 # Ждём сокет X. Он есть и под Wayland (его создаёт mutter для Xwayland),
 # поэтому сокет — не признак пригодной сессии; тип сессии проверяет обёртка.
 ExecStartPre=/bin/bash -c 'for i in {1..30}; do [ -S /tmp/.X11-unix/X0 ] && break || sleep 2; done'

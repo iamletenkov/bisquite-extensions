@@ -73,7 +73,7 @@ resolve_user(){
 # рабочий стол — ровно противоположное задуманному.
 hand_over_passfile(){
   local cloud_user="$1"
-  local env_file=/etc/default/bisquite-x11vnc
+  local env_file=/etc/bisquite/x11vnc/config
   local passfile
 
   [[ -f "$env_file" ]] || return 0
@@ -131,7 +131,7 @@ configure_x11vnc_service(){
   # Порт, дисплей, пароль и адрес прослушивания сюда больше не читаются:
   # раньше их доставали из config.yaml и НИГДЕ не использовали — юнит
   # хардкодил свои значения. Теперь они приходят из VMFILE переменными
-  # окружения, install.sh кладёт их в /etc/default/bisquite-x11vnc,
+  # окружения, install.sh кладёт их в /etc/bisquite/x11vnc/config,
   # а юнит читает оттуда.
   systemctl enable "x11vnc@${cloud_user}.service" || true
   # Без `|| true`: отказ обязан быть виден. Раньше обе команды глушились,

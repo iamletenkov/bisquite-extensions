@@ -4,6 +4,10 @@ VNC-доступ к рабочему столу X11 для пользовате�
 Сервер поднимается системным юнитом-шаблоном `x11vnc@<пользователь>.service`
 и по умолчанию слушает только петлю.
 
+**С 2.0.0 файл параметров — `/etc/bisquite/x11vnc/config`** (был `/etc/default/bisquite-x11vnc`).
+Прежний путь не читается; если файл по нему остался в базовом образе,
+установка его удаляет.
+
 ## Манифест
 
 | Поле | Значение |
@@ -77,7 +81,7 @@ EXTENSION x11vnc X11VNC_PORT=5901 X11VNC_PASSWORD=секрет
 | `X11VNC_PASSWORD` | пусто | пароль; без него сервер поднимается с `-nopw` |
 | `X11VNC_LISTEN` | `localhost` | `localhost` — только петля (`-localhost`), **любое другое значение** — все интерфейсы |
 
-`install.sh` кладёт первые три в `/etc/default/bisquite-x11vnc`, юнит читает
+`install.sh` кладёт первые три в `/etc/bisquite/x11vnc/config`, юнит читает
 оттуда. Пароль туда не пишется: `x11vnc -storepasswd` кладёт его
 в `/etc/x11vnc/passwd` в собственном формате `-rfbauth`, а в файл окружения
 уезжает только путь (`X11VNC_PASSFILE`).
@@ -107,12 +111,12 @@ ssh -L 5900:localhost:5900 пользователь@адрес
 
 ## Параметры времени выполнения
 
-Параметры живут в **`/etc/default/bisquite-x11vnc`** — это `EnvironmentFile`
+Параметры живут в **`/etc/bisquite/x11vnc/config`** — это `EnvironmentFile`
 юнита `x11vnc@.service`, а не копия сборочных значений. Менять их на живой
 машине можно и пересобирать образ для этого не нужно.
 
 ```console
-$ cat /etc/default/bisquite-x11vnc
+$ cat /etc/bisquite/x11vnc/config
 X11VNC_PORT=5900
 X11VNC_DISPLAY=:0
 X11VNC_LISTEN=localhost
@@ -122,7 +126,7 @@ X11VNC_LISTEN=localhost
 
 ```bash
 # 1. поменять значение (любое, кроме localhost, означает «все интерфейсы»)
-sudo sed -i 's/^X11VNC_LISTEN=.*/X11VNC_LISTEN=all/' /etc/default/bisquite-x11vnc
+sudo sed -i 's/^X11VNC_LISTEN=.*/X11VNC_LISTEN=all/' /etc/bisquite/x11vnc/config
 
 # 2. задать пароль, если его ещё нет, — без него сервер поднимается с -nopw
 sudo install -d -m 0755 /etc/x11vnc
@@ -130,8 +134,8 @@ sudo x11vnc -storepasswd 'пароль' /etc/x11vnc/passwd
 # файл читает сервер, а он работает под пользователем, а не под root
 sudo chown <пользователь> /etc/x11vnc/passwd
 sudo chmod 0600 /etc/x11vnc/passwd
-grep -q X11VNC_PASSFILE /etc/default/bisquite-x11vnc || \
-  echo 'X11VNC_PASSFILE=/etc/x11vnc/passwd' | sudo tee -a /etc/default/bisquite-x11vnc
+grep -q X11VNC_PASSFILE /etc/bisquite/x11vnc/config || \
+  echo 'X11VNC_PASSFILE=/etc/x11vnc/passwd' | sudo tee -a /etc/bisquite/x11vnc/config
 
 # 3. перезапустить сервер того пользователя, для которого он включён
 systemctl list-units 'x11vnc@*'                  # узнать имя экземпляра
@@ -219,7 +223,7 @@ ss -ltnp | grep 5900
   было, и узнавал об этом тот, кто включил плату без монитора;
 - кладёт `/etc/systemd/system/x11vnc@.service`
   и `/etc/systemd/system/configure-x11vnc.service`;
-- пишет `/etc/default/bisquite-x11vnc` и, если задан пароль,
+- пишет `/etc/bisquite/x11vnc/config` и, если задан пароль,
   `/etc/x11vnc/passwd` правами `0600`; **не записавшийся файл пароля — тоже
   отказ**, потому что без него сервер поднимается с `-nopw`;
 - включает `configure-x11vnc.service`;
@@ -353,7 +357,7 @@ VMFILE**; в примерах основного репозитория это `
 На собранном образе:
 
 ```console
-$ virt-cat -a образ.qcow2 /etc/default/bisquite-x11vnc
+$ virt-cat -a образ.qcow2 /etc/bisquite/x11vnc/config
 $ virt-ls -a образ.qcow2 /etc/systemd/system | grep x11vnc
 ```
 

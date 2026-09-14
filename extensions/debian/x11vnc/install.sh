@@ -78,12 +78,18 @@ install -m 0644 "$SCRIPT_DIR/configure-x11vnc.service" \
 chmod +x "$SCRIPT_DIR/run-x11vnc.sh"
 
 # Параметры в EnvironmentFile, который читает юнит.
-install -d -m 0755 /etc/default
+# The file moved from /etc/default/bisquite-x11vnc in 2.0.0. The old path is
+# not read as a fallback; remove it so the image has one source of truth.
+if [[ -e /etc/default/bisquite-x11vnc ]]; then
+  log_info "удаляю /etc/default/bisquite-x11vnc: параметры теперь в /etc/bisquite/x11vnc/config"
+  rm -f /etc/default/bisquite-x11vnc
+fi
+install -d -m 0755 /etc/bisquite/x11vnc
 {
   echo "X11VNC_PORT=${X11VNC_PORT}"
   echo "X11VNC_DISPLAY=${X11VNC_DISPLAY}"
   echo "X11VNC_LISTEN=${X11VNC_LISTEN}"
-} > /etc/default/bisquite-x11vnc
+} > /etc/bisquite/x11vnc/config
 
 if [[ -n "$X11VNC_PASSWORD" ]]; then
   # Файл пароля VNC, а не открытый пароль в окружении: у -rfbauth формат свой.
@@ -107,7 +113,7 @@ if [[ -n "$X11VNC_PASSWORD" ]]; then
     # чтобы его закрыть: обёртка проверяет файл на читаемость и при отказе
     # прежде поднимала сервер с `-nopw`.
     chmod 0600 /etc/x11vnc/passwd
-    echo "X11VNC_PASSFILE=/etc/x11vnc/passwd" >> /etc/default/bisquite-x11vnc
+    echo "X11VNC_PASSFILE=/etc/x11vnc/passwd" >> /etc/bisquite/x11vnc/config
     log_info "пароль записан в /etc/x11vnc/passwd"
   else
     # Отказ, а не предупреждение: пароль просили, пароля не будет, а сервер
@@ -119,7 +125,7 @@ if [[ -n "$X11VNC_PASSWORD" ]]; then
     exit 1
   fi
 fi
-chmod 0644 /etc/default/bisquite-x11vnc
+chmod 0644 /etc/bisquite/x11vnc/config
 
 log_info "порт ${X11VNC_PORT}, дисплей ${X11VNC_DISPLAY}, слушает ${X11VNC_LISTEN}"
 if [[ "$X11VNC_LISTEN" != "localhost" && -z "$X11VNC_PASSWORD" ]]; then
