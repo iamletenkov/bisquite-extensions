@@ -8,7 +8,7 @@ Type=simple
 User=%i
 EnvironmentFile=-/etc/bisquite/selkies/config
 # Ждать сессию обёртка умеет сама и отказывает громко — см. её шапку.
-ExecStart=/bin/bash /opt/vmsetup/selkies/run-selkies.sh %i
+ExecStart=/bin/bash /opt/bisquite/selkies/run-selkies.sh %i
 Restart=always
 RestartSec=5
 

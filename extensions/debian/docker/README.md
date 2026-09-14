@@ -2,6 +2,11 @@
 
 Docker CE из официального apt-репозитория Docker (`download.docker.com`).
 
+> **С 3.0.0 — раскладка 2.** Каталог расширения в госте —
+> `/opt/bisquite/docker/` (был `/opt/vmsetup/docker/`), в том числе
+> в `ExecStart` юнита первой загрузки; `lib/get_cloud_user.sh` — ссылкой на общий код источника, а не копией.
+> Нужен bisquite с поддержкой `layout: 2`.
+
 ## Манифест
 
 | Поле | Значение |
@@ -232,9 +237,8 @@ journalctl -u docker -b | grep "iptables raw"
 
 ## Как определяется пользователь для группы `docker`
 
-`configure.sh` зовёт вендоренную копию `get_cloud_user.sh` (источник —
-`lib/get_cloud_user.sh`, копии кладёт `tools/sync-lib.sh`; руками копию не
-правят): имя берётся из userdata cloud-init, а при отсутствии `cloud-init`
+`configure.sh` зовёт общий `lib/get_cloud_user.sh` через свой каталог
+(`/opt/bisquite/docker/lib` — ссылка на `lib/` источника, её ставит сборка): имя берётся из userdata cloud-init, а при отсутствии `cloud-init`
 или `yq` — первая по порядку `/etc/passwd` учётка с uid 1000..65533 и
 домашним каталогом. Не определился никто — предупреждение, группа не
 назначена; отказа нет, потому что Docker от этого работать не перестаёт.
@@ -264,7 +268,7 @@ journalctl -u docker -b | grep "iptables raw"
 объявлен `After=multi-user.target` — это кольцо, и оно замерено (2026-09-06,
 три молча выброшенных службы).
 
-Вывод `get_cloud_user.sh` в stderr **не глушится**: скрипт говорит там, что
+Вывод `lib/get_cloud_user.sh` в stderr **не глушится**: скрипт говорит там, что
 пошёл запасным путём и какую учётку выбрал, — ровно то, что надо видеть
 в журнале, если группу получил не тот пользователь.
 
@@ -297,22 +301,13 @@ journalctl -u docker -b | grep "iptables raw"
 EXTENSION docker
 ```
 
-Прежняя запись продолжает работать — она привязывает VMFILE к раскладке
-каталогов на конкретной машине, но ничего не требует от кеша источников:
+Ручной формы через `COPY_IN` больше нет: сборка кладёт каталог в
+`/opt/bisquite/docker/` и ставит рядом ссылку `lib` на общий код источника,
+а это делает только `EXTENSION` (раскладка 2, см. `docs/extensions.md`).
 
-```vmfile
-COPY_IN <чекаут>/extensions/debian/docker:/opt/vmsetup/
-RUN_COMMAND chmod +x /opt/vmsetup/docker/*.sh
-RUN_COMMAND /opt/vmsetup/docker/install.sh
-```
-
-`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
-VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
-и глубина зависит от того, насколько глубоко лежит сам VMFILE.
-
-Обе формы кладут каталог в `/opt/vmsetup/docker` и запускают `install.sh`
-внутри `virt-customize`, то есть под барьером архитектуры: arm64-образ
-собирается только на arm64-хосте. Путь `/opt/vmsetup/docker` прибит в
+`install.sh` запускается внутри `virt-customize`, то есть под барьером
+архитектуры: arm64-образ собирается только на arm64-хосте. Путь
+`/opt/bisquite/docker` прибит в
 `ExecStart` юнита первой загрузки — каталог обязан лежать именно там.
 
 **Предупреждения этого расширения по умолчанию не видны.** `virt-customize`

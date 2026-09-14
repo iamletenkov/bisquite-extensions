@@ -13,7 +13,9 @@ log_warn(){ echo -e "${YELLOW}[WARN]${NC} $*" >&2; }
 log_error(){ echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_YAML="$SCRIPT_DIR/config.yaml"
+# Settings of the device, written by install.sh from the build defaults
+# (config.yaml next to this script). Edit this file, not the one in /opt.
+CONFIG_YAML=/etc/bisquite/kiosk/config.yaml
 
 check_prereqs(){
   if ! command -v yq >/dev/null 2>&1; then
@@ -24,8 +26,8 @@ check_prereqs(){
     log_error "chromium is not installed"
     exit 1
   fi
-  if [[ ! -x "$SCRIPT_DIR/get_cloud_user.sh" ]]; then
-    log_error "get_cloud_user.sh not found or not executable at $SCRIPT_DIR/get_cloud_user.sh"
+  if [[ ! -x "$SCRIPT_DIR/lib/get_cloud_user.sh" ]]; then
+    log_error "get_cloud_user.sh not found or not executable at $SCRIPT_DIR/lib/get_cloud_user.sh"
     exit 1
   fi
   if [[ ! -f "$CONFIG_YAML" ]]; then
@@ -76,7 +78,7 @@ resolve_user(){
 
   # Wait up to 120s for cloud user to appear to avoid racing cloud-init
   while true; do
-    if user="$("$SCRIPT_DIR"/get_cloud_user.sh 2>/dev/null || true)" && [[ -n "$user" ]]; then
+    if user="$("$SCRIPT_DIR"/lib/get_cloud_user.sh 2>/dev/null || true)" && [[ -n "$user" ]]; then
       if id "$user" >/dev/null 2>&1; then
         log_info "Found user from cloud-init: $user"
         echo "$user"

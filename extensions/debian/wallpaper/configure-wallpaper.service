@@ -13,7 +13,7 @@ Wants=cloud-final.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash /opt/vmsetup/wallpaper/configure.sh
+ExecStart=/bin/bash /opt/bisquite/wallpaper/configure.sh
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=configure-wallpaper

@@ -16,7 +16,7 @@ EnvironmentFile=-/var/lib/kiosk/config
 # ExecStartPre с `xdpyinfo` убран: он проверял дисплей тем же неверным
 # authority, что и сам запуск, то есть повторял ошибку. Ожидание дисплея
 # переехало внутрь обёртки, где кандидат и проверка — одно и то же.
-ExecStart=/bin/bash /opt/vmsetup/kiosk/run-kiosk.sh %i
+ExecStart=/bin/bash /opt/bisquite/kiosk/run-kiosk.sh %i
 
 Restart=always
 RestartSec=10

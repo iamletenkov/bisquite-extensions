@@ -1,5 +1,6 @@
 name: docker
-version: 2.1.0
+version: 3.0.0
+layout: 2
 family: deb
 # Репозиторий Docker публикует binary-amd64 и binary-arm64 для всех целевых
 # сюит. binary-armhf там тоже есть, но проект его не собирает.

@@ -1,5 +1,6 @@
 name: l4t-opencv
-version: 1.0.0
+version: 1.1.0
+layout: 2
 family: deb
 # Только arm64: пакеты OpenCV от NVIDIA лежат в jetson/common, который
 # подключён только в образе L4T.

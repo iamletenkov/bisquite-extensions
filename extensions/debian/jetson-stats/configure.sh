@@ -23,8 +23,8 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} jetson-stats: $*"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 check_prereqs(){
-    if [[ ! -x "$SCRIPT_DIR/get_cloud_user.sh" ]]; then
-        log_error "нет $SCRIPT_DIR/get_cloud_user.sh или он не исполняемый"
+    if [[ ! -x "$SCRIPT_DIR/lib/get_cloud_user.sh" ]]; then
+        log_error "нет $SCRIPT_DIR/lib/get_cloud_user.sh или он не исполняемый"
         exit 1
     fi
 }
@@ -35,7 +35,7 @@ check_prereqs(){
 resolve_user(){
     local user attempts=0 max_attempts=40
     while true; do
-        if user="$("$SCRIPT_DIR/get_cloud_user.sh" 2>/dev/null || true)" && [[ -n "$user" ]]; then
+        if user="$("$SCRIPT_DIR/lib/get_cloud_user.sh" 2>/dev/null || true)" && [[ -n "$user" ]]; then
             if id "$user" >/dev/null 2>&1; then
                 echo "$user"
                 return 0

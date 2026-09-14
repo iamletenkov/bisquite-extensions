@@ -1,5 +1,6 @@
 name: x11vnc
-version: 2.0.0
+version: 3.0.0
+layout: 2
 # 2.0.0: файл параметров переехал в /etc/bisquite/x11vnc/config (был
 #        /etc/default/bisquite-x11vnc; прежний не читается, установка удаляет).
 family: deb

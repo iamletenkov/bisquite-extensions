@@ -36,7 +36,7 @@ Wants=cloud-final.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash /opt/vmsetup/jetson-stats/configure.sh
+ExecStart=/bin/bash /opt/bisquite/jetson-stats/configure.sh
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=configure-jetson-stats

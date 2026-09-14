@@ -7,7 +7,7 @@ Requires=display-manager.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash /opt/vmsetup/selkies/configure.sh
+ExecStart=/bin/bash /opt/bisquite/selkies/configure.sh
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=configure-selkies

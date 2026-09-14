@@ -35,7 +35,7 @@ case "$(dpkg --print-architecture)" in
     *) log_error "архитектура $(dpkg --print-architecture) — AppImage Selkies только для amd64 и arm64"; exit 1 ;;
 esac
 
-for f in selkies@.service configure-selkies.service run-selkies.sh configure.sh get_cloud_user.sh; do
+for f in selkies@.service configure-selkies.service run-selkies.sh configure.sh lib/get_cloud_user.sh; do
     if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
         log_error "рядом нет $f — Selkies на устройстве не запустится"
         exit 1

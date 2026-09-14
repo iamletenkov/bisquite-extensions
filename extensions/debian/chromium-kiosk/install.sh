@@ -47,7 +47,7 @@ apt-get install -y chromium-kiosk || exit 1
 # кто собирал образ. Образец громкого отказа — vino-vnc/install.sh.
 #
 # Ищем рядом с собой ($SCRIPT_DIR), а не по зашитому
-# /opt/vmsetup/chromium-kiosk/: проверка обязана отвечать на вопрос «файл
+# /opt/bisquite/chromium-kiosk/: проверка обязана отвечать на вопрос «файл
 # приехал рядом со мной?», а не «раскладка EXTENSION всё ещё такая?». Скрипт
 # запускается из того самого каталога, куда его скопировали, поэтому
 # $SCRIPT_DIR верен при любой раскладке, и её смена не уронит все сборки разом.
@@ -67,6 +67,15 @@ done
 # что и у ненайденного файла, значит и отказ тот же.
 install -m 0644 "$SCRIPT_DIR/configure-chromium-kiosk.service" \
   /etc/systemd/system/configure-chromium-kiosk.service
+
+# Настройки устройства — /etc/bisquite/chromium-kiosk/config.yaml; config.yaml
+# рядом со скриптом — умолчания сборки. В /opt по FHS живёт код, а настройки
+# держат в /etc: их правят манифесты записи, их берут etckeeper и бэкапы.
+# Файл переписывается умолчаниями на каждой установке — свой config.yaml
+# кладётся UPLOAD-ом ПОСЛЕ `EXTENSION chromium-kiosk`. Права — как у файла,
+# который из него делает configure.sh (/etc/chromium-kiosk/config.yml): 0644.
+install -d -m 0755 /etc/bisquite/chromium-kiosk
+install -m 0644 "$SCRIPT_DIR/config.yaml" /etc/bisquite/chromium-kiosk/config.yaml
 
 # Enable configuration service
 systemctl daemon-reload || true

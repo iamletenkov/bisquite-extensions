@@ -33,8 +33,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # path and which account it picked — exactly what has to be in the journal when
 # the group went to an unexpected user.
 user=""
-if [[ -x "$HERE/get_cloud_user.sh" ]]; then
-    user="$("$HERE/get_cloud_user.sh" || true)"
+if [[ -x "$HERE/lib/get_cloud_user.sh" ]]; then
+    user="$("$HERE/lib/get_cloud_user.sh" || true)"
 fi
 
 if [[ -z "$user" ]]; then

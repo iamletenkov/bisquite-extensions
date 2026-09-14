@@ -227,7 +227,7 @@ Init-скрипт сорсит **все `*.sh` из `/usr/lib/wrt-cloudinit/lib/
 
 Инструкция `EXTENSION` здесь **не применима**: `OpenWrtBuilder` блокирует её
 целиком — расширения рассчитаны на apt и systemd, а `wrt.cloudinit` вообще
-доставляется не каталогом в `/opt/vmsetup`, а файлами по конкретным путям.
+доставляется не каталогом в `/opt/bisquite/<имя>` (`EXTENSION`), а файлами по конкретным путям.
 Манифеста `extension.yaml` у каталога поэтому нет; разбор — в
 `docs/extensions.md`.
 

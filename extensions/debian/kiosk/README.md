@@ -3,6 +3,12 @@
 Chromium в режиме киоска: браузер разворачивается на весь экран после входа
 пользователя, которого создаёт cloud-init.
 
+> **С 2.0.0 — раскладка 2.** Каталог расширения в госте —
+> `/opt/bisquite/kiosk/` (был `/opt/vmsetup/kiosk/`), в том числе в `ExecStart`
+> юнитов; настройки устройства — `/etc/bisquite/kiosk/config.yaml` (были
+> в `/opt/vmsetup/kiosk/config.yaml`); `lib/get_cloud_user.sh` — ссылкой на общий код источника, а не копией.
+> Нужен bisquite с поддержкой `layout: 2`.
+
 ## Манифест
 
 | Поле | Значение |
@@ -27,15 +33,17 @@ Chromium в режиме киоска: браузер разворачивает
   с `|| exit 1`;
 - проверяет, что рядом с ним лежат все шесть своих файлов
   (`configure-kiosk.service`, `kiosk-chromium@.service`, `run-kiosk.sh`,
-  `configure.sh`, `config.yaml`, `get_cloud_user.sh`); **отсутствие любого —
+  `configure.sh`, `config.yaml`, `lib/get_cloud_user.sh`); **отсутствие любого —
   отказ сборки**. Раньше громким был только `run-kiosk.sh`, а ненайденные
   юниты давали предупреждение и зелёную сборку: выходило, что обёртка важнее
   юнита, который её запускает. Проверка смотрит **рядом с собой**
-  (`$SCRIPT_DIR`), а не по зашитому `/opt/vmsetup/kiosk/`, — вопрос
+  (`$SCRIPT_DIR`), а не по зашитому `/opt/bisquite/kiosk/`, — вопрос
   «файл приехал рядом со мной?», а не «раскладка всё ещё такая?»;
 - кладёт `kiosk-chromium@.service` и `configure-kiosk.service`
   в `/etc/systemd/system/`, включает **только** второй (первый — шаблон,
   его поднимает `configure.sh` по имени пользователя);
+- копирует `config.yaml` (умолчания сборки) в `/etc/bisquite/kiosk/config.yaml`
+  с правами `0644` — секретов в нём нет;
 - ставит бит исполнения на `run-kiosk.sh`.
 
 **`yq` расширение не ставит**, хотя `configure.sh` без него отказывает, —
@@ -45,7 +53,7 @@ Chromium в режиме киоска: браузер разворачивает
 
 - резолвит пользователя: `USER` из `config.yaml`, иначе из cloud-init —
   в обоих случаях с ожиданием до 120 секунд, 40 попыток по 3 с;
-- читает `config.yaml` рядом с собой;
+- читает `/etc/bisquite/kiosk/config.yaml`;
 - определяет рабочий стол и настраивает **только то, что этому столу
   подходит** (см. ниже);
 - пишет `/var/lib/kiosk/config` — его читает юнит через `EnvironmentFile`;
@@ -64,7 +72,7 @@ Chromium в режиме киоска: браузер разворачивает
 
 `configure.sh` начинается с `check_prereqs`, и тот делает `exit 1`, если
 нет чего-то из четырёх: `yq` в `PATH`, `chromium` в `PATH`, исполняемого
-`get_cloud_user.sh` рядом, файла `config.yaml` рядом. `yq` расширение
+`lib/get_cloud_user.sh` рядом, файла `/etc/bisquite/kiosk/config.yaml`. `yq` расширение
 **не ставит**, и сборка об этом не говорит: образ собирается зелёным,
 а отказ приезжает на первой загрузке устройства — после записи носителя.
 
@@ -82,7 +90,7 @@ EXTENSION kiosk
 настройки упали с «не дождался пользователя cloud-init», хотя пользователь
 существовал с первых секунд. Разбор — в `../yq/README.md`.
 
-Отдельная тонкость: у `get_cloud_user.sh` есть запасной путь — образ без
+Отдельная тонкость: у `lib/get_cloud_user.sh` есть запасной путь — образ без
 `cloud-init` или без `yq` настраивается на первую учётку с uid 1000..65533
 и домашним каталогом. Здесь до него **не доходит**: `check_prereqs`
 отказывает раньше, на самом `command -v yq`. То есть в этом расширении
@@ -182,7 +190,7 @@ GDM), проверяя каждого `xdpyinfo`, и при неудаче пе�
 
 Рабочий способ поменять параметры сегодня — положить свой `config.yaml`
 в гостя через cloud-init `write_files` по пути
-`/opt/vmsetup/kiosk/config.yaml` и перезапустить `configure-kiosk`.
+`/etc/bisquite/kiosk/config.yaml` и перезапустить `configure-kiosk`.
 
 ## Конфигурация (`config.yaml`)
 
@@ -203,7 +211,7 @@ CHROMIUM_FLAGS: "--disable-pinch --overscroll-history-navigation=0"
 | `CHROMIUM_FLAGS` | `configure.sh` → `/var/lib/kiosk/config` | пусто |
 
 **`USER` перекрывает cloud-init.** Раньше ключ не читал никто — `configure.sh`
-всегда шёл в `get_cloud_user.sh`, а строка в файле выглядела как ручка,
+всегда шёл в `lib/get_cloud_user.sh`, а строка в файле выглядела как ручка,
 которой нет. Теперь заданное значение сильнее: расширение ждёт **названного**
 пользователя (те же 120 секунд) и, не дождавшись, отказывает вслух, а не
 подставляет чужого. Ровно так этот ключ работает у соседнего `code-server`.
@@ -224,16 +232,16 @@ CHROMIUM_FLAGS: "--disable-pinch --overscroll-history-navigation=0"
 
 ## Что править и чем перезапускать
 
-Параметров **две копии**, и это надо держать в голове: `config.yaml` рядом
-со скриптом — источник, `/var/lib/kiosk/config` — то, что читает юнит через
+Параметров **две копии**, и это надо держать в голове: `/etc/bisquite/kiosk/config.yaml`
+— источник, `/var/lib/kiosk/config` — то, что читает юнит через
 `EnvironmentFile`. Второй файл пересобирается из первого на каждой загрузке.
 
 | Что менять | Где лежит на устройстве | Чем применить |
 |---|---|---|
 | URL, дисплей, флаги Chromium — **до следующей загрузки** | `/var/lib/kiosk/config` | `systemctl restart kiosk-chromium@<user>` |
-| то же **надолго** | `/opt/vmsetup/kiosk/config.yaml` | `systemctl restart configure-kiosk` (он перепишет `/var/lib/kiosk/config` и перезапустит браузер) |
+| то же **надолго** | `/etc/bisquite/kiosk/config.yaml` | `systemctl restart configure-kiosk` (он перепишет `/var/lib/kiosk/config` и перезапустит браузер) |
 | под каким пользователем киоск | ключ `USER` в том же `config.yaml` | `systemctl restart configure-kiosk` |
-| логика запуска браузера, ожидание X | `/opt/vmsetup/kiosk/run-kiosk.sh` | `systemctl restart kiosk-chromium@<user>` |
+| логика запуска браузера, ожидание X | `/opt/bisquite/kiosk/run-kiosk.sh` | `systemctl restart kiosk-chromium@<user>` |
 
 `DISPLAY` задан **дважды**: `Environment="DISPLAY=:0"` в юните и строкой
 в `/var/lib/kiosk/config`, который тот же юнит подхватывает
@@ -285,20 +293,13 @@ EXTENSION kiosk
 а отказ из-за нарушенного порядка приезжает не на сборку, а на первую
 загрузку устройства.
 
-Прежняя запись продолжает работать:
+Ручной формы через `COPY_IN` больше нет: сборка кладёт каталог в
+`/opt/bisquite/kiosk/` и ставит рядом ссылку `lib` на общий код источника,
+а это делает только `EXTENSION` (раскладка 2, см. `docs/extensions.md`).
 
-```vmfile
-COPY_IN <чекаут>/extensions/debian/kiosk:/opt/vmsetup/
-RUN_COMMAND chmod +x /opt/vmsetup/kiosk/*.sh
-RUN_COMMAND /opt/vmsetup/kiosk/install.sh
-```
-
-`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
-VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
-и глубина зависит от того, насколько глубоко лежит сам VMFILE.
-
-Свой `config.yaml` при этой форме удобно положить поверх ещё на сборке —
-отдельным `UPLOAD` после `COPY_IN`, до `install.sh`.
+Свой `config.yaml` на сборке кладётся `UPLOAD`-ом в `/etc/bisquite/kiosk/config.yaml`
+**после** `EXTENSION kiosk`: `install.sh` пишет туда умолчания и перезапишет
+то, что лежало раньше.
 
 Взаимоисключающе с `chromium-kiosk`: оба автостартом на `graphical.target`
 разворачивают полноэкранный браузер на одном месте. Сборка этого **не
@@ -326,7 +327,7 @@ ls -la /home/<user>/.config/autostart  # автозапуск клавиатур
 - **Нужно больше времени на X11** — правьте цикл ожидания
   в `run-kiosk.sh` (30 попыток по 2 с).
 - **`configure-kiosk` упал сразу** — это `check_prereqs`: в журнале прямо
-  сказано, чего нет (`yq`, `chromium`, `get_cloud_user.sh`, `config.yaml`).
+  сказано, чего нет (`yq`, `chromium`, `lib/get_cloud_user.sh`, `config.yaml`).
   Первое — самое частое: в VMFILE не было `EXTENSION yq` выше.
 - **`Timeout waiting for cloud-init user`** — 40 попыток по 3 с прошли зря;
   если в `config.yaml` задан `USER`, в журнале будет другая строка —

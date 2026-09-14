@@ -25,7 +25,7 @@ log_error() {
 
 # Каталог расширения — от каталога СКРИПТА, а не от зашитой строки.
 #
-# `EXTENSION` копирует каталог в /opt/vmsetup/<имя>/ и запускает install.sh
+# `EXTENSION` копирует каталог в /opt/bisquite/<имя>/ и запускает install.sh
 # оттуда, поэтому $SCRIPT_DIR и есть тот каталог при любой раскладке.
 # Проверки ниже спрашивают «файл приехал рядом со мной?», а не «раскладка
 # всё ещё такая?»: прибитый путь превращал смену раскладки в отказ всех
@@ -266,7 +266,7 @@ fi
 # config.yaml в списке не за компанию: configure.sh читает его первым делом
 # (`read_config`) и без него выходит с ошибкой, то есть его отсутствие стоит
 # ровно столько же, сколько отсутствие юнита.
-for f in configure-code-server.service configure.sh get_cloud_user.sh config.yaml; do
+for f in configure-code-server.service configure.sh lib/get_cloud_user.sh config.yaml; do
     if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
         log_error "рядом нет $f — донастройка на первой загрузке не состоится,"
         log_error "а без неё code-server не получит ни сертификата, ни юнита"
@@ -279,35 +279,39 @@ done
 install -m 0644 "$SCRIPT_DIR/configure-code-server.service" \
     /etc/systemd/system/configure-code-server.service
 
-# Параметры из VMFILE перекрывают config.yaml.
+# Настройки устройства — /etc/bisquite/code-server/config.yaml.
 #
-# ЗАЧЕМ. config.yaml лежит в каталоге расширения, то есть в кеше источников,
-# а кеш перезаписывается на каждом `bs extension sync`. Правка порта в нём
-# держалась бы до первой синхронизации и пропадала молча — ровно та болезнь
-# «мёртвых ручек», из-за которой у расширения x11vnc настройки переехали
-# в переменные окружения (2026-09-03).
+# ПОЧЕМУ В /etc. config.yaml в каталоге расширения — умолчания СБОРКИ, и
+# лежит он в /opt/bisquite, где по FHS живёт код, а не настройки. Манифесты
+# записи правят порт, адрес и пароль `sed`-ом — правят они теперь файл
+# в /etc, который держат etckeeper и бэкапы. Копия ставится всегда, а не
+# только при параметрах из VMFILE: configure.sh читает только её.
 #
-# Читает config.yaml не install.sh, а configure.sh на первой загрузке
-# (`read_config`, оттуда же bind-addr и auth), поэтому перезаписываем файл
-# здесь, в фазе сборки, а не подменяем механизм.
-_cs_config="$SCRIPT_DIR/config.yaml"
+# Параметры из VMFILE перекрывают умолчания. config.yaml в кеше источников
+# перезаписывается на каждом `bs extension sync`, поэтому правка порта в нём
+# держалась бы до первой синхронизации — ровно та болезнь «мёртвых ручек»,
+# из-за которой у x11vnc настройки переехали в переменные окружения
+# (2026-09-03).
+#
+# 0600 всегда: в файле может лежать пароль, в том числе из умолчаний.
+# Права ставятся ДО записи — промежутка с правами по umask быть не должно.
+_cs_defaults="$SCRIPT_DIR/config.yaml"
+_cs_config=/etc/bisquite/code-server/config.yaml
+install -d -m 0755 /etc/bisquite/code-server
+install -m 0600 /dev/null "$_cs_config"
+cat "$_cs_defaults" > "$_cs_config"
 if [[ -n "${CODE_SERVER_PORT:-}${CODE_SERVER_PASSWORD:-}${CODE_SERVER_USER:-}${CODE_SERVER_BIND:-}" ]]; then
-  if [[ -f "$_cs_config" ]]; then
-    # Значения, которых не задали, берём из существующего файла, чтобы
-    # `EXTENSION code-server CODE_SERVER_PORT=9002` не сбрасывал версию.
-    _cs_old_user=$(sed -n 's/^USER:[[:space:]]*//p' "$_cs_config" | head -1)
-    _cs_old_pass=$(sed -n 's/^PASSWORD:[[:space:]]*//p' "$_cs_config" | head -1)
-    _cs_old_port=$(sed -n 's/^PORT:[[:space:]]*//p' "$_cs_config" | head -1)
-    _cs_old_ver=$(sed -n 's/^VERSION:[[:space:]]*//p' "$_cs_config" | head -1)
-    _cs_old_bind=$(sed -n 's/^BIND:[[:space:]]*//p' "$_cs_config" | head -1)
-  fi
+  # Значения, которых не задали, берём из умолчаний, чтобы
+  # `EXTENSION code-server CODE_SERVER_PORT=9002` не сбрасывал версию.
+  _cs_old_user=$(sed -n 's/^USER:[[:space:]]*//p' "$_cs_defaults" | head -1)
+  _cs_old_pass=$(sed -n 's/^PASSWORD:[[:space:]]*//p' "$_cs_defaults" | head -1)
+  _cs_old_port=$(sed -n 's/^PORT:[[:space:]]*//p' "$_cs_defaults" | head -1)
+  _cs_old_ver=$(sed -n 's/^VERSION:[[:space:]]*//p' "$_cs_defaults" | head -1)
+  _cs_old_bind=$(sed -n 's/^BIND:[[:space:]]*//p' "$_cs_defaults" | head -1)
   _cs_pass="${CODE_SERVER_PASSWORD:-${_cs_old_pass:-none}}"
   _cs_port="${CODE_SERVER_PORT:-${_cs_old_port:-9001}}"
   _cs_bind="${CODE_SERVER_BIND:-${_cs_old_bind:-0.0.0.0}}"
 
-  # Права ставятся ДО записи: файл может содержать пароль, и промежутка,
-  # в котором он лежит с правами по umask, быть не должно.
-  install -m 0600 /dev/null "$_cs_config"
   cat > "$_cs_config" <<CSCONF
 USER: ${CODE_SERVER_USER:-${_cs_old_user:-}}
 PASSWORD: ${_cs_pass}
@@ -319,7 +323,7 @@ CSCONF
   # Пароль в журнал НЕ печатается — только факт его наличия. Журнал сборки
   # уезжает в CI и в переписку чаще, чем сам образ.
   if [[ "$_cs_pass" == "none" ]]; then
-    log_info "config.yaml перезаписан из VMFILE: порт ${_cs_port}, адрес ${_cs_bind}, пароль не задан"
+    log_info "$_cs_config записан из VMFILE: порт ${_cs_port}, адрес ${_cs_bind}, пароль не задан"
     # Это ЕДИНСТВЕННОЕ место, где решение видно до того, как образ уедет
     # на устройство, поэтому формулировка прямая. Но громкость идёт по
     # АДРЕСУ, а не по одному лишь отсутствию пароля: без пароля на
@@ -336,9 +340,9 @@ CSCONF
         ;;
     esac
   else
-    log_info "config.yaml перезаписан из VMFILE: порт ${_cs_port}, пароль задан"
-    # Пароль лежит в образе открытым текстом — и в /opt/vmsetup, и потом
-    # в ~/.config/code-server. Кто получит образ, получит и пароль.
+    log_info "$_cs_config записан из VMFILE: порт ${_cs_port}, пароль задан"
+    # Пароль лежит в образе открытым текстом — и в /etc/bisquite/code-server,
+    # и потом в ~/.config/code-server. Кто получит образ, получит и пароль.
     log_warn "пароль хранится в образе открытым текстом: образ = пароль"
     # Оговорка не лишняя: до 2026-09-03 configure.sh писал `auth: none`
     # безусловно, и заданный пароль не включал ничего. Теперь включает.
@@ -349,8 +353,9 @@ fi
 # Declaration for teleport-agent: publish code-server as a Teleport app.
 # Only NAME and URI — who may open it is decided by the operator's env label,
 # not here. Harmless without teleport-agent. configure.sh always serves TLS
-# (mkcert), hence https; loopback works whatever BIND says.
-_cs_decl_port="$(sed -n 's/^PORT:[[:space:]]*//p' "$SCRIPT_DIR/config.yaml" 2>/dev/null | head -1)"
+# (mkcert), hence https; loopback works whatever BIND says. The port is read
+# from the installed config, so CODE_SERVER_PORT from the VMFILE counts.
+_cs_decl_port="$(sed -n 's/^PORT:[[:space:]]*//p' "$_cs_config" 2>/dev/null | head -1)"
 if [[ "$_cs_decl_port" =~ ^[0-9]{1,5}$ ]]; then
   install -d -m 0755 /etc/bisquite/teleport/apps.d
   install -m 0644 /dev/null /etc/bisquite/teleport/apps.d/code-server.conf
@@ -358,7 +363,7 @@ if [[ "$_cs_decl_port" =~ ^[0-9]{1,5}$ ]]; then
     > /etc/bisquite/teleport/apps.d/code-server.conf
   log_info "объявлен для Teleport: apps.d/code-server.conf (https://127.0.0.1:${_cs_decl_port})"
 else
-  log_warn "порт в config.yaml не прочитан — объявление для Teleport не положено"
+  log_warn "порт в $_cs_config не прочитан — объявление для Teleport не положено"
 fi
 
 systemctl daemon-reload || true

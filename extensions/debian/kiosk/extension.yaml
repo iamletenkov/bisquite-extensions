@@ -1,5 +1,6 @@
 name: kiosk
-version: 1.0.0
+version: 2.0.0
+layout: 2
 family: deb
 arch: [amd64, arm64]
 # build     — install.sh ставит chromium и кладёт kiosk-chromium@.service;

@@ -7,16 +7,23 @@
     Расширением считается каталог `extensions/<группа>/<имя>/`, в котором лежит
     `install.sh`. Каталоги без него (`extensions/openwrt/*`) расширениями по
     текущей конвенции не являются — они доставляются `UPLOAD`/`COPY_IN` по
-    фиксированным путям, а не `COPY_IN <ext>:/opt/vmsetup/` плюс `install.sh`.
+    фиксированным путям, а не инструкцией `EXTENSION` (каталог в
+    `/opt/bisquite/<имя>/` плюс `install.sh`).
     Они печатаются списком «пропущено», а не молча игнорируются.
 
-2.  Набор полей ровно тот, что задан спекой: name, version, family, arch,
-    phase, provides, requires, conflicts. Лишнее поле — ошибка, а не «задел
-    на будущее»: неизвестное поле молча ничего не делает.
+2.  Набор полей ровно тот, что задан спекой: name, version, layout, family,
+    arch, phase, provides, requires, conflicts. Лишнее поле — ошибка, а не
+    «задел на будущее»: неизвестное поле молча ничего не делает.
 
 3.  Поля заполнены и осмысленны: `name` совпадает с именем каталога, `version`
-    — semver, `family` из известного набора, `arch` непустой, `phase` из
-    {build, firstboot}.
+    — semver, `layout` ровно 2, `family` из известного набора, `arch`
+    непустой, `phase` из {build, firstboot}.
+
+    `layout: 2` — раскладка в госте: расширение ставится в
+    `/opt/bisquite/<имя>/` и зовёт общий код через `$SCRIPT_DIR/lib/`.
+    bisquite отказывает расширению без него ещё до сборки, поэтому
+    пропущенное поле ловится здесь, а не на хосте сборки. Значение сверяется
+    точно и по типу: `layout: "2"` — строка, и это тоже ошибка.
 
 4.  Каждая способность из `requires` кем-то предоставляется. Именно это
     отношение сегодня держится только порядком слоёв в VMFILE.
@@ -53,6 +60,7 @@ EXTENSIONS_ROOT = REPO_ROOT / "extensions"
 REQUIRED_FIELDS = (
     "name",
     "version",
+    "layout",
     "family",
     "arch",
     "phase",
@@ -64,6 +72,9 @@ LIST_FIELDS = ("arch", "provides", "requires", "conflicts")
 KNOWN_FAMILIES = {"deb", "rpm", "apk", "openwrt"}
 KNOWN_PHASES = {"build", "firstboot"}
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+# Guest layout this repository targets: /opt/bisquite/<name>/ with lib/ linked
+# in by the build. bisquite refuses any other value, so the validator does too.
+SUPPORTED_LAYOUT = 2
 
 
 class Report:
@@ -145,6 +156,20 @@ def check_fields(manifests: dict[str, dict], report: Report) -> None:
         version = data.get("version")
         if version is not None and not SEMVER.match(str(version)):
             report.error(rel, f"`version: {version}` не semver (ожидается X.Y.Z)")
+
+        if "layout" in declared:
+            layout = data.get("layout")
+            # bool is an int subclass: `layout: true` must not pass as 1.
+            if (
+                isinstance(layout, bool)
+                or not isinstance(layout, int)
+                or layout != SUPPORTED_LAYOUT
+            ):
+                report.error(
+                    rel,
+                    f"`layout: {layout!r}` — ожидается ровно {SUPPORTED_LAYOUT} "
+                    "(раскладка /opt/bisquite, общий код через $SCRIPT_DIR/lib/)",
+                )
 
         family = data.get("family")
         if family is not None and family not in KNOWN_FAMILIES:

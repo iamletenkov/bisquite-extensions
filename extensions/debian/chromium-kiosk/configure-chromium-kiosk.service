@@ -7,7 +7,7 @@ Before=chromium-kiosk_configwatcher.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash /opt/vmsetup/chromium-kiosk/configure.sh
+ExecStart=/bin/bash /opt/bisquite/chromium-kiosk/configure.sh
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=configure-chromium-kiosk

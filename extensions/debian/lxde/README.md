@@ -3,6 +3,13 @@
 LXDE с менеджером входа lightdm. Даёт X-сервер и сессию расширениям, которым
 они нужны, — `x11vnc`, `kiosk`.
 
+> **С 4.0.0 — раскладка 2.** Каталог расширения в госте — `/opt/bisquite/lxde/`
+> (был `/opt/vmsetup/lxde/`); CLI `bisquite-desktop` ставится ссылкой
+> `/usr/local/sbin/bisquite-desktop` →
+> `/opt/bisquite/lxde/lib/bisquite-desktop` из общего `lib/` источника, а не
+> копией; прежний `/usr/local/lib/bisquite-desktop` установка удаляет.
+> Нужен bisquite с поддержкой `layout: 2`.
+
 **С 3.0.0 файл ручек — `/etc/bisquite/desktop/config`** (был
 `/etc/default/bisquite-desktop`). Прежний путь не читается; если файл
 по нему остался в базовом образе, установка его удаляет.

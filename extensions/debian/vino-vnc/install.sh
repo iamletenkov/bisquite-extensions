@@ -125,7 +125,7 @@ else
 fi
 
 # --- Донастройка на первой загрузке -----------------------------------------
-for f in configure-vino-vnc.service configure.sh get_cloud_user.sh; do
+for f in configure-vino-vnc.service configure.sh lib/get_cloud_user.sh; do
     if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
         log_error "рядом нет $f — донастройка на первой загрузке не состоится,"
         log_error "а без неё vino не запустится ни при каком параметре"

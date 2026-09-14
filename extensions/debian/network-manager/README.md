@@ -3,6 +3,11 @@
 NetworkManager в образе — чтобы Wi-Fi, объявленный в манифесте устройства,
 на этом устройстве действительно поднялся.
 
+> **С 1.1.0 — раскладка 2.** Манифест объявляет `layout: 2`: каталог расширения
+> в госте — `/opt/bisquite/network-manager/` (был `/opt/vmsetup/network-manager/`). Путей гостя
+> расширение не прибивает, поэтому версия минорная; нужен bisquite
+> с поддержкой `layout: 2`.
+
 ## Зачем
 
 `bs device write` при наличии секции `wifi` у интерфейса генерирует
@@ -29,17 +34,9 @@ EXTENSION network-manager
 
 Параметров нет.
 
-Прежняя запись продолжает работать:
-
-```vmfile
-COPY_IN <чекаут>/extensions/debian/network-manager:/opt/vmsetup/
-RUN_COMMAND chmod +x /opt/vmsetup/network-manager/*.sh
-RUN_COMMAND /opt/vmsetup/network-manager/install.sh
-```
-
-`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
-VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
-и глубина зависит от того, насколько глубоко лежит сам VMFILE.
+Ручной формы через `COPY_IN` больше нет: сборка кладёт каталог в
+`/opt/bisquite/network-manager/` и ставит рядом ссылку `lib` на общий код источника,
+а это делает только `EXTENSION` (раскладка 2, см. `docs/extensions.md`).
 
 ## Манифест
 

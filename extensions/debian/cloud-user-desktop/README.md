@@ -5,6 +5,13 @@
 Raspberry Pi OS): убирает вендорскую учётку и ставит ручки рабочего стола
 `bisquite-desktop`, чтобы автологин и группы достались пользователю cloud-init.
 
+> **С 4.0.0 — раскладка 2.** Каталог расширения в госте — `/opt/bisquite/cloud-user-desktop/`
+> (был `/opt/vmsetup/cloud-user-desktop/`); CLI `bisquite-desktop` ставится ссылкой
+> `/usr/local/sbin/bisquite-desktop` →
+> `/opt/bisquite/cloud-user-desktop/lib/bisquite-desktop` из общего `lib/` источника, а не
+> копией; прежний `/usr/local/lib/bisquite-desktop` установка удаляет.
+> Нужен bisquite с поддержкой `layout: 2`.
+
 **С 3.0.0 файл ручек — `/etc/bisquite/desktop/config`** (был
 `/etc/default/bisquite-desktop`). Прежний путь не читается; если файл
 по нему остался в базовом образе, установка его удаляет.

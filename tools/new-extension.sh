@@ -6,9 +6,9 @@
 # copied values look deliberate and survive review, which is exactly how the
 # eight diverging copies of get_cloud_user.sh happened.
 #
-# The scaffold also registers the directory in tools/lib-targets.txt right
-# away: an author who has to add that line by hand will copy the shared code
-# instead, and the copies start drifting again.
+# Shared code is not copied into the extension at all: the build links the
+# source's lib/ in as /opt/bisquite/<name>/lib, and scripts call it as
+# "$SCRIPT_DIR/lib/<file>". Nothing to register, nothing to drift.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,9 +16,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # The manifest field `family` is not the directory name: `deb` lives under
 # extensions/debian/. The resolver behind `EXTENSION` finds an extension by the
-# `name` field of its manifest, not by the directory — but the older `COPY_IN`
-# form addresses the directory directly, and 22 such lines in 12 VMFILEs of the
-# main repository still do (counted 2026-09-03). So the mapping stays explicit.
+# `name` field of its manifest, not by the directory. The mapping stays explicit
+# anyway: the directory is what a human looks for in this repository.
 family_dir() {
     case "$1" in
         deb) echo debian ;;
@@ -109,6 +108,9 @@ mkdir -p "$ext_dir"
 cat > "$ext_dir/extension.yaml" <<EOF
 name: $name
 version: 0.1.0
+# Раскладка в госте: каталог расширения — /opt/bisquite/<имя>/, общий код
+# lib/ источника — /opt/bisquite/<имя>/lib. Без этого поля bisquite откажет.
+layout: 2
 family: $family
 arch: $arch_yaml
 phase: $phase_yaml
@@ -193,10 +195,11 @@ EOF
     if [[ "$want_shared_user" -eq 1 ]]; then
         cat >> "$ext_dir/configure.sh" <<'EOF'
 
-# Shared resolver, vendored from lib/ — do not copy it by hand.
+# Shared code of the source lives in $SCRIPT_DIR/lib/ — the build links the
+# source's lib/ there. Call it from there; never copy it into the extension.
 # Placeholder until the TODO below uses it; drop the disable then.
 # shellcheck disable=SC2034
-CLOUD_USER="$("$SCRIPT_DIR/get_cloud_user.sh")" || {
+CLOUD_USER="$("$SCRIPT_DIR/lib/get_cloud_user.sh")" || {
     echo "Не удалось определить пользователя cloud-init" >&2
     exit 1
 }
@@ -220,7 +223,7 @@ Wants=cloud-init.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/opt/vmsetup/$name/configure.sh
+ExecStart=/opt/bisquite/$name/configure.sh
 
 [Install]
 WantedBy=multi-user.target
@@ -244,17 +247,9 @@ cat > "$ext_dir/README.md" <<EOF
 EXTENSION $name
 \`\`\`
 
-Прежняя запись продолжает работать:
-
-\`\`\`vmfile
-COPY_IN <чекаут>/extensions/$dir_name/$name:/opt/vmsetup/
-RUN_COMMAND chmod +x /opt/vmsetup/$name/*.sh
-RUN_COMMAND /opt/vmsetup/$name/install.sh
-\`\`\`
-
-\`<чекаут>\` — путь до чекаута этого репозитория **относительно каталога
-VMFILE**; в примерах основного репозитория это \`../../../../bisquite-extensions\`,
-и глубина зависит от того, насколько глубоко лежит сам VMFILE.
+Сборка копирует каталог в \`/opt/bisquite/$name/\`, ставит рядом ссылку
+\`lib\` на общий код источника и запускает \`install.sh\`. Ручной формы
+через \`COPY_IN\` нет: \`lib\` доставляет только \`EXTENSION\`.
 
 ## Параметры
 
@@ -322,14 +317,6 @@ for f in "$ext_dir/install.sh" "$ext_dir/configure.sh"; do
     sed -i "s/__NAME__/$name/g; s/__ENVPREFIX__/$env_prefix/g" "$f"
 done
 
-registered=0
-if [[ "$want_firstboot" -eq 1 && "$want_shared_user" -eq 1 ]]; then
-    printf '%-31s # configure.sh — пользователь cloud-init\n' \
-        "extensions/$dir_name/$name" >> "$REPO_ROOT/tools/lib-targets.txt"
-    bash "$SCRIPT_DIR/sync-lib.sh" >/dev/null
-    registered=1
-fi
-
 echo
 echo "Создано: extensions/$dir_name/$name"
 echo
@@ -338,6 +325,7 @@ echo "  install.sh                фаза сборки"
 [[ "$want_firstboot" -eq 1 ]] && echo "  configure.sh              фаза первой загрузки"
 [[ "$want_firstboot" -eq 1 ]] && echo "  configure-$name.service   юнит первой загрузки"
 echo "  README.md                 заполни, чем это пользоваться"
-[[ "$registered" -eq 1 ]] && echo "  get_cloud_user.sh         сгенерирован из lib/, руками не править"
+echo
+echo "  общий код — \$SCRIPT_DIR/lib/ (lib/ корня источника, ссылку ставит сборка)"
 echo
 echo "Дальше: заполнить TODO, потом  bash tools/check.sh"

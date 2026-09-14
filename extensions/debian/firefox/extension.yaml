@@ -1,5 +1,6 @@
 name: firefox
-version: 1.0.0
+version: 1.1.0
+layout: 2
 family: deb
 # Mozilla публикует amd64 и arm64 в packages.mozilla.org; arm64 проверен
 # на AGX Orin (jammy) 2026-09-14 — Firefox 155.0.1.

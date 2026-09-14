@@ -2,6 +2,11 @@
 
 PyTorch и torchvision с CUDA для Jetson (JetPack 6, L4T 36.4, Orin).
 
+> **С 1.1.0 — раскладка 2.** Манифест объявляет `layout: 2`: каталог расширения
+> в госте — `/opt/bisquite/l4t-pytorch/` (был `/opt/vmsetup/l4t-pytorch/`). Путей гостя
+> расширение не прибивает, поэтому версия минорная; нужен bisquite
+> с поддержкой `layout: 2`.
+
 ## Манифест
 
 | Поле | Значение |

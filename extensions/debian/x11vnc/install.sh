@@ -15,10 +15,10 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} $*"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 
-# Параметры приходят из VMFILE переменными окружения, потому что RUN_COMMAND
-# отдаёт строку шеллу гостя целиком:
+# Параметры приходят из VMFILE переменными окружения: EXTENSION передаёт
+# пары КЛЮЧ=ЗНАЧЕНИЕ в окружение install.sh как есть:
 #
-#   RUN_COMMAND X11VNC_PORT=5901 X11VNC_LISTEN=all /opt/vmsetup/x11vnc/install.sh
+#   EXTENSION x11vnc X11VNC_PORT=5901 X11VNC_LISTEN=all
 #
 # Раньше на их месте лежал config.yaml, чьи ключи PORT/PASSWORD/DISPLAY
 # читались и НИГДЕ не использовались — юнит хардкодил свои значения, а README
@@ -50,15 +50,15 @@ apt-get install -y \
 # инфраструктуры bisquite — fail-closed у детектора устройств, preflight
 # утилит до `dd`. Образец — vino-vnc/install.sh.
 #
-# Ищем рядом с собой ($SCRIPT_DIR), а не по зашитому /opt/vmsetup/x11vnc/:
+# Ищем рядом с собой ($SCRIPT_DIR), а не по зашитому /opt/bisquite/x11vnc/:
 # проверка обязана отвечать на вопрос «файл приехал рядом со мной?», а не
 # «раскладка EXTENSION всё ещё такая?». Скрипт запускается из того самого
 # каталога, куда его скопировали, поэтому $SCRIPT_DIR верен при любой
 # раскладке, и её смена не уронит все сборки разом. (Юниты ссылаются на
-# /opt/vmsetup абсолютным путём и после смены раскладки правятся вместе
+# /opt/bisquite абсолютным путём и после смены раскладки правятся вместе
 # с ней — но это правка одного файла, а не отказ конвейера.)
 for f in x11vnc@.service configure-x11vnc.service run-x11vnc.sh \
-         configure.sh get_cloud_user.sh; do
+         configure.sh lib/get_cloud_user.sh; do
   if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
     log_error "рядом нет $f — донастройка на первой загрузке не состоится,"
     log_error "а без неё x11vnc не запустится ни при каком параметре"

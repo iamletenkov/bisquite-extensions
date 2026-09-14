@@ -14,7 +14,7 @@ Wants=cloud-final.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash /opt/vmsetup/code-server/configure.sh
+ExecStart=/bin/bash /opt/bisquite/code-server/configure.sh
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=/root
 

@@ -3,6 +3,11 @@
 Проприетарные драйверы NVIDIA в образе: репозитории, драйвер, блокировка
 `nouveau` и обновление initramfs. Рассчитано на ВМ с GPU passthrough.
 
+> **С 1.1.0 — раскладка 2.** Манифест объявляет `layout: 2`: каталог расширения
+> в госте — `/opt/bisquite/nvidia/` (был `/opt/vmsetup/nvidia/`). Путей гостя
+> расширение не прибивает, поэтому версия минорная; нужен bisquite
+> с поддержкой `layout: 2`.
+
 ## Поддерживаемые системы
 
 - **Debian**: 12 (bookworm), 13 (trixie)
@@ -68,17 +73,9 @@
 EXTENSION nvidia
 ```
 
-Прежняя запись продолжает работать:
-
-```vmfile
-COPY_IN <чекаут>/extensions/debian/nvidia:/opt/vmsetup/
-RUN_COMMAND chmod +x /opt/vmsetup/nvidia/*.sh
-RUN_COMMAND /opt/vmsetup/nvidia/install.sh
-```
-
-`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
-VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
-и глубина зависит от того, насколько глубоко лежит сам VMFILE.
+Ручной формы через `COPY_IN` больше нет: сборка кладёт каталог в
+`/opt/bisquite/nvidia/` и ставит рядом ссылку `lib` на общий код источника,
+а это делает только `EXTENSION` (раскладка 2, см. `docs/extensions.md`).
 
 ## Как это работает
 

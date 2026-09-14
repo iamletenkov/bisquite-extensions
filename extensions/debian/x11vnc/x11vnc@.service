@@ -15,7 +15,7 @@ EnvironmentFile=-/etc/bisquite/x11vnc/config
 ExecStartPre=/bin/bash -c 'for i in {1..30}; do [ -S /tmp/.X11-unix/X0 ] && break || sleep 2; done'
 # Путь к X authority раньше был зашит здесь и не существовал ни под одним
 # дисплей-менеджером. Теперь его ищет обёртка — разбор в её шапке.
-ExecStart=/bin/bash /opt/vmsetup/x11vnc/run-x11vnc.sh %i
+ExecStart=/bin/bash /opt/bisquite/x11vnc/run-x11vnc.sh %i
 Restart=on-failure
 RestartSec=5
 

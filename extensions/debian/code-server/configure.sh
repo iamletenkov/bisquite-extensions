@@ -39,6 +39,11 @@ log_debug() {
     >&2 echo -e "${BLUE}[DEBUG]${NC} $*"
 }
 
+# Settings live in /etc, not next to the script: install.sh writes the build
+# defaults plus VMFILE overrides there, and write manifests edit this file.
+# config.yaml in the extension directory is only the build-time default.
+CONFIG_FILE=/etc/bisquite/code-server/config.yaml
+
 # Проверка наличия необходимых команд
 check_dependencies() {
     local missing_deps=()
@@ -91,8 +96,7 @@ read_config_value() {
 
 # Чтение конфигурации из config.yaml
 read_config() {
-    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local config_file="$script_dir/config.yaml"
+    local config_file="$CONFIG_FILE"
 
     if [[ ! -f "$config_file" ]]; then
         log_error "Configuration file not found: $config_file"
@@ -121,15 +125,15 @@ resolve_user() {
         log_info "USER not specified in config, trying to get from cloud-init..."
 
         local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        if [[ -x "$script_dir/get_cloud_user.sh" ]]; then
-            if CODE_USER=$("$script_dir/get_cloud_user.sh"); then
+        if [[ -x "$script_dir/lib/get_cloud_user.sh" ]]; then
+            if CODE_USER=$("$script_dir/lib/get_cloud_user.sh"); then
                 log_info "Found user from cloud-init: $CODE_USER"
             else
                 log_error "Failed to get user from cloud-init"
                 exit 1
             fi
         else
-            log_error "get_cloud_user.sh not found at $script_dir/get_cloud_user.sh"
+            log_error "get_cloud_user.sh not found at $script_dir/lib/get_cloud_user.sh"
             exit 1
         fi
     else
@@ -365,10 +369,9 @@ should_reconfigure() {
     # Замер 2026-09-06 на Jetson Nano: манифест записи менял адрес
     # на 0.0.0.0 через firstboot, служба запускалась следом и молча
     # ничего не делала — сервер остался на 127.0.0.1.
-    local script_dir_cfg="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.yaml"
-    if [[ -f "$script_dir_cfg" ]]; then
+    if [[ -f "$CONFIG_FILE" ]]; then
         local cfg_mtime
-        cfg_mtime=$(stat -c %Y "$script_dir_cfg" 2>/dev/null || echo "0")
+        cfg_mtime=$(stat -c %Y "$CONFIG_FILE" 2>/dev/null || echo "0")
         if [[ "$cfg_mtime" -gt "$last_config_time_value" ]]; then
             return 0
         fi

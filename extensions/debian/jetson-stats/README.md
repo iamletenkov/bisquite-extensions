@@ -3,6 +3,11 @@
 Ставит `jtop` — монитор NVIDIA Jetson: загрузка CPU и GPU, память, частоты,
 питание, температуры, вентилятор, режим `nvpmodel`.
 
+> **С 2.0.0 — раскладка 2.** Каталог расширения в госте — `/opt/bisquite/jetson-stats/`
+> (был `/opt/vmsetup/jetson-stats/`); `ExecStart` юнита первой загрузки смотрит туда же, `lib/get_cloud_user.sh` —
+> ссылкой на общий код источника, а не копией.
+> Нужен bisquite с поддержкой `layout: 2`.
+
 ## Зачем
 
 На Jetson нет ни `nvidia-smi`, ни `nvtop`, которые работали бы: и то и другое
@@ -42,17 +47,9 @@ nvtop:      нет, и в apt-репозиториях этой машины е�
 EXTENSION jetson-stats
 ```
 
-Прежняя запись продолжает работать:
-
-```vmfile
-COPY_IN <чекаут>/extensions/debian/jetson-stats:/opt/vmsetup/
-RUN_COMMAND chmod +x /opt/vmsetup/jetson-stats/*.sh
-RUN_COMMAND /opt/vmsetup/jetson-stats/install.sh
-```
-
-`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
-VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
-и глубина зависит от того, насколько глубоко лежит сам VMFILE.
+Ручной формы через `COPY_IN` больше нет: сборка кладёт каталог в
+`/opt/bisquite/jetson-stats/` и ставит рядом ссылку `lib` на общий код источника,
+а это делает только `EXTENSION` (раскладка 2, см. `docs/extensions.md`).
 
 ## Параметры
 
@@ -90,7 +87,7 @@ EXTENSION jetson-stats JETSON_STATS_VERSION=7.2.1
 говорит об этом предупреждением — это работа `install.sh`.
 
 `yq` этому расширению **не нужен**, в отличие от десктопов: `configure.sh`
-проверяет только наличие исполняемого `get_cloud_user.sh` рядом, а тот без
+проверяет только наличие исполняемого `lib/get_cloud_user.sh` рядом, а тот без
 `cloud-init`/`yq` уходит на запасной путь — первая учётка с uid 1000..65533
 и домашним каталогом.
 
@@ -255,7 +252,7 @@ $ ldconfig -p | grep libnvidia-ml   # на Nano пусто
 отказом доступа.
 
 На первой загрузке отказом (кодом возврата 1) заканчиваются три случая:
-рядом нет исполняемого `get_cloud_user.sh`; не дождались пользователя
+рядом нет исполняемого `lib/get_cloud_user.sh`; не дождались пользователя
 cloud-init за 40 попыток по 3 секунды; `jtop.service` не запустился.
 Последний — без `|| true` намеренно: неработающий демон означает, что команда
 `jtop` на плате не работает вовсе, а расширение при этом отрапортовало бы
@@ -310,7 +307,7 @@ arm64-хосте**: libguestfs не выполняет код в госте чу
 |---|---|---|
 | параметры демона jtop | `/etc/systemd/system/jtop.service` | `systemctl daemon-reload && systemctl restart jtop.service` |
 | кто имеет доступ к `/run/jtop.sock` | членство в группе `jtop` (`usermod -aG jtop <user>`) | новый вход в сессию (`logout`/`reboot`) — сессия группу на ходу не подхватывает |
-| что делает донастройка | `/opt/vmsetup/jetson-stats/configure.sh` | `systemctl restart configure-jetson-stats.service` |
+| что делает донастройка | `/opt/bisquite/jetson-stats/configure.sh` | `systemctl restart configure-jetson-stats.service` |
 | переменные окружения jtop | `/etc/profile.d/jtop_env.sh` (кладёт `jtop --install-service`, захода 2) | новый вход в сессию |
 
 Версия пакета — параметр **сборки**, а не устройства: на плате её меняют

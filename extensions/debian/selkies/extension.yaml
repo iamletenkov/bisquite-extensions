@@ -1,5 +1,6 @@
 name: selkies
-version: 2.1.1
+version: 3.0.0
+layout: 2
 family: deb
 # AppImage публикуется для x86_64 и aarch64; install.sh выбирает по dpkg-архитектуре.
 arch: [amd64, arm64]

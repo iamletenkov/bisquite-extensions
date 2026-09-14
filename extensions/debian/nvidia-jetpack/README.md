@@ -4,6 +4,11 @@
 Jetson**: ставит инструментарий L4T, включает NFS-сервер, гасит USB-autosuspend
 для устройств NVIDIA и раскладывает скрипты прошивки в `/opt/nvidia-jetpack/`.
 
+> **С 1.1.0 — раскладка 2.** Манифест объявляет `layout: 2`: каталог расширения
+> в госте — `/opt/bisquite/nvidia-jetpack/` (был `/opt/vmsetup/nvidia-jetpack/`). Путей гостя
+> расширение не прибивает, поэтому версия минорная; нужен bisquite
+> с поддержкой `layout: 2`.
+
 Расширение ставится на **ПК**, а не на плату. Соседнее `jetson-stats` — про
 обратное, оно объявляет `arm64` и живёт на самой Jetson.
 
@@ -115,7 +120,7 @@ ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TEST=="power/control", 
 `scripts/*.sh` копируются в `/opt/nvidia-jetpack/` с правами `0755`,
 `scripts/README.md` — туда же с правами `0644` (документация, а не шаг
 прошивки). Каталог расширения находится относительно самого `install.sh`
-(`BASH_SOURCE`), а не по захардкоженному `/opt/vmsetup/nvidia-jetpack`.
+(`BASH_SOURCE`), а не по захардкоженному `/opt/bisquite/nvidia-jetpack`.
 
 Нет каталога `scripts/` или нет в нём ни одного `*.sh` — **отказ сборки**
 с внятным сообщением. Станция без скриптов прошить ничего не может, и узнать
@@ -161,17 +166,9 @@ ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TEST=="power/control", 
 EXTENSION nvidia-jetpack
 ```
 
-Прежняя запись продолжает работать:
-
-```vmfile
-COPY_IN <чекаут>/extensions/debian/nvidia-jetpack:/opt/vmsetup/
-RUN_COMMAND chmod +x /opt/vmsetup/nvidia-jetpack/*.sh
-RUN_COMMAND /opt/vmsetup/nvidia-jetpack/install.sh
-```
-
-`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
-VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
-и глубина зависит от того, насколько глубоко лежит сам VMFILE.
+Ручной формы через `COPY_IN` больше нет: сборка кладёт каталог в
+`/opt/bisquite/nvidia-jetpack/` и ставит рядом ссылку `lib` на общий код источника,
+а это делает только `EXTENSION` (раскладка 2, см. `docs/extensions.md`).
 
 Целевой образ — Ubuntu 22.04 (jammy) с рабочим столом; L4T 36.4.3 официально
 требует 20.04/22.04, про 24.04 есть прямые сообщения о несовместимости

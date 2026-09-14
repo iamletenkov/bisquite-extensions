@@ -7,7 +7,7 @@ Requires=display-manager.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash /opt/vmsetup/x11vnc/configure.sh
+ExecStart=/bin/bash /opt/bisquite/x11vnc/configure.sh
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=configure-x11vnc

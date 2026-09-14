@@ -1,5 +1,6 @@
 name: l4t-pytorch
-version: 1.0.0
+version: 1.1.0
+layout: 2
 family: deb
 # Только arm64 и только L4T: колесо torch — сборка NVIDIA под JetPack,
 # с PyPI-колесом aarch64 оно несовместимо (PyPI-сборка без CUDA).

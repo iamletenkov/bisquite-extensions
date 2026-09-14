@@ -7,6 +7,12 @@
 в `/etc/chromium-kiosk/config.yml` — до того, как пакет запустит
 собственный наблюдатель за этим файлом.
 
+> **С 2.0.0 — раскладка 2.** Каталог расширения в госте —
+> `/opt/bisquite/chromium-kiosk/` (был `/opt/vmsetup/chromium-kiosk/`),
+> настройки устройства — `/etc/bisquite/chromium-kiosk/config.yaml` (были
+> в `/opt/vmsetup/chromium-kiosk/config.yaml`). Манифесты записи со старым
+> путём правят несуществующий файл; нужен bisquite с поддержкой `layout: 2`.
+
 ## Манифест
 
 | Поле | Значение |
@@ -27,11 +33,13 @@
   репозиторий `https://repository.salamek.cz/deb/pub` (suite `all`,
   компонент `main`) в `/etc/apt/sources.list.d/salamek.cz.list`;
 - ставит пакет `chromium-kiosk`;
+- копирует `config.yaml` из каталога расширения (умолчания сборки) в
+  `/etc/bisquite/chromium-kiosk/config.yaml` (`0644`);
 - кладёт `configure-chromium-kiosk.service` и включает его.
 
 **Каждая загрузка** (`configure.sh`)
 
-- копирует `config.yaml` из каталога расширения в
+- копирует `/etc/bisquite/chromium-kiosk/config.yaml` в
   `/etc/chromium-kiosk/config.yml` (`install -m 0644`), создавая каталог,
   если его нет.
 
@@ -44,7 +52,7 @@
 **`yq` расширению не нужен.** Ни `install.sh`, ни `configure.sh` его не
 зовут и YAML не разбирают вовсе — `config.yaml` копируется файлом как есть.
 Порядок относительно `EXTENSION yq` здесь поэтому безразличен, в отличие от
-`code-server` и расширений, чей `configure.sh` ходит в `get_cloud_user.sh`.
+`code-server` и расширений, чей `configure.sh` ходит в `lib/get_cloud_user.sh`.
 
 ## Десктопное расширение не требуется
 
@@ -70,7 +78,7 @@
 
 ## Что править на живой машине и чем применять
 
-Правится **`/opt/vmsetup/chromium-kiosk/config.yaml`** в госте — это
+Правится **`/etc/bisquite/chromium-kiosk/config.yaml`** в госте — это
 источник, с которого `configure.sh` копирует. Применить:
 
 ```bash
@@ -87,10 +95,10 @@ sudo systemctl restart configure-chromium-kiosk.service
 
 Способы задать свою конфигурацию заранее:
 
-- при форме `COPY_IN` — положить свой файл поверх отдельным `UPLOAD`
-  после копирования каталога и до `install.sh`;
+- на сборке — положить свой файл `UPLOAD`-ом в `/etc/bisquite/chromium-kiosk/config.yaml`
+  **после** `EXTENSION chromium-kiosk`: `install.sh` пишет туда умолчания;
 - на устройстве — cloud-init `write_files` по пути
-  `/opt/vmsetup/chromium-kiosk/config.yaml`.
+  `/etc/bisquite/chromium-kiosk/config.yaml`.
 
 ## Конфигурация (`config.yaml`)
 
@@ -149,20 +157,12 @@ sudo systemctl restart configure-chromium-kiosk.service
 EXTENSION chromium-kiosk
 ```
 
-Прежняя запись продолжает работать:
+Ручной формы через `COPY_IN` больше нет: сборка кладёт каталог в
+`/opt/bisquite/chromium-kiosk/` и ставит рядом ссылку `lib` на общий код источника,
+а это делает только `EXTENSION` (раскладка 2, см. `docs/extensions.md`).
 
-```vmfile
-COPY_IN <чекаут>/extensions/debian/chromium-kiosk:/opt/vmsetup/
-RUN_COMMAND chmod +x /opt/vmsetup/chromium-kiosk/*.sh
-RUN_COMMAND /opt/vmsetup/chromium-kiosk/install.sh
-```
-
-`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
-VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
-и глубина зависит от того, насколько глубоко лежит сам VMFILE.
-
-**Путь `/opt/vmsetup/chromium-kiosk` прибит в `ExecStart` юнита**, и обе
-формы подключения кладут каталог именно туда. Сам `install.sh` свои файлы
+**Путь `/opt/bisquite/chromium-kiosk` прибит в `ExecStart` юнита**, и
+`EXTENSION` кладёт каталог именно туда. Сам `install.sh` свои файлы
 ищет **рядом с собой** (`$SCRIPT_DIR`) — он отвечает на вопрос «файл приехал
 рядом со мной?», а не «раскладка всё ещё такая?», — и при отсутствии любого
 из трёх (`configure-chromium-kiosk.service`, `configure.sh`, `config.yaml`)

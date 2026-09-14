@@ -1,5 +1,6 @@
 name: cuda-toolkit
-version: 1.0.0
+version: 1.1.0
+layout: 2
 family: deb
 # Только arm64: расширение ставит из репозитория jetson/common, который
 # кладёт в rootfs nvidia-l4t-apt-source (часть BSP L4T) — на не-Jetson его

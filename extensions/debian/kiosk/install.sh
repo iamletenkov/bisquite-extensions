@@ -59,17 +59,17 @@ log_info "Chromium installed successfully"
 # то есть внутри одного файла стояли оба подхода: обёртка важнее юнита,
 # который её запускает, — такого порядка быть не может.
 #
-# Ищем рядом с собой ($SCRIPT_DIR), а не по зашитому /opt/vmsetup/kiosk/:
+# Ищем рядом с собой ($SCRIPT_DIR), а не по зашитому /opt/bisquite/kiosk/:
 # проверка обязана отвечать на вопрос «файл приехал рядом со мной?», а не
 # «раскладка EXTENSION всё ещё такая?». Скрипт запускается из того самого
 # каталога, куда его скопировали, поэтому $SCRIPT_DIR верен при любой
 # раскладке, и её смена не уронит все сборки разом.
 #
-# config.yaml и get_cloud_user.sh в списке потому, что без них `configure.sh`
+# config.yaml и lib/get_cloud_user.sh в списке потому, что без них `configure.sh`
 # откажет на первой загрузке (его check_prereqs), — то есть их отсутствие
 # стоит ровно столько же, сколько отсутствие юнита.
 for f in configure-kiosk.service kiosk-chromium@.service run-kiosk.sh \
-         configure.sh config.yaml get_cloud_user.sh; do
+         configure.sh config.yaml lib/get_cloud_user.sh; do
     if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
         log_error "рядом нет $f — настройка киоска на первой загрузке не состоится,"
         log_error "а без неё браузер не развернётся ни при какой конфигурации"
@@ -83,6 +83,14 @@ install -m 0644 "$SCRIPT_DIR/configure-kiosk.service" \
     /etc/systemd/system/configure-kiosk.service
 install -m 0644 "$SCRIPT_DIR/kiosk-chromium@.service" \
     /etc/systemd/system/kiosk-chromium@.service
+
+# Настройки устройства — в /etc/bisquite/kiosk/config.yaml; config.yaml рядом
+# со скриптом — умолчания сборки. В /opt по FHS живёт код, а настройки держат
+# в /etc: их правят манифесты записи, их берут etckeeper и бэкапы. Файл
+# переписывается умолчаниями на каждой установке — свой config.yaml кладётся
+# UPLOAD-ом ПОСЛЕ `EXTENSION kiosk`. Секретов в нём нет, отсюда 0644.
+install -d -m 0755 /etc/bisquite/kiosk
+install -m 0644 "$SCRIPT_DIR/config.yaml" /etc/bisquite/kiosk/config.yaml
 
 # Обёртка, которая ищет X authority в рантайме и запускает chromium. Юнит
 # зовёт её через `/bin/bash`, то есть бит исполнения ему не нужен; он нужен

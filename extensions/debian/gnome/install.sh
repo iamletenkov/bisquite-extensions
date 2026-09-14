@@ -86,12 +86,14 @@ done
 # bisquite-desktop.service применяет их на каждой загрузке ДО gdm и вносит
 # пользователя в группы видеоядра — без этого первая загрузка Jetson
 # показывала экран входа (разбор — в самом скрипте).
-if [[ ! -x "$SCRIPT_DIR/bisquite-desktop" ]]; then
-  log_error "рядом нет bisquite-desktop — ручек автологина и экрана не будет"
+# Общий код приезжает не копией в каталоге расширения, а ссылкой lib на
+# lib/ источника, которую ставит сборка (раскладка 2).
+if [[ ! -x "$SCRIPT_DIR/lib/bisquite-desktop" ]]; then
+  log_error "рядом нет lib/bisquite-desktop — ручек автологина и экрана не будет"
   exit 1
 fi
 apt-get install -y x11-xserver-utils || exit 1
-"$SCRIPT_DIR/bisquite-desktop" install "$SCRIPT_DIR" || exit 1
+"$SCRIPT_DIR/lib/bisquite-desktop" install "$SCRIPT_DIR" || exit 1
 
 systemctl enable gdm3.service || systemctl enable gdm.service || true
 systemctl set-default graphical.target || true

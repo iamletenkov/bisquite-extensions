@@ -60,8 +60,8 @@ check_prereqs(){
         log_error "в системе нет: ${missing[*]}"
         exit 1
     fi
-    if [[ ! -x "$SCRIPT_DIR/get_cloud_user.sh" ]]; then
-        log_error "нет $SCRIPT_DIR/get_cloud_user.sh или он не исполняемый"
+    if [[ ! -x "$SCRIPT_DIR/lib/get_cloud_user.sh" ]]; then
+        log_error "нет $SCRIPT_DIR/lib/get_cloud_user.sh или он не исполняемый"
         exit 1
     fi
     if [[ ! -f "$DESKTOP_SRC" ]]; then
@@ -74,7 +74,7 @@ check_prereqs(){
 resolve_user(){
     local user attempts=0 max_attempts=40
     while true; do
-        if user="$("$SCRIPT_DIR/get_cloud_user.sh" 2>/dev/null || true)" && [[ -n "$user" ]]; then
+        if user="$("$SCRIPT_DIR/lib/get_cloud_user.sh" 2>/dev/null || true)" && [[ -n "$user" ]]; then
             if id "$user" >/dev/null 2>&1; then
                 echo "$user"
                 return 0

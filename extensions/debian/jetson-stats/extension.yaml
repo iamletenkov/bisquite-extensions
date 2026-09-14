@@ -1,5 +1,6 @@
 name: jetson-stats
-version: 1.0.0
+version: 2.0.0
+layout: 2
 family: deb
 # Только arm64, и это не осторожность, а форма железа: Jetson существует
 # исключительно как aarch64-модуль на Tegra (t210 у Nano, t194, t234, t264).

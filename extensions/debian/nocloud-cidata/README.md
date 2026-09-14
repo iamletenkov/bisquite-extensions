@@ -2,6 +2,11 @@
 
 Заставляет cloud-init читать NoCloud-seed с раздела, помеченного `cidata`.
 
+> **С 1.1.0 — раскладка 2.** Манифест объявляет `layout: 2`: каталог расширения
+> в госте — `/opt/bisquite/nocloud-cidata/` (был `/opt/vmsetup/nocloud-cidata/`). Путей гостя
+> расширение не прибивает, поэтому версия минорная; нужен bisquite
+> с поддержкой `layout: 2`.
+
 ## Зачем
 
 `bs device write` кладёт seed (`user-data`, `meta-data`, `network-config`) на

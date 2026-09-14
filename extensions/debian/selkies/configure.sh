@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 user=""
 for _ in $(seq 1 40); do
-    user="$("$SCRIPT_DIR/get_cloud_user.sh" 2>/dev/null || true)"
+    user="$("$SCRIPT_DIR/lib/get_cloud_user.sh" 2>/dev/null || true)"
     [[ -n "$user" ]] && id "$user" >/dev/null 2>&1 && break
     user=""; sleep 3
 done

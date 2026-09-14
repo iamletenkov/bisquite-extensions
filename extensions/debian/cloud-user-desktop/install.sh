@@ -85,9 +85,11 @@ fi
 # Raspberry Pi OS) приходит без расширения gnome/xfce4/lxde — ставить
 # bisquite-desktop больше некому. Автологин по умолчанию выключен; вендорский
 # автологин на вендорскую учётку гасится первым же применением ручек.
-if [[ ! -x "$HERE/bisquite-desktop" ]]; then
-    log_error "рядом нет bisquite-desktop — автологина на пользователя cloud-init не будет"
+# Общий код приезжает не копией в каталоге расширения, а ссылкой lib на
+# lib/ источника, которую ставит сборка (раскладка 2).
+if [[ ! -x "$HERE/lib/bisquite-desktop" ]]; then
+    log_error "рядом нет lib/bisquite-desktop — автологина на пользователя cloud-init не будет"
     exit 1
 fi
 apt-get install -y x11-xserver-utils >/dev/null 2>&1 || log_warn "x11-xserver-utils не поставился — xset для DESKTOP_DISABLE_SCREEN_BLANK не будет"
-"$HERE/bisquite-desktop" install "$HERE" || exit 1
+"$HERE/lib/bisquite-desktop" install "$HERE" || exit 1

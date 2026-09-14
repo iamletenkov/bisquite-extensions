@@ -1,5 +1,6 @@
 name: btop
-version: 1.0.0
+version: 1.1.0
+layout: 2
 family: deb
 # Обычный apt-пакет из universe, ничего платформенного: проверено на
 # живом Jetson (jammy/arm64) 2026-09-12, версия 1.2.3-2. Не ограничено

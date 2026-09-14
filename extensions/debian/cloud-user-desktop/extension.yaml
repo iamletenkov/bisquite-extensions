@@ -1,5 +1,6 @@
 name: cloud-user-desktop
-version: 3.0.0
+version: 4.0.0
+layout: 2
 # 3.0.0: файл ручек переехал в /etc/bisquite/desktop/config (был
 #        /etc/default/bisquite-desktop; прежний не читается, установка удаляет).
 family: deb

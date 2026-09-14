@@ -4,6 +4,13 @@
 сборке, выпуск локального TLS-сертификата и запуск под пользователем, которого
 создаёт cloud-init, — на первой загрузке.
 
+> **С 2.0.0 — раскладка 2.** Каталог расширения в госте —
+> `/opt/bisquite/code-server/` (был `/opt/vmsetup/code-server/`), настройки
+> устройства — `/etc/bisquite/code-server/config.yaml` (были в
+> `/opt/vmsetup/code-server/config.yaml`), `lib/get_cloud_user.sh` — ссылкой на общий
+> код источника, а не копией. Манифесты записи со старым путём правят несуществующий файл;
+> нужен bisquite с поддержкой `layout: 2`.
+
 ## Манифест
 
 | Поле | Значение |
@@ -42,23 +49,24 @@ EXTENSION code-server CODE_SERVER_BIND=127.0.0.1
   что `-version` отрабатывает; кладётся в `/usr/local/bin/mkcert`;
 - ставит code-server штатным установщиком `code-server.dev/install.sh`,
   с закреплённой версией или `latest`;
-- перезаписывает `config.yaml` расширения значениями из VMFILE, если они
-  заданы;
+- кладёт настройки устройства в `/etc/bisquite/code-server/config.yaml`
+  (`0600`): умолчания из `config.yaml` расширения, поверх — значения из
+  VMFILE, если они заданы;
 - кладёт `/etc/systemd/system/configure-code-server.service` и включает его.
 
 **Отсутствие файлов рядом со скриптом — отказ сборки.** Перед установкой юнита
 `install.sh` проверяет, что в своём каталоге лежат
-`configure-code-server.service`, `configure.sh`, `get_cloud_user.sh` и
+`configure-code-server.service`, `configure.sh`, `lib/get_cloud_user.sh` и
 `config.yaml`, и при промахе выходит с кодом 1. Раньше это было
 предупреждение с `|| true`: сборка оставалась зелёной, юнита в образе не
 было, и новость приходила из журнала устройства, где читателя нет. Из двух
 отказов дешевле тот, который читает собиравший.
 
 Проверка смотрит в **каталог самого скрипта**, а не в зашитый
-`/opt/vmsetup/code-server/`: скрипт лежит там же, куда `EXTENSION` скопировал
+`/opt/bisquite/code-server/`: скрипт лежит там же, куда `EXTENSION` скопировал
 каталог, поэтому вопрос звучит «файл приехал рядом со мной?», а не
-«раскладка всё ещё такая?». По той же причине `config.yaml` перезаписывается
-рядом со скриптом.
+«раскладка всё ещё такая?». `lib/` — ссылка на общий код источника, её
+ставит сборка рядом с каталогом расширения.
 
 Загрузки идут с повторами — пять попыток, задержка растёт. У `curl`
 (установщик code-server) повторы только на сетевых ошибках: на остальных он
@@ -67,8 +75,8 @@ EXTENSION code-server CODE_SERVER_BIND=127.0.0.1
 
 **Первая загрузка** (`configure.sh`)
 
-- читает `config.yaml` рядом с собой;
-- резолвит пользователя: `USER` из файла, иначе `get_cloud_user.sh`;
+- читает `/etc/bisquite/code-server/config.yaml`;
+- резолвит пользователя: `USER` из файла, иначе `lib/get_cloud_user.sh`;
 - выпускает `mkcert`-сертификат на `localhost 127.0.0.1 ::1` в
   `<домашний каталог>/.local/share/code-server/certs/` (свой `CAROOT`
   там же, сертификат не перевыпускается, если `localhost.crt`
@@ -126,7 +134,7 @@ EXTENSION code-server CODE_SERVER_PORT=9002 CODE_SERVER_VERSION=4.135.0
 значение приходило в окружении и стиралось. Ключ `--version` по-прежнему
 сильнее переменной — он и задумывался как явное указание руками.
 
-**Почему не правкой `config.yaml` руками.** Файл лежит в каталоге
+**Почему не правкой `config.yaml` расширения руками.** Файл лежит в каталоге
 расширения, то есть в кеше источников, а кеш перезаписывается на каждом
 `bs extension sync`. Правка держалась бы до первой синхронизации и пропадала
 молча — ровно та болезнь «мёртвых ручек», из-за которой у расширения
@@ -152,7 +160,7 @@ EXTENSION code-server CODE_SERVER_PORT=9002 CODE_SERVER_VERSION=4.135.0
 | любой другой | `none` | **предупреждение**: шелл открыт всей сети |
 | любой | задан | сообщение: аутентификация по паролю включена |
 
-Пароль лежит в образе открытым текстом — и в `/opt/vmsetup/code-server/config.yaml`,
+Пароль лежит в образе открытым текстом — и в `/etc/bisquite/code-server/config.yaml` (`0600`),
 и потом в пользовательском конфиге. Кто получит образ, получит и пароль;
 установка говорит об этом предупреждением, но сам пароль в журнал не
 печатает: журнал сборки уезжает в CI и в переписку чаще, чем образ.
@@ -161,7 +169,12 @@ EXTENSION code-server CODE_SERVER_PORT=9002 CODE_SERVER_VERSION=4.135.0
 другой машине его не признает и по имени хоста в него не попадёт: TLS здесь
 закрывает туннель до петли, а не публикует сервис наружу.
 
-## Конфигурация (`config.yaml` расширения)
+## Конфигурация (`config.yaml`)
+
+`config.yaml` в каталоге расширения — умолчания сборки. `install.sh` копирует
+его в `/etc/bisquite/code-server/config.yaml` (`0600`, поверх — параметры
+VMFILE), и на устройстве `configure.sh` читает только эту копию: настройки
+лежат в `/etc`, а в `/opt/bisquite` — код.
 
 | Параметр | В поставляемом файле | Кто читает |
 | --- | --- | --- |
@@ -181,7 +194,8 @@ EXTENSION code-server CODE_SERVER_PORT=9002 CODE_SERVER_VERSION=4.135.0
 ```yaml
 #cloud-config
 write_files:
-  - path: /opt/vmsetup/code-server/config.yaml
+  - path: /etc/bisquite/code-server/config.yaml
+    permissions: '0600'
     content: |
       USER: developer
       PASSWORD: none
@@ -197,7 +211,7 @@ write_files:
 
 | Надо | Править | Применять |
 |---|---|---|
-| поменять порт, адрес, пароль **насовсем** | `/opt/vmsetup/code-server/config.yaml` в госте | `sudo systemctl restart configure-code-server.service` |
+| поменять порт, адрес, пароль **насовсем** | `/etc/bisquite/code-server/config.yaml` в госте | `sudo systemctl restart configure-code-server.service` |
 | поправить что-то в конфиге самого code-server | `<домашний каталог>/.config/code-server/config.yaml` (каталог — из `getent passwd`) | `sudo systemctl restart code-server@<пользователь>.service` |
 
 ### Из манифеста записи — только первый путь
@@ -220,15 +234,15 @@ cloud-init, то есть выполняются внутри `cloud-final.servi
 
 ```yaml
 firstboot-commands:
-  - "sed -i 's/^BIND:.*/BIND: 0.0.0.0/' /opt/vmsetup/code-server/config.yaml"
+  - "sed -i 's/^BIND:.*/BIND: 0.0.0.0/' /etc/bisquite/code-server/config.yaml"
 ```
 
 `|| true` тут лишний: файл кладёт расширение на сборке, и его отсутствие
 означает, что образ собран не тем, чем думали, — такое обязано быть
 громким.
 
-Первый путь работает потому, что `configure.sh` сравнивает mtime своего
-`config.yaml` с меткой `/var/lib/code-server/last-config-time`: правка файла
+Первый путь работает потому, что `configure.sh` сравнивает mtime
+`/etc/bisquite/code-server/config.yaml` с меткой `/var/lib/code-server/last-config-time`: правка файла
 и есть сигнал «переконфигурируй». Замер 2026-09-06 на Jetson Nano — до этой
 сверки служба смотрела только на `user-data` от cloud-init, молча выходила
 с «No configuration changes needed», и адрес, заданный манифестом записи
@@ -250,7 +264,7 @@ NAME=code-server
 URI=https://127.0.0.1:<PORT>
 ```
 
-Порт — из `config.yaml` после параметров VMFILE; схема `https`, потому что
+Порт — из `/etc/bisquite/code-server/config.yaml`, то есть после параметров VMFILE; схема `https`, потому что
 `configure.sh` всегда выпускает сертификат mkcert. Файл безвреден без
 `teleport-agent`. С ним code-server публикуется как
 `https://code-server.<нода>.<хост прокси>` — через Teleport, при
@@ -280,7 +294,7 @@ cloud-init в системе вообще**:
 
 Раньше первой строки не было: отсутствующий `user-data.txt` давал
 «изменений нет» **до** проверки `config.yaml`, и на образе без cloud-init
-служба выходила, не настроив ничего, — хотя `get_cloud_user.sh` держит
+служба выходила, не настроив ничего, — хотя `lib/get_cloud_user.sh` держит
 `fallback_user()` ровно для такого образа. Различие взято у
 `lib/get_cloud_user.sh`, где оно уже сделано по тому же признаку.
 
@@ -335,28 +349,18 @@ EXTENSION yq
 EXTENSION code-server CODE_SERVER_PORT=9002
 ```
 
-Прежняя запись продолжает работать:
+Ручной формы через `COPY_IN` больше нет: сборка кладёт каталог в
+`/opt/bisquite/code-server/` и ставит рядом ссылку `lib` на общий код источника,
+а это делает только `EXTENSION` (раскладка 2, см. `docs/extensions.md`).
 
-```vmfile
-COPY_IN <чекаут>/extensions/debian/code-server:/opt/vmsetup/
-RUN_COMMAND chmod +x /opt/vmsetup/code-server/*.sh
-RUN_COMMAND CODE_SERVER_PORT=9002 /opt/vmsetup/code-server/install.sh
-```
+Версию задаёт `CODE_SERVER_VERSION` (`EXTENSION code-server
+CODE_SERVER_VERSION=4.135.0`). Ключ `--version` у `install.sh` остался для
+запуска руками, но `EXTENSION` аргументов не передаёт.
 
-`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
-VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
-и глубина зависит от того, насколько глубоко лежит сам VMFILE.
-
-Версию можно задать и ключом — он сильнее переменной окружения:
-
-```vmfile
-RUN_COMMAND /opt/vmsetup/code-server/install.sh --version 4.135.0
-```
-
-Обе формы кладут каталог в `/opt/vmsetup/code-server`. В `install.sh` этот
-путь больше **не** прибит — и юнит, и `config.yaml` он берёт рядом с собой,
-через каталог скрипта. Прибит он остался в одном месте: `ExecStart` юнита,
-где иначе и нельзя — systemd-юниту нужен абсолютный путь.
+В `install.sh` путь `/opt/bisquite/code-server` **не** прибит — юнит и
+умолчания он берёт рядом с собой, через каталог скрипта. Прибит он в одном
+месте: `ExecStart` юнита, где иначе и нельзя — systemd-юниту нужен
+абсолютный путь.
 
 ## Требования
 

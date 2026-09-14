@@ -12,8 +12,9 @@ log_info(){ echo -e "${GREEN}[INFO]${NC} $*" >&2; }
 log_warn(){ echo -e "${YELLOW}[WARN]${NC} $*" >&2; }
 log_error(){ echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE_CONFIG="$SCRIPT_DIR/config.yaml"
+# Settings of the device, written by install.sh from the build defaults
+# (config.yaml in /opt/bisquite/chromium-kiosk). Edit this file, not that one.
+SOURCE_CONFIG=/etc/bisquite/chromium-kiosk/config.yaml
 TARGET_CONFIG="/etc/chromium-kiosk/config.yml"
 
 check_prereqs(){

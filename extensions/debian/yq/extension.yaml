@@ -1,5 +1,6 @@
 name: yq
-version: 1.0.0
+version: 1.1.0
+layout: 2
 family: deb
 # Бинарь ставится под архитектуру гостя, но выбирается по `dpkg
 # --print-architecture` внутри него же, а не угадывается снаружи.

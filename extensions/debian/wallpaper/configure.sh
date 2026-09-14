@@ -47,11 +47,11 @@ if ! grep -qx "org.gnome.desktop.background" <<<"$SCHEMAS"; then
     exit 1
 fi
 
-if [[ ! -x "$SCRIPT_DIR/get_cloud_user.sh" ]]; then
-    log_error "нет $SCRIPT_DIR/get_cloud_user.sh"
+if [[ ! -x "$SCRIPT_DIR/lib/get_cloud_user.sh" ]]; then
+    log_error "нет $SCRIPT_DIR/lib/get_cloud_user.sh"
     exit 1
 fi
-CLOUD_USER="$("$SCRIPT_DIR/get_cloud_user.sh")" || {
+CLOUD_USER="$("$SCRIPT_DIR/lib/get_cloud_user.sh")" || {
     log_error "не удалось определить пользователя cloud-init"
     exit 1
 }

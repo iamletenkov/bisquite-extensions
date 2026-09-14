@@ -5,7 +5,7 @@
 #   bisquite-desktop apply [--boot|--now] применить то, что записано
 #   bisquite-desktop defaults [KEY=VALUE…] завести файл ручек (сборка образа)
 #   bisquite-desktop status               показать ручки и что из них применено
-#   bisquite-desktop install <каталог>    поставить себя и службу (install.sh расширения)
+#   bisquite-desktop install <каталог>    поставить CLI и службу (install.sh расширения)
 #
 # Ручки — /etc/bisquite/desktop/config, все булевы и по умолчанию 0:
 #
@@ -24,7 +24,15 @@ CONF=/etc/bisquite/desktop/config
 # Path before 3.0.0. Not read as a fallback: install removes it so the
 # image never carries two sources of truth.
 LEGACY_CONF=/etc/default/bisquite-desktop
-LIBDIR=/usr/local/lib/bisquite-desktop
+# Where this script really lives: /opt/bisquite/lib/<sha256>/, the shared code
+# the build delivered next to the extension. /usr/local/sbin/bisquite-desktop is
+# a symlink into it, so resolving the link finds get_cloud_user.sh of the SAME
+# lib/ version — the CLI and the resolver it calls can never come from two
+# different commits.
+LIBDIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+# Before layout 2 install copied the CLI's helper here. Not read as a fallback:
+# install removes it so a base image built earlier leaves no stale copy behind.
+LEGACY_LIBDIR=/usr/local/lib/bisquite-desktop
 KEYS=(DESKTOP_AUTOLOGIN DESKTOP_AUTOLOGIN_USER DESKTOP_DISABLE_SCREEN_LOCK DESKTOP_DISABLE_SCREEN_BLANK)
 BOOL_KEYS=(DESKTOP_AUTOLOGIN DESKTOP_DISABLE_SCREEN_LOCK DESKTOP_DISABLE_SCREEN_BLANK)
 
@@ -476,8 +484,8 @@ cmd_set(){
     fi
 }
 
-# Юнит — в теле скрипта, а не отдельным файлом: так его несёт та же копия
-# lib/, и четыре расширения не могут разойтись в порядке запуска.
+# Юнит — в теле скрипта, а не отдельным файлом: так его несёт тот же lib/,
+# и четыре расширения не могут разойтись в порядке запуска.
 write_unit(){
     cat > /etc/systemd/system/bisquite-desktop.service <<'EOF'
 [Unit]
@@ -507,19 +515,38 @@ EOF
 
 # `install <каталог расширения>` — на сборке образа. Внутри virt-customize
 # systemd не работает, поэтому включение — ссылкой, а не `systemctl enable`.
+#
+# CLI ставится ССЫЛКОЙ /usr/local/sbin/bisquite-desktop ->
+# <каталог>/lib/bisquite-desktop, а не копией. Копии в /usr/local/sbin
+# не на кого опереться: get_cloud_user.sh лежит в lib/ рядом с оригиналом, и
+# копии пришлось бы вписывать путь с именем расширения — то есть ещё один
+# путь, который расходится. Ссылка же ведёт в каталог расширения, который
+# остаётся в образе (из него работают и юниты), и через него — в тот lib/,
+# с которым расширение ставили. В цепочке FROM последнее расширение рабочего
+# стола перенаправляет ссылку на свой lib/; ручки в /etc/bisquite/desktop
+# при этом не трогаются.
 # Умолчания ручек — из переменных окружения DESKTOP_*, если заданы
 # (`EXTENSION gnome DESKTOP_AUTOLOGIN=1`); не заданные не трогаются, чтобы
 # второе расширение рабочего стола не сбросило то, что задало первое.
 cmd_install(){
     local src="${1:-}" k pairs=()
     [[ -d "$src" ]] || die "install: нужен каталог расширения"
-    [[ -f "$src/get_cloud_user.sh" ]] || die "install: рядом нет get_cloud_user.sh"
+    # Абсолютный: путь уходит в ссылку и должен значить то же на устройстве.
+    [[ "$src" == /* ]] || die "install: путь каталога расширения должен быть абсолютным: '$src'"
+    [[ -x "$src/lib/bisquite-desktop" ]] || die "install: нет $src/lib/bisquite-desktop — сборка не доставила lib/ источника"
+    [[ -x "$src/lib/get_cloud_user.sh" ]] || die "install: нет $src/lib/get_cloud_user.sh — сборка не доставила lib/ источника"
     if [[ -e "$LEGACY_CONF" ]]; then
         log "удаляю $LEGACY_CONF: ручки теперь в $CONF, прежний файл не читается"
         rm -f "$LEGACY_CONF"
     fi
-    install -D -m 0755 "$src/bisquite-desktop" /usr/local/sbin/bisquite-desktop
-    install -D -m 0755 "$src/get_cloud_user.sh" "$LIBDIR/get_cloud_user.sh"
+    if [[ -e "$LEGACY_LIBDIR" ]]; then
+        log "удаляю $LEGACY_LIBDIR: общий код теперь в lib/ расширения"
+        rm -rf "$LEGACY_LIBDIR"
+    fi
+    install -d -m 0755 /usr/local/sbin
+    # -n: не заходить внутрь, если на месте уже ссылка; -f: заменить прежнюю
+    # копию из образа до раскладки 2.
+    ln -sfn "$src/lib/bisquite-desktop" /usr/local/sbin/bisquite-desktop
     write_unit
     install -d /etc/systemd/system/graphical.target.wants
     ln -sf /etc/systemd/system/bisquite-desktop.service /etc/systemd/system/graphical.target.wants/bisquite-desktop.service

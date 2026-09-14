@@ -75,12 +75,14 @@ log_info "lightdm: сессия LXDE, автологин выключен до �
 # `bisquite-desktop set` на устройстве. Служба bisquite-desktop.service
 # применяет их на каждой загрузке ДО lightdm. На железе xfce4/lxde с новым
 # механизмом не проверялись — проверен gnome на Jetson AGX Orin (2026-09-14).
-if [[ ! -x "$SCRIPT_DIR/bisquite-desktop" ]]; then
-  log_error "рядом нет bisquite-desktop — ручек автологина и экрана не будет"
+# Общий код приезжает не копией в каталоге расширения, а ссылкой lib на
+# lib/ источника, которую ставит сборка (раскладка 2).
+if [[ ! -x "$SCRIPT_DIR/lib/bisquite-desktop" ]]; then
+  log_error "рядом нет lib/bisquite-desktop — ручек автологина и экрана не будет"
   exit 1
 fi
 apt-get install -y x11-xserver-utils dconf-cli || exit 1
-"$SCRIPT_DIR/bisquite-desktop" install "$SCRIPT_DIR" || exit 1
+"$SCRIPT_DIR/lib/bisquite-desktop" install "$SCRIPT_DIR" || exit 1
 
 systemctl enable lightdm.service || true
 systemctl set-default graphical.target || true

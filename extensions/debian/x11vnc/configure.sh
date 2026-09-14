@@ -29,8 +29,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # зовёт, было бы ложным диагнозом — оно указывает на инструмент, к отказу
 # отношения не имеющий.
 check_prereqs(){
-  if [[ ! -x "$SCRIPT_DIR/get_cloud_user.sh" ]]; then
-    log_error "get_cloud_user.sh not found or not executable at $SCRIPT_DIR/get_cloud_user.sh"
+  if [[ ! -x "$SCRIPT_DIR/lib/get_cloud_user.sh" ]]; then
+    log_error "get_cloud_user.sh not found or not executable at $SCRIPT_DIR/lib/get_cloud_user.sh"
     exit 1
   fi
 }
@@ -42,7 +42,7 @@ resolve_user(){
 
   # Wait up to 120s for cloud user to appear to avoid racing cloud-init
   while true; do
-    if user="$("$SCRIPT_DIR/get_cloud_user.sh" 2>/dev/null || true)" && [[ -n "$user" ]]; then
+    if user="$("$SCRIPT_DIR/lib/get_cloud_user.sh" 2>/dev/null || true)" && [[ -n "$user" ]]; then
       if id "$user" >/dev/null 2>&1; then
         log_info "Found user from cloud-init: $user"
         echo "$user"
