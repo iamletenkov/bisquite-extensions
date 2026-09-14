@@ -366,7 +366,7 @@ ssh -L 9001:127.0.0.1:9001 <пользователь>@<машина>
 
 | Уровень | Как | Когда применяется |
 |---|---|---|
-| сборка | `EXTENSION gnome DESKTOP_AUTOLOGIN=1` | умолчание образа в `/etc/default/bisquite-desktop` |
+| сборка | `EXTENSION gnome DESKTOP_AUTOLOGIN=1` | умолчание образа в `/etc/bisquite/desktop/config` |
 | образ профиля | `FIRSTBOOT_COMMAND "bisquite-desktop set …"` | guestfs-firstboot, до менеджера входа — на первой же загрузке |
 | compose | строкой в `firstboot_commands` | так же, это тот же guestfs-firstboot |
 | манифест записи | строкой в `firstboot-commands` | cloud-final, ПОСЛЕ старта менеджера входа: `set` применяет сразу и перезапускает менеджер, если нет открытой сессии |

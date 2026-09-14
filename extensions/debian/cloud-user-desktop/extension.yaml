@@ -1,5 +1,7 @@
 name: cloud-user-desktop
-version: 2.0.0
+version: 3.0.0
+# 3.0.0: файл ручек переехал в /etc/bisquite/desktop/config (был
+#        /etc/default/bisquite-desktop; прежний не читается, установка удаляет).
 family: deb
 arch: [amd64, arm64]
 # build     — убирает вендорскую учётку (CLOUD_USER_DESKTOP_REMOVE) и ставит

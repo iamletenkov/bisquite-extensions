@@ -18,7 +18,7 @@
 #   bisquite-desktop status               показать ручки и что из них применено
 #   bisquite-desktop install <каталог>    поставить себя и службу (install.sh расширения)
 #
-# Ручки — /etc/default/bisquite-desktop, все булевы и по умолчанию 0:
+# Ручки — /etc/bisquite/desktop/config, все булевы и по умолчанию 0:
 #
 #   DESKTOP_AUTOLOGIN=0             1 — вход без пароля
 #   DESKTOP_AUTOLOGIN_USER=         пусто — пользователь cloud-init
@@ -31,7 +31,10 @@
 # расходились, как расходились их копии disable_powersave.sh.
 set -uo pipefail
 
-CONF=/etc/default/bisquite-desktop
+CONF=/etc/bisquite/desktop/config
+# Path before 3.0.0. Not read as a fallback: install removes it so the
+# image never carries two sources of truth.
+LEGACY_CONF=/etc/default/bisquite-desktop
 LIBDIR=/usr/local/lib/bisquite-desktop
 KEYS=(DESKTOP_AUTOLOGIN DESKTOP_AUTOLOGIN_USER DESKTOP_DISABLE_SCREEN_LOCK DESKTOP_DISABLE_SCREEN_BLANK)
 BOOL_KEYS=(DESKTOP_AUTOLOGIN DESKTOP_DISABLE_SCREEN_LOCK DESKTOP_DISABLE_SCREEN_BLANK)
@@ -97,7 +100,8 @@ write_conf_pair(){
 
 ensure_conf_file(){
     [[ -f "$CONF" ]] && return 0
-    install -D -m 0644 /dev/null "$CONF"
+    install -d -m 0755 "$(dirname "$CONF")"
+    install -m 0644 /dev/null "$CONF"
     cat > "$CONF" <<'EOF'
 # Ручки рабочего стола. Положено расширением рабочего стола bisquite.
 # Все 0/1, по умолчанию 0. Менять командой, она же применяет:
@@ -521,6 +525,10 @@ cmd_install(){
     local src="${1:-}" k pairs=()
     [[ -d "$src" ]] || die "install: нужен каталог расширения"
     [[ -f "$src/get_cloud_user.sh" ]] || die "install: рядом нет get_cloud_user.sh"
+    if [[ -e "$LEGACY_CONF" ]]; then
+        log "удаляю $LEGACY_CONF: ручки теперь в $CONF, прежний файл не читается"
+        rm -f "$LEGACY_CONF"
+    fi
     install -D -m 0755 "$src/bisquite-desktop" /usr/local/sbin/bisquite-desktop
     install -D -m 0755 "$src/get_cloud_user.sh" "$LIBDIR/get_cloud_user.sh"
     write_unit

@@ -3,6 +3,10 @@
 GNOME на Xorg (Wayland выключен), менеджер входа gdm3. Даёт X-сервер
 и сессию расширениям, которым они нужны, — `x11vnc`, `kiosk`.
 
+**С 3.0.0 файл ручек — `/etc/bisquite/desktop/config`** (был
+`/etc/default/bisquite-desktop`). Прежний путь не читается; если файл
+по нему остался в базовом образе, установка его удаляет.
+
 **С 2.0.0 автологин, отключение автоблокировки и затемнения — ручки,
 по умолчанию выключены.** Раньше расширение включало всё это безусловно.
 Разбор ручек — [`docs/extensions.md`, «Ручки рабочего стола»](../../../docs/extensions.md#ручки-рабочего-стола).
@@ -26,7 +30,7 @@ GNOME на Xorg (Wayland выключен), менеджер входа gdm3. Д
 - пробует нативный `chromium` — только его, см. ниже;
 - пишет конфигурацию gdm3 из `daemon.conf`: `WaylandEnable=false`,
   `AutomaticLoginEnable=false`;
-- ставит `bisquite-desktop` (CLI, `/etc/default/bisquite-desktop`,
+- ставит `bisquite-desktop` (CLI, `/etc/bisquite/desktop/config`,
   `bisquite-desktop.service`) и записывает умолчания ручек из параметров;
 - включает gdm3 и `graphical.target`.
 
