@@ -6,7 +6,7 @@ Requires=display-manager.service
 [Service]
 Type=simple
 User=%i
-EnvironmentFile=-/etc/default/bisquite-selkies
+EnvironmentFile=-/etc/bisquite/selkies/config
 # Ждать сессию обёртка умеет сама и отказывает громко — см. её шапку.
 ExecStart=/bin/bash /opt/vmsetup/selkies/run-selkies.sh %i
 Restart=always

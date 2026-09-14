@@ -34,7 +34,9 @@ DISPLAY_NUM="${SELKIES_DISPLAY:-:0}"
 # Selkies без basic auth на адресе не петли — это рабочий стол, буфер обмена
 # и передача файлов любому в сети. На петле защиту даёт тот, кто проксирует
 # (Teleport, ssh). Отказ, а не предупреждение: предупреждение в журнале
-# робота не прочитает никто.
+# робота не прочитает никто. Снимает отказ только явная ручка
+# BISQUITE_SELKIES_ALLOW_NO_AUTH=true — решение, записанное в VMFILE или
+# манифесте, а не молчаливое умолчание.
 addr="${SELKIES_ADDR:-127.0.0.1}"
 loopback=1
 IFS=',' read -r -a addrs <<< "$addr"
@@ -42,9 +44,14 @@ for a in "${addrs[@]}"; do
     case "${a// /}" in 127.*|::1|localhost) ;; *) loopback=0 ;; esac
 done
 if (( ! loopback )) && [[ "${SELKIES_ENABLE_BASIC_AUTH:-false}" != true ]]; then
+  if [[ "${BISQUITE_SELKIES_ALLOW_NO_AUTH:-false}" == true ]]; then
+    log_warn "SELKIES_ADDR=$addr без аутентификации (BISQUITE_SELKIES_ALLOW_NO_AUTH=true) — стол открыт всей сети"
+  else
     log_error "SELKIES_ADDR=$addr не петля, а SELKIES_ENABLE_BASIC_AUTH не true — не запускаюсь"
-    log_error "задайте SELKIES_ENABLE_BASIC_AUTH=true и SELKIES_BASIC_AUTH_PASSWORD в /etc/default/bisquite-selkies"
+    log_error "задайте SELKIES_ENABLE_BASIC_AUTH=true и SELKIES_BASIC_AUTH_PASSWORD в /etc/bisquite/selkies/config"
+    log_error "или откройте без пароля осознанно: BISQUITE_SELKIES_ALLOW_NO_AUTH=true"
     exit 1
+  fi
 fi
 
 session_type(){
@@ -105,13 +112,29 @@ if [[ ! -S "$PULSE_RUNTIME_PATH/native" && "${SELKIES_AUDIO_ENABLED:-true}" == t
     export SELKIES_AUDIO_ENABLED=false
 fi
 
+# HTTPS: браузер даёт буфер обмена, микрофон, камеру и геймпады только
+# защищённому контексту, а http://<адрес робота> им не является. Selkies умеет
+# выпустить самоподписанную пару сам, но сначала берёт путь по умолчанию —
+# /etc/ssl/certs/ssl-cert-snakeoil.pem. На Ubuntu сертификат там есть, а ключ
+# пользователю не читается, и Selkies падает с «PEM lib» вместо генерации
+# (замер на AGX Orin 2026-09-14). Поэтому путь по умолчанию переносится
+# в состояние пользователя: файла там нет — Selkies создаёт пару на
+# устройстве и переиспользует её между перезапусками. Ключ в образ не попадает.
+if [[ "${SELKIES_ENABLE_HTTPS:-false}" == true && -z "${SELKIES_HTTPS_CERT:-}" ]]; then
+    tls_dir="${XDG_STATE_HOME:-$HOME_OF_USER/.local/state}/selkies"
+    mkdir -p "$tls_dir" && chmod 0700 "$tls_dir"
+    export SELKIES_HTTPS_CERT="$tls_dir/selkies.pem" SELKIES_HTTPS_KEY="$tls_dir/selkies.key"
+fi
+scheme=http
+[[ "${SELKIES_ENABLE_HTTPS:-false}" == true ]] && scheme=https
+
 # Каталог передачи файлов — в домашнем каталоге того, кто на экране.
 if [[ -z "${SELKIES_FILE_MANAGER_PATH:-}" ]]; then
     export SELKIES_FILE_MANAGER_PATH="$HOME_OF_USER/Downloads"
 fi
 mkdir -p "$SELKIES_FILE_MANAGER_PATH" 2>/dev/null || true
 
-log_info "http://${addr}:${SELKIES_PORT:-8080}/ файлы=${SELKIES_FILE_TRANSFERS:-} в $SELKIES_FILE_MANAGER_PATH, буфер=${SELKIES_ENABLE_CLIPBOARD:-}"
+log_info "${scheme}://${addr}:${SELKIES_PORT:-8080}/ файлы=${SELKIES_FILE_TRANSFERS:-} в $SELKIES_FILE_MANAGER_PATH, буфер=${SELKIES_ENABLE_CLIPBOARD:-}"
 
 # СТОРОЖ СЕССИИ. Selkies не умирает вместе с X: замер на AGX Orin 2026-09-14 —
 # после `loginctl terminate-session` процесс остался жив (тот же pid), в журнале

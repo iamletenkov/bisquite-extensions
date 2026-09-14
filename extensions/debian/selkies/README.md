@@ -44,7 +44,9 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
   `/opt/selkies/current` — ссылка). Пакеты Selkies собраны под Ubuntu 26.04
   и Debian trixie; AppImage несёт своё окружение и на Ubuntu 22.04
   (Jetson L4T 36.4) работает. Распакован, чтобы не зависеть от FUSE.
-- **`/etc/default/bisquite-selkies`** (0600) — переменные `SELKIES_*`, читает юнит.
+- **`/etc/bisquite/selkies/config`** (0600) — переменные `SELKIES_*`, читает юнит.
+  До 2.0.0 файл лежал в `/etc/default/bisquite-selkies`; старый путь не читается,
+  `install.sh` его удаляет.
 - **`selkies@.service`** + **`run-selkies.sh`** — запуск от пользователя сессии.
 - **`configure-selkies.service`** — на первой загрузке включает
   `selkies@<пользователь cloud-init>`.
@@ -58,7 +60,7 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
 | `SELKIES_ADDR` | `127.0.0.1` | снаружи — через Teleport или ssh |
 | `SELKIES_PORT` | `8080` | |
 | `SELKIES_ENABLE_BASIC_AUTH` | `false` | на петле аутентификацию делает прокси; наружу без пароля обёртка не запустится |
-| `SELKIES_ENABLE_HTTPS` | `false` | TLS завершает прокси |
+| `SELKIES_ENABLE_HTTPS` | `false` | TLS завершает прокси; открывая наружу — `true` (см. «Открыть в сеть») |
 | `SELKIES_ENABLE_RESIZE` | `false` | **иначе Selkies меняет разрешение монитора** под окно браузера |
 | `SELKIES_ENCODER` | `h264enc` | NVENC/VA-API, если есть, иначе x264 |
 | `SELKIES_FRAMERATE` | `30,8-60` | 30 при старте, пользователь может поднять до 60 |
@@ -69,6 +71,7 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
 | `SELKIES_COMMAND_ENABLED` | `false` | API выполнения команд |
 | `SELKIES_ENABLE_SHARING`, `SELKIES_SECOND_SCREEN` | `false` | ссылки для просмотра, второй монитор |
 | `SELKIES_MODE` | `websockets` | WebRTC через веб-приложение Teleport не проходит |
+| `BISQUITE_SELKIES_ALLOW_NO_AUTH` | `false` | ручка обёртки, не Selkies: `true` разрешает адрес не петли без пароля |
 
 ## Что ещё умеет Selkies
 
@@ -103,15 +106,18 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
   `Origin`, соединение получит `403` и в журнале будет
   `Rejected WebSocket upgrade from disallowed Origin`. Тогда:
   `SELKIES_ALLOWED_ORIGINS=https://<приложение>.<teleport>`.
-- **Наружу — только с паролем.** `SELKIES_ADDR` не на петле без
-  `SELKIES_ENABLE_BASIC_AUTH=true` — обёртка отказывается стартовать.
+- **Наружу — с паролем или явным решением.** `SELKIES_ADDR` не на петле без
+  `SELKIES_ENABLE_BASIC_AUTH=true` — обёртка отказывается стартовать, если не
+  задано `BISQUITE_SELKIES_ALLOW_NO_AUTH=true`. С ним стартует и пишет
+  в журнал предупреждение: рабочий стол, буфер обмена, файлы и API команд
+  получает любой, кто достаёт до робота по сети.
 - **Пароль не в VMFILE.** Строка VMFILE хранится в образе и уезжает в реестр.
   Задавайте пароль на устройстве, например командой первой загрузки манифеста
   записи:
 
   ```yaml
   firstboot-commands:
-    - "printf 'SELKIES_ENABLE_BASIC_AUTH=true\nSELKIES_BASIC_AUTH_PASSWORD=...\n' >> /etc/default/bisquite-selkies"
+    - "printf 'SELKIES_ENABLE_BASIC_AUTH=true\nSELKIES_BASIC_AUTH_PASSWORD=...\n' >> /etc/bisquite/selkies/config"
     - "systemctl restart 'selkies@*' || true"
   ```
 
@@ -119,6 +125,38 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
 - **Файлы и буфер обмена** включены: тот, кто получил доступ к приложению,
   может читать и писать `~/Downloads` и буфер обмена сессии. Не нужно —
   `SELKIES_FILE_TRANSFERS=none`, `SELKIES_ENABLE_CLIPBOARD=out`.
+
+## Открыть в сеть
+
+Профиль стенда: все функции, без пароля, на всех интерфейсах.
+
+```
+EXTENSION selkies SELKIES_ADDR=0.0.0.0 SELKIES_ENABLE_HTTPS=true \
+    BISQUITE_SELKIES_ALLOW_NO_AUTH=true …
+```
+
+**HTTPS обязателен для «всех функций».** Браузер даёт буфер обмена,
+микрофон, камеру и геймпады только защищённому контексту; `http://<адрес>`
+им не является (исключение — `localhost`, то есть туннель).
+
+**Сертификат выпускается на устройстве.** Без `SELKIES_HTTPS_CERT` обёртка
+направляет путь в `~/.local/state/selkies/selkies.{pem,key}` пользователя
+сессии: файла там нет, и Selkies при первом старте создаёт самоподписанную
+пару (SAN: `localhost`, имя хоста, `127.0.0.1`, `::1`; срок 10 лет) и дальше
+её переиспользует. Путь по умолчанию самого Selkies —
+`/etc/ssl/certs/ssl-cert-snakeoil.pem`; на Ubuntu сертификат там есть, а ключ
+пользователю не читается, и Selkies падает с `[SSL] PEM lib` вместо генерации
+(замер на AGX Orin 2026-09-14). Браузер один раз попросит исключение для
+сертификата; пара не меняется между перезапусками, так что исключение
+держится. В образ ключ не попадает.
+
+С манифеста записи то же — строками в конфиг:
+
+```yaml
+firstboot-commands:
+  - "sed -i -e 's/^SELKIES_ADDR=.*/SELKIES_ADDR=0.0.0.0/' -e 's/^SELKIES_ENABLE_HTTPS=.*/SELKIES_ENABLE_HTTPS=true/' -e 's/^BISQUITE_SELKIES_ALLOW_NO_AUTH=.*/BISQUITE_SELKIES_ALLOW_NO_AUTH=true/' /etc/bisquite/selkies/config"
+  - "systemctl restart 'selkies@*' || true"
+```
 
 ## Жизненный цикл службы
 
@@ -149,6 +187,11 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
 Мышь из браузера доходит в X с точным пересчётом координат. Кодер
 программный: аппаратный кодер Jetson (nvv4l2) Selkies не поддерживает.
 
+Открытый профиль (`SELKIES_ADDR=0.0.0.0`, `SELKIES_ENABLE_HTTPS=true`,
+  `BISQUITE_SELKIES_ALLOW_NO_AUTH=true`): обёртка стартует с предупреждением,
+  Selkies выпустил пару в `~/.local/state/selkies/`, страница отвечает `200`
+  по `https://<адрес робота>` с другой машины. Без ручки — отказ старта.
+
 **Не проверено:** amd64 AppImage на Ubuntu 22.04; клавиатура и буфер обмена
 отдельно; работа через Teleport.
 
@@ -167,6 +210,6 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
 ```bash
 systemctl status selkies@robot
 journalctl -u selkies@robot -b | grep -E 'selkies:|running on|Origin|ERROR'
-sudo cat /etc/default/bisquite-selkies
+sudo cat /etc/bisquite/selkies/config
 ss -ltnp | grep 8080
 ```

@@ -27,7 +27,7 @@ declare -A APPIMAGE_SHA256=(
     [aarch64]="a1abb4658c3117188afa6881eaab93a24c172a5db5c0cbb18889c43c60e59043"
 )
 PREFIX="/opt/selkies/${SELKIES_VERSION}"
-CONF=/etc/default/bisquite-selkies
+CONF=/etc/bisquite/selkies/config
 
 case "$(dpkg --print-architecture)" in
     amd64) APPARCH=x86_64 ;;
@@ -58,6 +58,10 @@ done
 #   MICROPHONE false
 #   COMMAND_ENABLED false  API выполнения команд
 #   ENABLE_SHARING false   ссылки для просмотра другими
+#
+# BISQUITE_SELKIES_ALLOW_NO_AUTH — не переменная Selkies, а ручка обёртки:
+# true снимает отказ стартовать на адресе не петли без basic auth. Решение
+# «рабочий стол любому в сети» принимается явно, в VMFILE или манифесте.
 #   FILE_TRANSFERS         передача файлов в обе стороны; каталог — ~/Downloads
 #   upload,download        пользователя, его ставит обёртка
 declare -A DEFAULTS=(
@@ -83,6 +87,7 @@ declare -A DEFAULTS=(
     [SELKIES_UI_SIDEBAR_SHOW_WEBCAM]="false"
     [SELKIES_UI_SIDEBAR_SHOW_SHARING]="false"
     [SELKIES_UI_SIDEBAR_SHOW_APPS]="false"
+    [BISQUITE_SELKIES_ALLOW_NO_AUTH]="false"
 )
 
 # --- AppImage -----------------------------------------------------------------
@@ -116,13 +121,22 @@ ln -sfn "$PREFIX" /opt/selkies/current
 # Обёртке нужен xdpyinfo — проверить кандидата в X authority, как у x11vnc.
 apt-get install -y -q x11-utils xauth >/dev/null || { log_error "x11-utils не поставился"; exit 1; }
 
-# --- /etc/default/bisquite-selkies ---------------------------------------------
+# --- /etc/bisquite/selkies/config ---------------------------------------------
 declare -A VALUES=()
 for k in "${!DEFAULTS[@]}"; do VALUES[$k]="${DEFAULTS[$k]}"; done
 while IFS='=' read -r k v; do
-    [[ "$k" =~ ^SELKIES_[A-Z0-9_]+$ ]] || continue
+    [[ "$k" =~ ^(SELKIES|BISQUITE_SELKIES)_[A-Z0-9_]+$ ]] || continue
     VALUES[$k]="$v"
 done < <(env)
+# The file moved from /etc/default/bisquite-selkies in 2.0.0. The old path is
+# not read as a fallback; remove it so the image has one source of truth.
+if [[ -e /etc/default/bisquite-selkies ]]; then
+    log_info "удаляю /etc/default/bisquite-selkies: параметры теперь в $CONF"
+    rm -f /etc/default/bisquite-selkies
+fi
+install -d -m 0755 "$(dirname "$CONF")"
+# 0600 before the first byte: SELKIES_BASIC_AUTH_PASSWORD may land here.
+install -m 0600 /dev/null "$CONF"
 {
     echo "# Положено расширением selkies. Имена — переменные Selkies (selkies --help)."
     echo "# После правки: sudo systemctl restart 'selkies@*'"
@@ -132,8 +146,7 @@ done < <(env)
         printf '%s=%s\n' "$k" "$v"
     done
 } > "$CONF"
-# 0600: сюда ляжет SELKIES_BASIC_AUTH_PASSWORD, если его зададут. Читает файл
-# systemd (EnvironmentFile), а не пользователь.
+# Читает файл systemd (EnvironmentFile), а не пользователь.
 chmod 0600 "$CONF"
 
 addr="${VALUES[SELKIES_ADDR]}"
@@ -141,7 +154,17 @@ auth="${VALUES[SELKIES_ENABLE_BASIC_AUTH]}"
 log_info "адрес ${addr}:${VALUES[SELKIES_PORT]}, basic auth ${auth}, файлы ${VALUES[SELKIES_FILE_TRANSFERS]}, буфер ${VALUES[SELKIES_ENABLE_CLIPBOARD]}"
 case "$addr" in
     127.0.0.1|::1|localhost|"127.0.0.1,::1") ;;
-    *) [[ "$auth" == true ]] || log_warn "SELKIES_ADDR=$addr без SELKIES_ENABLE_BASIC_AUTH=true — обёртка откажется стартовать" ;;
+    *)
+        if [[ "$auth" == true ]]; then
+            :
+        elif [[ "${VALUES[BISQUITE_SELKIES_ALLOW_NO_AUTH]}" == true ]]; then
+            log_warn "SELKIES_ADDR=$addr БЕЗ АУТЕНТИФИКАЦИИ (BISQUITE_SELKIES_ALLOW_NO_AUTH=true):"
+            log_warn "  рабочий стол, буфер обмена и файлы — любому, кто достаёт до робота по сети"
+        else
+            log_warn "SELKIES_ADDR=$addr без SELKIES_ENABLE_BASIC_AUTH=true — обёртка откажется стартовать"
+            log_warn "  (открыть без пароля осознанно: BISQUITE_SELKIES_ALLOW_NO_AUTH=true)"
+        fi
+        ;;
 esac
 
 # --- Юниты ----------------------------------------------------------------------
