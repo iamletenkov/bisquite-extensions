@@ -12,7 +12,7 @@
 # месте лежал config.yaml, чьи ключи читались и нигде не использовались:
 # юнит хардкодил свои значения, а README обещал парольный доступ, которого
 # не было. Файл удалили вместе с обещанием. Здесь параметры приезжают из
-# VMFILE, install.sh кладёт их в /etc/default/bisquite-vino, а configure.sh
+# VMFILE, install.sh кладёт их в /etc/bisquite/vino/config, а configure.sh
 # читает оттуда — единственный источник правды об их именах — этот файл.
 #
 # ПОЧЕМУ НАСТРОЙКА НЕ ЗДЕСЬ. `gsettings` пишет в dconf конкретного
@@ -34,7 +34,10 @@ VINO_LISTEN="${VINO_LISTEN:-localhost}"
 VINO_PASSWORD="${VINO_PASSWORD:-}"
 VINO_ENCRYPTION="${VINO_ENCRYPTION:-false}"
 
-ENV_FILE=/etc/default/bisquite-vino
+ENV_FILE=/etc/bisquite/vino/config
+# Path before 2.0.0. Not read as a fallback: removed below so the image never
+# carries two sources of truth.
+LEGACY_ENV_FILE=/etc/default/bisquite-vino
 PASS_FILE=/etc/vino/vnc-password.b64
 
 # --- Проверка параметров до установки ---------------------------------------
@@ -72,7 +75,11 @@ apt-get install -y \
     dbus || exit 1
 
 # --- Параметры для первой загрузки ------------------------------------------
-install -d -m 0755 /etc/default
+if [[ -e "$LEGACY_ENV_FILE" ]]; then
+    log_info "удаляю $LEGACY_ENV_FILE: параметры теперь в $ENV_FILE"
+    rm -f "$LEGACY_ENV_FILE"
+fi
+install -d -m 0755 "$(dirname "$ENV_FILE")"
 {
     echo "VINO_PORT=${VINO_PORT}"
     echo "VINO_LISTEN=${VINO_LISTEN}"

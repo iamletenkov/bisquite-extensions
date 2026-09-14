@@ -35,7 +35,7 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} vino-vnc: $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-ENV_FILE=/etc/default/bisquite-vino
+ENV_FILE=/etc/bisquite/vino/config
 DESKTOP_SRC=/usr/share/applications/vino-server.desktop
 
 # Умолчания те же, что в install.sh. Файла может не быть, если расширение

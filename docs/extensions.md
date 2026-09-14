@@ -296,15 +296,15 @@ Chromium для arm64 нет ни в Ubuntu ports, ни в репозитори�
 
 | Расширение | Где действующее значение | Чем применить правку |
 |---|---|---|
-| `x11vnc` | `/etc/default/bisquite-x11vnc` — `EnvironmentFile` юнита `x11vnc@.service` | `systemctl restart x11vnc@<пользователь>` |
+| `x11vnc` | `/etc/bisquite/x11vnc/config` — `EnvironmentFile` юнита `x11vnc@.service` | `systemctl restart x11vnc@<пользователь>` |
 | `kiosk` | `/var/lib/kiosk/config` — `EnvironmentFile` юнита `kiosk-chromium@.service` | `systemctl restart kiosk-chromium@<пользователь>` |
 | `code-server` | `~<пользователь>/.config/code-server/config.yaml` — путь зашит в `ExecStart` | `systemctl restart code-server@<пользователь>` |
-| `vino-vnc` | **dconf пользователя**, а не файл в `/etc/default` — см. оговорку ниже | `gsettings set org.gnome.Vino …` от имени пользователя |
+| `vino-vnc` | **dconf пользователя**, а не файл в `/etc/bisquite` — см. оговорку ниже | `gsettings set org.gnome.Vino …` от имени пользователя |
 | остальные | действующего значения нет: расширение однократно настраивает систему | повторный прогон `configure-<имя>.service` |
 
 ### Оговорка про `vino-vnc`: файл есть, ручкой он не является
 
-`/etc/default/bisquite-vino` выглядит как близнец файла `x11vnc`, но
+`/etc/bisquite/vino/config` выглядит как близнец файла `x11vnc`, но
 работает иначе, и спутать их дорого. Юнита с `EnvironmentFile` у
 `vino-vnc` нет вовсе: файл **однократно читает `configure.sh`** на первой
 загрузке (`source "$ENV_FILE"`) и переносит значения в dconf пользователя
@@ -314,7 +314,7 @@ Chromium для arm64 нет ни в Ubuntu ports, ни в репозитори�
 Причина такая же, по которой настройка вообще вынесена в `firstboot`:
 `gsettings` пишет в dconf **конкретного пользователя**
 (`~/.config/dconf/user`), а на сборке этого пользователя ещё не
-существует — его создаёт cloud-init. Файл в `/etc/default` здесь —
+существует — его создаёт cloud-init. Файл в `/etc/bisquite` здесь —
 способ протащить параметры из VMFILE через сборку до первой загрузки,
 а не точка настройки живой машины.
 

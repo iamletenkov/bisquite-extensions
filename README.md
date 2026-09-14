@@ -58,7 +58,7 @@ firstboot-служба, а не сборка. Поэтому каталог на
 
 **Где потом менять настройки.** Единого механизма нет, и различие
 намеренно видимое: у `x11vnc` это `EnvironmentFile` юнита
-(`/etc/default/bisquite-x11vnc`), у `kiosk` — `/var/lib/kiosk/config`,
+(`/etc/bisquite/x11vnc/config`), у `kiosk` — `/var/lib/kiosk/config`,
 у `code-server` — `config.yaml` в домашнем каталоге пользователя,
 а у `vino-vnc` файла-ручки нет вовсе: действующее значение живёт в dconf.
 Таблица «что править и чем перезапускать» —

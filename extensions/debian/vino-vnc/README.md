@@ -2,6 +2,10 @@
 
 Удалённый рабочий стол по VNC штатным сервером GNOME — `vino`.
 
+**С 2.0.0 файл параметров — `/etc/bisquite/vino/config`** (был `/etc/default/bisquite-vino`).
+Прежний путь не читается; если файл по нему остался в базовом образе,
+установка его удаляет.
+
 ## Зачем отдельное расширение, а не режим `x11vnc`
 
 Общего кода почти нет, и это видно по устройству обоих:
@@ -89,13 +93,13 @@ EXTENSION vino-vnc VINO_PASSWORD="two words"
 ```
 
 `install.sh` кладёт `VINO_PORT`, `VINO_LISTEN` и `VINO_ENCRYPTION`
-в `/etc/default/bisquite-vino`; `configure.sh` читает оттуда. Пароль туда
+в `/etc/bisquite/vino/config`; `configure.sh` читает оттуда. Пароль туда
 **не пишется**: ключ `vnc-password` схемы `org.gnome.Vino` хранит его
 в base64, поэтому base64 уезжает в отдельный файл `/etc/vino/vnc-password.b64`
 с правами `0600`, а в файл окружения — только путь (`VINO_PASSWORD_FILE`).
 В журнал не печатается ни пароль, ни его base64.
 
-Оговорка, важная при правке на живой машине: `/etc/default/bisquite-vino`
+Оговорка, важная при правке на живой машине: `/etc/bisquite/vino/config`
 здесь **не `EnvironmentFile` какого-то юнита**, как у `x11vnc`. Его
 `source`-ит `configure.sh` на первой загрузке и переносит значения
 в dconf пользователя. Настоящий источник правды для работающего сервера —
@@ -140,7 +144,7 @@ vino: умеют не все.
 dconf пользователя.
 
 ```console
-$ cat /etc/default/bisquite-vino
+$ cat /etc/bisquite/vino/config
 VINO_PORT=5900
 VINO_LISTEN=localhost
 VINO_ENCRYPTION=false
@@ -150,13 +154,13 @@ VINO_ENCRYPTION=false
 
 ```bash
 # 1. поменять значение (любое, кроме localhost, означает «все интерфейсы»)
-sudo sed -i 's/^VINO_LISTEN=.*/VINO_LISTEN=all/' /etc/default/bisquite-vino
+sudo sed -i 's/^VINO_LISTEN=.*/VINO_LISTEN=all/' /etc/bisquite/vino/config
 
 # 2. задать пароль, если его ещё нет: ключ хранит его в base64
 sudo install -d -m 0700 /etc/vino
 printf '%s' 'пароль' | base64 -w0 | sudo tee /etc/vino/vnc-password.b64 >/dev/null
 sudo chmod 0600 /etc/vino/vnc-password.b64
-grep -q VINO_PASSWORD_FILE /etc/default/bisquite-vino ||   echo 'VINO_PASSWORD_FILE=/etc/vino/vnc-password.b64' | sudo tee -a /etc/default/bisquite-vino
+grep -q VINO_PASSWORD_FILE /etc/bisquite/vino/config ||   echo 'VINO_PASSWORD_FILE=/etc/vino/vnc-password.b64' | sudo tee -a /etc/bisquite/vino/config
 
 # 3. перенести значения в dconf пользователя — это и есть «перезапуск настройки»
 sudo systemctl restart configure-vino-vnc.service
@@ -203,7 +207,7 @@ sudo -u <пользователь> dbus-run-session --   gsettings set org.gnome
 ## Что делает
 
 - **Сборка** (`install.sh`) — проверяет параметры, ставит `vino`,
-  `libglib2.0-bin` и `dbus`, пишет `/etc/default/bisquite-vino`
+  `libglib2.0-bin` и `dbus`, пишет `/etc/bisquite/vino/config`
   и (если задан) файл пароля, включает `configure-vino-vnc.service`.
 - **Первая загрузка** (`configure.sh`) — резолвит пользователя cloud-init,
   применяет `gsettings` в его dconf и кладёт автозапуск
@@ -346,7 +350,7 @@ VNC не поднимется. Оно также не
 На собранном образе:
 
 ```console
-$ virt-cat -a образ.qcow2 /etc/default/bisquite-vino
+$ virt-cat -a образ.qcow2 /etc/bisquite/vino/config
 $ virt-ls -a образ.qcow2 /etc/systemd/system | grep vino
 ```
 
