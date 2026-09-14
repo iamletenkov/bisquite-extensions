@@ -92,7 +92,11 @@ EXTENSION kiosk
 
 `install.sh` ставит клиентские утилиты X (`x11-xserver-utils`, `x11-utils`,
 `xauth`) и `dbus-x11`, но **не** `xorg` и не дисплей-менеджер. X-сервер
-и автологин обязан дать кто-то другой — `gnome`, `xfce4` или `lxde`. Это
+даёт `gnome`, `xfce4` или `lxde`, а сессию пользователя — только их ручка
+`DESKTOP_AUTOLOGIN=1`: с 2.0.0 десктопных расширений автологин по умолчанию
+выключен, и без ручки киоску не во что запускаться (`bisquite-desktop set
+DESKTOP_AUTOLOGIN=1 DESKTOP_DISABLE_SCREEN_LOCK=1 DESKTOP_DISABLE_SCREEN_BLANK=1`
+в `FIRSTBOOT_COMMAND`). Это
 записано в манифесте (`requires: [x11-server, display-manager]`), но
 **сборкой не проверяется**: топологической сортировки у резолвера нет,
 и киоск без десктопа соберётся зелёным. На устройстве это теперь видно

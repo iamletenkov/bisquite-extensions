@@ -349,6 +349,53 @@ Chromium для arm64 нет ни в Ubuntu ports, ни в репозитори�
 ssh -L 9001:127.0.0.1:9001 <пользователь>@<машина>
 ```
 
+## Ручки рабочего стола
+
+Автологин, автоблокировка и затемнение — **не поведение расширения, а ручки**,
+общие для `gnome`, `xfce4`, `lxde` и `cloud-user-desktop`. Все булевы, все
+по умолчанию `0` (до 2.0.0 этих расширений всё это включалось безусловно).
+
+| Ручка | `0` (умолчание) | `1` |
+|---|---|---|
+| `DESKTOP_AUTOLOGIN` | экран входа | вход без пароля |
+| `DESKTOP_AUTOLOGIN_USER` | пусто — пользователь cloud-init | имя |
+| `DESKTOP_DISABLE_SCREEN_LOCK` | поведение ОС | без автоблокировки; вручную заблокировать можно |
+| `DESKTOP_DISABLE_SCREEN_BLANK` | поведение ОС | без затемнения, гашения, DPMS и сна |
+
+**Где задаётся:**
+
+| Уровень | Как | Когда применяется |
+|---|---|---|
+| сборка | `EXTENSION gnome DESKTOP_AUTOLOGIN=1` | умолчание образа в `/etc/default/bisquite-desktop` |
+| образ профиля | `FIRSTBOOT_COMMAND "bisquite-desktop set …"` | guestfs-firstboot, до менеджера входа — на первой же загрузке |
+| compose | строкой в `firstboot_commands` | так же, это тот же guestfs-firstboot |
+| манифест записи | строкой в `firstboot-commands` | cloud-final, ПОСЛЕ старта менеджера входа: `set` применяет сразу и перезапускает менеджер, если нет открытой сессии |
+| работающая машина | `sudo bisquite-desktop set …` | сразу |
+
+Все примеры с рабочим столом включают три ручки строкой
+`bisquite-desktop set DESKTOP_AUTOLOGIN=1 DESKTOP_DISABLE_SCREEN_LOCK=1 DESKTOP_DISABLE_SCREEN_BLANK=1`.
+
+**Кто применяет.** `bisquite-desktop.service` — на **каждой** загрузке, до
+менеджера входа, `After=cloud-init.service guestfs-firstboot.service`. Рёбер
+к `cloud-config`/`cloud-final` нет намеренно: первый ждёт `snapd.seeded`,
+связка со вторым уже дважды давала молчаливый цикл, и systemd выбрасывал gdm.
+До старта менеджера служба:
+
+1. вносит пользователя в `video render audio pulse input dialout plugdev` —
+   **до** сессии. Без `video` Xorg автологина не открывает GPU
+   (первая загрузка AGX Orin 2026-09-14: 52 падения и экран входа);
+2. пишет автологин в gdm3 (`daemon.conf`/`custom.conf`) и lightdm;
+3. блокировка и затемнение — системная база dconf **с locks** (пользователь
+   в настройках не перебьёт), экран входа gdm, `Xsession.d` для DPMS, xfconf,
+   lxsession, `xserver-command` lightdm. Выключенная ручка удаляет свои файлы.
+
+**Что сделано на железе:** `gnome` на AGX Orin — ручки в обе стороны,
+перезагрузки, циклов нет. `xfce4`, `lxde` и Jetson Nano с новым механизмом
+не проверялись.
+
+Общий код — `lib/bisquite-desktop`, вендорится своим списком получателей
+(`tools/lib-targets-desktop.txt`); юнит — в теле скрипта, подкоманда `install`.
+
 ## Манифест `extension.yaml`
 
 ```yaml
@@ -552,6 +599,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `jetson-monitor` | `jetson-stats` | `jtop` из PyPI плюс `jtop.service`; данные идут из `tegrastats` и sysfs Tegra, а не из NVML |
 | `cuda` | `cuda-toolkit` | `cuda-toolkit-12-6` из `jetson/common`, `nvcc` в `/usr/local/cuda/bin` |
 | `tensorrt` | `tensorrt` | мета-пакет `tensorrt` плюс `python3-libnvinfer` и `nvidia-l4t-dla-compiler` |
+| `l4t-boot-verify` | `l4t-boot-verify` | `bisquite-l4t-boot-verify.service` — `nvbootctrl verify` на каждой загрузке; вендорская `nv-l4t-bootloader-config` заглушена |
 | `gmsl2-camera` | `sensing-gmsl2-camera` | ядро и модули Sensing, DTB-оверлей, запуск камер на каждой загрузке (`modprobe.d`, правило udev, `bisquite-sensing-clock.service`) |
 | `gstreamer` | `l4t-gstreamer` | `gstreamer1.0-tools` и плагины base/good/bad/ugly/libav, RTSP-сервер, `gstreamer1.0-nice`, `python3-gst-1.0` |
 | `hw-video-codec` | `l4t-gstreamer` | `nvidia-l4t-gstreamer` версии `nvidia-l4t-core`: `nvv4l2h264enc`/`h265enc`/`decoder`, `nvvidconv` |
@@ -609,6 +657,12 @@ apt-репозиторий, — на том основании, что стар�
 Разбор целиком — в `extensions/debian/docker/README.md`.
 
 ## Общий код: вендоринг из `lib/`
+
+В `lib/` два файла, **у каждого свой список получателей**:
+`get_cloud_user.sh` — `tools/lib-targets.txt`, `bisquite-desktop` — только
+расширениям рабочего стола, `tools/lib-targets-desktop.txt` (общий список
+разложил бы CLI рабочего стола в docker и code-server). Соответствие «файл →
+список» — `targets_file_for` в `tools/lib-common.sh`.
 
 `get_cloud_user.sh` нужен десяти расширениям (список —
 `tools/lib-targets.txt`). Наивный ответ — положить его

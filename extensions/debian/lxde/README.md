@@ -1,269 +1,62 @@
 # lxde
 
-Ультралёгкий рабочий стол [LXDE](https://lxde.org/) с автологином через
-LightDM. База для расширений, которым нужен X-сервер и дисплей-менеджер, —
-`x11vnc` и `kiosk`.
+LXDE с менеджером входа lightdm. Даёт X-сервер и сессию расширениям, которым
+они нужны, — `x11vnc`, `kiosk`.
+
+**С 2.0.0 автологин, отключение автоблокировки и затемнения — ручки,
+по умолчанию выключены.** Раньше расширение включало всё это безусловно.
+Разбор ручек — [`docs/extensions.md`, «Ручки рабочего стола»](../../../docs/extensions.md#ручки-рабочего-стола).
 
 ## Манифест
 
 | Поле | Значение |
 |---|---|
 | `arch` | `amd64`, `arm64` |
-| `phase` | `build` (`install.sh`), `firstboot` (`configure.sh`) |
+| `phase` | `build` (`install.sh`), `firstboot` (`bisquite-desktop.service` на каждой загрузке) |
 | `provides` | `x11-server`, `display-manager`, `desktop-session` |
 | `requires` | — |
 | `conflicts` | `gnome`, `xfce4` |
 
-`provides` выведены из кода: `xorg`/`xinput` → `x11-server`, `lightdm` плюс
-`systemctl set-default graphical.target` → `display-manager`, `lxde` →
-`desktop-session`.
-
 ## Что делает
 
-**Сборка** (`install.sh`)
+**Сборка** (`install.sh`): ставит `lxde`, `lightdm`, `lightdm-gtk-greeter`,
+`xorg`, `xinput`, `x11-xserver-utils`, `dconf-cli`; пробует браузер
+(`firefox-esr`/`firefox`, необязательно); пишет `/etc/lightdm/lightdm.conf`
+из шаблона (сессия и приветствие, без автологина); ставит `bisquite-desktop`;
+включает lightdm и `graphical.target`.
 
-- ставит `lxde`, `lightdm`, `lightdm-gtk-greeter`, `xorg`, `xinput`,
-  `usbutils`, `dbus-x11` — **одним списком с `|| exit 1`**;
-- ставит браузер **отдельно и необязательно** — см. «Браузер ставится
-  отдельно и не обязателен»;
-- заводит `/etc/X11/xorg.conf.d`;
-- включает `lightdm.service`, делает `graphical.target` умолчанием;
-- проверяет, что рядом с ним лежат `configure-lxde.service`, `configure.sh`,
-  `get_cloud_user.sh` и `lightdm.conf`, и **отказывает (код 1)**, если
-  чего-то нет: без этих файлов первой загрузки не будет вовсе. Путь берётся
-  от каталога самого скрипта, а не от зашитого `/opt/vmsetup/lxde/`, —
-  проверка отвечает на вопрос «файл приехал рядом со мной?», а не
-  «раскладка всё ещё такая?»;
-- кладёт `/etc/systemd/system/configure-lxde.service` из своего каталога
-  и включает его.
+**Каждая загрузка** (`bisquite-desktop.service`, до lightdm): группы
+пользователя cloud-init и ручки — `autologin-user` в lightdm, xfconf
+`xfce4-power-manager` и `xfce4-screensaver`, lxsession `screensaver=disabled`,
+X DPMS через `Xsession.d`, `xserver-command=X -s 0 -dpms` для экрана входа.
 
-**`yq` расширение не ставит, и больше его не требует** — см. «Порядок
-в VMFILE».
+## Параметры
 
-**Первая загрузка** (`configure.sh`, юнит `configure-lxde.service`)
+Те же четыре, что у `gnome`: `DESKTOP_AUTOLOGIN`, `DESKTOP_AUTOLOGIN_USER`,
+`DESKTOP_DISABLE_SCREEN_LOCK`, `DESKTOP_DISABLE_SCREEN_BLANK` — все `0`
+по умолчанию. На устройстве:
 
-- проверяет предпосылки и при нехватке любой отказывает (код 1): исполняемый
-  `get_cloud_user.sh` рядом, шаблон `lightdm.conf` рядом;
-- ждёт появления пользователя cloud-init — 40 попыток по 3 с, то есть
-  до 120 секунд, потом отказ;
-- подставляет его имя в шаблон `lightdm.conf` и кладёт результат
-  в `/etc/lightdm/lightdm.conf` **целиком перезаписывая** файл;
-- перезапускает LightDM через `try-restart`, то есть остановленный
-  дисплей-менеджер не поднимает;
-- зовёт `disable_powersave.sh`. Его отказ — **предупреждение**, а не отказ
-  юнита: автологин к этому моменту уже записан.
-
-Юнит стоит `Before=lightdm.service display-manager.service`: конфигурация
-обязана лечь до старта дисплей-менеджера, иначе первая загрузка пройдёт
-с гритером вместо автологина. Привязка — `WantedBy=lightdm.service
-display-manager.service`, то есть юнит отрабатывает **на каждой** загрузке.
-
-Шаблон задаёт `user-session=LXDE` — этим и отличается от `xfce4`, где та же
-пара скриптов пишет `user-session=xfce`. Плюс `autologin-user-timeout=0`
-и `greeter-session=lightdm-gtk-greeter`.
-
-## Браузер ставится отдельно и не обязателен
-
-Пока `firefox-esr` стоял в общем списке `apt-get install` с `|| exit 1`,
-отсутствие одного необязательного пакета роняло установку **всего**
-десктопа — при том что ни `lightdm`, ни сессия LXDE от браузера не зависят.
-Ровно эта ошибка у соседнего `gnome` уже замерена (jammy 2026-09-10:
-`E: Package 'chromium' has no installation candidate`); имя пакета там
-другое, механизм отказа тот же. Замера под сам `firefox-esr` не делали.
-
-Поэтому `install.sh` перебирает известные имена (`firefox-esr`, затем
-`firefox` — так браузер называется в Ubuntu, где это переходник на snap),
-ставит первое доступное, а промах по всем — только предупреждение в журнал
-сборки. Сессия LXDE поднимается и без браузера; нужен конкретный — ставьте
-его своим `INSTALL`.
-
-## Параметров нет
-
-Расширение не читает ни одной переменной окружения: единственное, что в нём
-изменяемо, — имя пользователя, а оно приходит из cloud-init на устройстве.
-
-## Порядок в VMFILE: `EXTENSION yq` стоит выше, но отказом больше не грозит
-
-```vmfile
-EXTENSION yq
-EXTENSION lxde
+```bash
+sudo bisquite-desktop set DESKTOP_AUTOLOGIN=1 DESKTOP_DISABLE_SCREEN_LOCK=1 DESKTOP_DISABLE_SCREEN_BLANK=1
 ```
-
-**Что изменилось.** `check_prereqs` больше не проверяет `yq`. Проверка была
-мёртвой: `configure.sh` не вызывает `yq` ни разу, а `exit 1` на
-`command -v yq` закрывал работающую дорогу — `get_cloud_user.sh` объявил
-`yq` необязательным и без него уходит в `fallback_user()`. То есть
-расширение отказывалось настраивать рабочий стол из-за инструмента, без
-которого рабочий стол настраивается, и отказ приезжал на первой загрузке
-устройства — после записи носителя.
-
-**Почему строку всё равно стоит держать.** Без `yq` имя пользователя берётся
-запасным путём: первая учётка с uid 1000..65533 и домашним каталогом. На
-образе с вендорской учёткой это может оказаться **не тот** пользователь.
-Запасной путь об этом говорит вслух, в stderr:
-
-```
-Note: cloud-init user unavailable; falling back to 'jetson' (uid 1000)
-```
-
-То есть `yq` перестал быть условием работы и остался условием того, что
-настроят именно пользователя cloud-init.
-
-Нужен именно бинарь [mikefarah/yq](https://github.com/mikefarah/yq), который
-ставит `EXTENSION yq`. Имя `yq` носят **два разных инструмента** с
-несовместимыми языками запросов — в apt лежит kislyuk/yq, — и `command -v yq`
-их не различает: проверка отвечает лишь на вопрос «хоть какой-то `yq` есть».
-Чем это кончается, записано замером 2026-09-06 на Jetson Nano: три службы
-настройки упали с «не дождался пользователя cloud-init», хотя пользователь
-существовал с первых секунд. Разбор — в `../yq/README.md`.
-
-## Что выключает `disable_powersave.sh`
-
-Скрипт зовётся с именем пользователя и раскладывает:
-
-- `/etc/X11/Xsession.d/90-disable-dpms` — `xset s off`, `xset s noblank`,
-  `xset -dpms` на каждую X-сессию;
-- `~/.config/autostart/disable-screensaver.desktop` и
-  `disable-powersave-runtime.desktop` — то же изнутри сессии;
-- `~/.config/disable-powersave-runtime.sh` — `xset` плюс выход
-  `xscreensaver`, если тот запущен;
-- `~/.config/lxsession/LXDE/desktop.conf` — **две строки**,
-  `window_manager=openbox-lxde` в секции `[Session]` и
-  `screensaver=disabled` в `[Startup]`; остальное в файле остаётся как
-  оставил `lxsession`;
-- `~/.xscreensaver` — `mode: off`, но **только если файл уже существует**.
-
-**Граница «своего» файла проходит по тому, кому разрешено его менять, а не
-по тому, кто его создал.** Расширение вправе безусловно перезаписывать файл,
-если настраивать его некому: либо файл создало само расширение и других
-писателей у него нет, либо весь сеанс — продукт расширения, а не рабочее
-место человека.
-
-`desktop.conf` пишет `lxsession`, и пишет на рабочем столе, где человек
-работает. Раньше скрипт перезаписывал его целиком, а
-`configure-lxde.service` отрабатывает **на каждой** загрузке, — то есть
-всё, что пользователь поменял в своей сессии (оконный менеджер, автозапуск),
-возвращалось к двум нашим строкам при следующем включении. Теперь файл
-создаётся целиком только если его ещё нет, а дальше правятся ровно две
-наши строки.
-
-Соседние `~/.config/autostart/*.desktop` и
-`~/.config/disable-powersave-runtime.sh` по тому же правилу остаются
-безусловными: их расширение создало само, других писателей у них нет.
-У `kiosk` по тому же правилу безусловными остаются `xfce4-desktop.xml`
-и `xfce4-panel.xml` — там панель и рабочий стол и есть продукт расширения.
-
-Что правка **не** отменяет: у пользователя, который уже поработал на
-прошитом устройстве, файл уже затёрт. Восстановить его правка не может.
-
-## Что править и чем перезапускать
-
-| Что менять | Где лежит на устройстве | Чем применить |
-|---|---|---|
-| автологин, сессия, гритер | `/etc/lightdm/lightdm.conf` | `systemctl restart lightdm` |
-| энергосбережение сессии | `~<user>/.config/lxsession/LXDE/desktop.conf`, `~/.config/autostart/*.desktop` | новый вход в сессию |
-| что делает донастройка | `/opt/vmsetup/lxde/configure.sh`, шаблон `/opt/vmsetup/lxde/lightdm.conf` | `systemctl restart configure-lxde.service` |
-
-На каждой загрузке пересобираются `/etc/lightdm/lightdm.conf` (пишется
-из шаблона целиком) и `~/.config/autostart/*.desktop` (из
-`disable_powersave.sh`). Правка в них держится до перезагрузки; чтобы
-держалась всегда — правьте шаблон в `/opt/vmsetup/lxde/`, он остался
-в образе.
-
-`desktop.conf` — исключение: в нём правятся только две наши строки,
-остальное ваше и переживает перезагрузку (см. «Что выключает
-`disable_powersave.sh`»).
 
 ## Подключение в VMFILE
 
 ```vmfile
-EXTENSION yq
 EXTENSION lxde
+FIRSTBOOT_COMMAND "bisquite-desktop set DESKTOP_AUTOLOGIN=1 DESKTOP_DISABLE_SCREEN_LOCK=1 DESKTOP_DISABLE_SCREEN_BLANK=1"
 ```
 
-Прежняя запись продолжает работать:
+## Не проверено
 
-```vmfile
-COPY_IN <чекаут>/extensions/debian/lxde:/opt/vmsetup/
-RUN_COMMAND chmod +x /opt/vmsetup/lxde/*.sh
-RUN_COMMAND /opt/vmsetup/lxde/install.sh
-```
-
-`<чекаут>` — путь до чекаута этого репозитория **относительно каталога
-VMFILE**; в примерах основного репозитория это `../../../../bisquite-extensions`,
-и глубина зависит от того, насколько глубоко лежит сам VMFILE.
-
-Ставите поверх `x11vnc` или `kiosk` — десктоп идёт **первым**:
-топологической сортировки у резолвера нет, порядок держится этой строкой.
-
-Слой выполняет код внутри гостя (`EXTENSION` входит в `GUEST_CODE_LAYERS`),
-поэтому `LABEL arch` обязан совпасть с архитектурой машины сборки.
-
-## Требования
-
-- Debian 12 / Ubuntu 22.04+ со `systemd` и `cloud-init`;
-- `yq` (mikefarah) в госте к моменту первой загрузки — его даёт
-  `EXTENSION yq`, **не** это расширение. Не обязателен: без него имя
-  пользователя берётся запасным путём, см. «Порядок в VMFILE»;
-- доступ к apt-репозиториям при сборке. Браузера среди требований больше
-  нет: его отсутствие — предупреждение, см. «Браузер ставится отдельно»;
-- минимум 512 МБ RAM (рекомендуется ≥1 ГБ), ≥2 ГБ диска.
-
-Взаимоисключающе с `gnome` и `xfce4`: каждый ставит свой дисплей-менеджер
-и делает его системным `display-manager.service`. Валидатор этого репозитория
-требует симметрии конфликтов, но **сборка их не проверяет** — два десктопа
-подряд она поставит молча.
-
-## Чего оно не делает
-
-- не ставит `yq`, не проверяет его ни на сборке, ни на первой загрузке
-  и сам его не вызывает;
-- не гарантирует браузер — только пробует два имени пакета;
-- не трогает темы, панель и раскладки LXDE: выключено только
-  энергосбережение;
-- не выключает автологин «навсегда» — юнит возвращает его на каждой
-  загрузке.
-
-## Доступ к рабочему столу
-
-- консоль Proxmox / noVNC;
-- `x11vnc` поверх — VNC на loopback, доступ через SSH-туннель;
-- локальный монитор или тачскрин.
+С новым механизмом lxde на железе не собирался и не загружался: проверен
+`gnome` на Jetson AGX Orin (2026-09-14). Общий код тот же, но ключи lightdm,
+xfconf и lxsession подтверждены только разбором.
 
 ## Диагностика
 
 ```bash
-systemctl status lightdm
-systemctl status configure-lxde.service
-
-journalctl -u configure-lxde -f
-journalctl -u lightdm -f
-
-cat /etc/lightdm/lightdm.conf
-cat ~/.config/lxsession/LXDE/desktop.conf
+bisquite-desktop status
+journalctl -b -u bisquite-desktop
+grep -E 'autologin-user|xserver-command|user-session' /etc/lightdm/lightdm.conf
 ```
-
-- **в журнале `Note: cloud-init user unavailable; falling back to '<имя>'`**
-  — `yq` или `cloud-init` в образе нет, и имя взято запасным путём. Если
-  названная учётка не та, добавьте `EXTENSION yq` выше и пересоберите образ;
-- **`Timeout waiting for cloud-init user to be created`** — проверьте
-  `cloud-init status` и что seed задаёт `user` или `users[0].name`;
-- **нет логина** — проверьте, что пользователь создан (`id <user>`);
-- **чёрный экран** — `Xorg.0.log` и ресурсы ВМ;
-- **отключить автологин** — закомментируйте `autologin-user`
-  в `/etc/lightdm/lightdm.conf` и перезапустите `lightdm`. Учтите, что
-  `configure-lxde.service` при следующей загрузке отработает снова
-  и вернёт автологин: файл пересобирается из шаблона каждый раз.
-
-## Кастомизация
-
-- настройки сессии — `~/.config/lxsession/LXDE/`; в `desktop.conf`
-  расширение правит только две свои строки, остальное ваше (см. выше);
-- экранная блокировка и засыпание уже выключены `disable_powersave.sh`;
-- тему и панель удобно раскладывать через cloud-init `write_files`/`runcmd`.
-
-## Лицензия
-
-Расширение распространяется на условиях публичной некоммерческой лицензии
-Bisquite (PolyForm Noncommercial 1.0.0, см. `LICENSE`). Для коммерческого
-использования требуется отдельная платная лицензия — см. `COMMERCIAL-LICENSE.md`.
