@@ -8,13 +8,13 @@
 # Зовут его юниты, а не человек: bisquite-sensing-camera@videoN.service
 # (по правилу udev, на появление узла) и bisquite-sensing-clock.service.
 #
-# Настройка — /etc/default/bisquite-sensing-camera. Правка применяется
+# Настройка — /etc/bisquite/sensing-camera/config. Правка применяется
 # перезапуском юнитов, перезагрузка не нужна; режим GMSL живёт отдельно,
 # в /etc/modprobe.d/bisquite-sensing-gmsl2.conf, потому что это параметр
 # модуля, и меняется только его перезагрузкой.
 set -uo pipefail
 
-CONF=/etc/default/bisquite-sensing-camera
+CONF=/etc/bisquite/sensing-camera/config
 SENSING_CAMERA_CONTROLS="sensor_mode=1,trig_mode=0,trig_pin=0x00020007"
 SENSING_BOOST_CLOCK=1
 # shellcheck source=/dev/null

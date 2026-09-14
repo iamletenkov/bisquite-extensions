@@ -4,6 +4,10 @@
 p3701-0000, носитель p3737-0000) с адаптером **SG8A-AGON-G2Y-A1**: замена
 ядра, модули `.ko`, DTB-оверлей, новая запись в загрузочном меню.
 
+**С 2.0.0 файл ручек — `/etc/bisquite/sensing-camera/config`** (был
+`/etc/default/bisquite-sensing-camera`). Прежний путь не читается; если
+файл по нему остался в базовом образе, установка его удаляет.
+
 ## Манифест
 
 | Поле | Значение |
@@ -80,7 +84,7 @@ GMSL1, а камеры — GMSL2. Узлы есть, картинки нет, и
 **Поменять на работающей машине:**
 
 ```bash
-sudoedit /etc/default/bisquite-sensing-camera        # профиль, частоты
+sudoedit /etc/bisquite/sensing-camera/config         # профиль, частоты
 sudo systemctl restart 'bisquite-sensing-camera@*' bisquite-sensing-clock
 sudoedit /etc/modprobe.d/bisquite-sensing-gmsl2.conf # режим линка
 sudo reboot

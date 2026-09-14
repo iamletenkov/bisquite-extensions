@@ -299,12 +299,20 @@ cat > /etc/modprobe.d/bisquite-sensing-gmsl2.conf <<EOF
 options sgx_yuv_gmsl2 GMSLMODE_0=${_m[0]},${_m[1]},${_m[2]},${_m[3]} GMSLMODE_1=${_m[4]},${_m[5]},${_m[6]},${_m[7]}
 EOF
 
-cat > /etc/default/bisquite-sensing-camera <<EOF
+# The knob file moved to /etc/bisquite/sensing-camera/config in 2.0.0. The old
+# path is not read as a fallback; remove it so the image has one source of truth.
+if [[ -e /etc/default/bisquite-sensing-camera ]]; then
+    log_info "удаляю /etc/default/bisquite-sensing-camera: ручки теперь в /etc/bisquite/sensing-camera/config"
+    rm -f /etc/default/bisquite-sensing-camera
+fi
+install -d -m 0755 /etc/bisquite/sensing-camera
+cat > /etc/bisquite/sensing-camera/config <<EOF
 # Положено расширением sensing-gmsl2-camera. Ручка на работающей машине:
 # после правки — sudo systemctl restart 'bisquite-sensing-camera@*' bisquite-sensing-clock
 SENSING_CAMERA_CONTROLS=${SENSING_CAMERA_CONTROLS}
 SENSING_BOOST_CLOCK=${SENSING_BOOST_CLOCK}
 EOF
+chmod 0644 /etc/bisquite/sensing-camera/config
 
 # v4l2-ctl — единственная утилита скрипта. В базе L4T она есть не всегда.
 if ! command -v v4l2-ctl >/dev/null 2>&1; then
