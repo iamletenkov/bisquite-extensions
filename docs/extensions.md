@@ -301,6 +301,8 @@ Chromium для arm64 нет ни в Ubuntu ports, ни в репозитори�
 | `kiosk` | `/var/lib/kiosk/config` — `EnvironmentFile` юнита `kiosk-chromium@.service` | `systemctl restart kiosk-chromium@<пользователь>` |
 | `code-server` | `~<пользователь>/.config/code-server/config.yaml` — путь зашит в `ExecStart` | `systemctl restart code-server@<пользователь>` |
 | `vino-vnc` | **dconf пользователя**, а не файл в `/etc/bisquite` — см. оговорку ниже | `gsettings set org.gnome.Vino …` от имени пользователя |
+| `selkies` | `/etc/bisquite/selkies/config` — `EnvironmentFile` юнита `selkies@.service` | `systemctl restart 'selkies@*'` |
+| `teleport-agent` | `/etc/bisquite/teleport/config` + `apps.d/`; `/etc/teleport.yaml` генерируется из них на старте | `bisquite-teleport set …` (кластер — `bisquite-teleport join …`) |
 | остальные | действующего значения нет: расширение однократно настраивает систему | повторный прогон `configure-<имя>.service` |
 
 ### Оговорка про `vino-vnc`: файл есть, ручкой он не является
@@ -343,7 +345,13 @@ Chromium для arm64 нет ни в Ubuntu ports, ни в репозитори�
 в том же `config.yaml` (`auth: password` и `password:` либо
 `hashed-password:`).
 
-Альтернатива без открытия порта — туннель, он не требует правки
+Вторая альтернатива — веб-приложение Teleport (`teleport-agent`): служба
+остаётся на петле, а расширение кладёт объявление в
+`/etc/bisquite/teleport/apps.d/<имя>.conf` — ровно `NAME` и `URI` на петле.
+Кому приложение видно, решает метка `env` оператора, а не объявление;
+формат и проверки — README `teleport-agent`.
+
+Альтернатива без открытия порта и без кластера — туннель, он не требует правки
 конфигурации вовсе:
 
 ```bash
@@ -602,6 +610,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `tensorrt` | `tensorrt` | мета-пакет `tensorrt` плюс `python3-libnvinfer` и `nvidia-l4t-dla-compiler` |
 | `web-remote-desktop` | `selkies` | Selkies 2.0 (AppImage) на существующем X-дисплее, WebSocket на `127.0.0.1:8080`; `selkies@.service` от пользователя сессии |
 | `web-browser` | `firefox` | `firefox` из `packages.mozilla.org` с пином 1000 поверх транзитного пакета снапа |
+| `teleport-node` | `teleport-agent` | `/usr/local/bin/teleport`, `teleport.service` из `bisquite-teleport join`; приложения — из `/etc/bisquite/teleport/apps.d` |
 | `l4t-boot-verify` | `l4t-boot-verify` | `bisquite-l4t-boot-verify.service` — `nvbootctrl verify` на каждой загрузке; вендорская `nv-l4t-bootloader-config` заглушена |
 | `gmsl2-camera` | `sensing-gmsl2-camera` | ядро и модули Sensing, DTB-оверлей, запуск камер на каждой загрузке (`modprobe.d`, правило udev, `bisquite-sensing-clock.service`) |
 | `gstreamer` | `l4t-gstreamer` | `gstreamer1.0-tools` и плагины base/good/bad/ugly/libav, RTSP-сервер, `gstreamer1.0-nice`, `python3-gst-1.0` |
