@@ -139,6 +139,23 @@ fi
 scheme=http
 [[ "${SELKIES_ENABLE_HTTPS:-false}" == true ]] && scheme=https
 
+# Что захватывать. Умолчание Selkies — «output.monitor»: для контейнера без
+# звуковой карты он сам заводит пустой sink «output». На роботе приложения
+# играют в настоящий sink по умолчанию, и Selkies слушал бы тишину (замер на
+# AGX Orin 2026-09-14: pcmflux на output.monitor, звук в analog-stereo).
+# Поэтому по умолчанию — monitor sink'а по умолчанию: слышно и в динамиках, и
+# в браузере. Микрофон клиента делает sink по умолчанию из этого же имени —
+# он существует, так что звук робота никуда не уводится.
+if [[ "${SELKIES_AUDIO_ENABLED:-true}" == true && -z "${SELKIES_AUDIO_DEVICE_NAME:-}" ]]; then
+    default_sink="$(pactl get-default-sink 2>/dev/null || pactl info 2>/dev/null | sed -n 's/^Default Sink: //p')"
+    if [[ -n "$default_sink" && "$default_sink" != output ]]; then
+        export SELKIES_AUDIO_DEVICE_NAME="${default_sink}.monitor"
+        log_info "звук: захват ${SELKIES_AUDIO_DEVICE_NAME}"
+    else
+        log_warn "sink по умолчанию не определён — Selkies захватит свой output.monitor"
+    fi
+fi
+
 # Каталог передачи файлов — в домашнем каталоге того, кто на экране.
 if [[ -z "${SELKIES_FILE_MANAGER_PATH:-}" ]]; then
     export SELKIES_FILE_MANAGER_PATH="$HOME_OF_USER/Downloads"

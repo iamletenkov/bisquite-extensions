@@ -64,7 +64,8 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
 | `SELKIES_ENABLE_RESIZE` | `false` | **иначе Selkies меняет разрешение монитора** под окно браузера |
 | `SELKIES_ENCODER` | `h264enc` | NVENC/VA-API, если есть, иначе x264 |
 | `SELKIES_FRAMERATE` | `30,8-60` | 30 при старте, пользователь может поднять до 60 |
-| `SELKIES_AUDIO_ENABLED` | `true` | звук сессии: monitor sink'а по умолчанию PulseAudio пользователя; обёртка ждёт его сокет до 30 с |
+| `SELKIES_AUDIO_ENABLED` | `true` | звук сессии; обёртка ждёт сокет PulseAudio пользователя до 30 с |
+| `SELKIES_AUDIO_DEVICE_NAME` | monitor sink'а по умолчанию | обёртка подставляет `<sink по умолчанию>.monitor`: собственное умолчание Selkies `output.monitor` — пустой sink для контейнера, в него на роботе никто не играет |
 | `SELKIES_ENABLE_CLIPBOARD` | `true` | обе стороны; `in`/`out`/`false` — по направлениям |
 | `SELKIES_FILE_TRANSFERS` | `upload,download` | в `~/Downloads` пользователя (`SELKIES_FILE_MANAGER_PATH`) |
 | `SELKIES_MICROPHONE_ENABLED`, `SELKIES_WEBCAM_ENABLED`, `SELKIES_GAMEPAD_ENABLED` | `false` | роботу не нужны |
@@ -168,9 +169,11 @@ firstboot-commands:
 `tpApps: selkies` пользователя. Не публиковать —
 `bisquite-teleport set TELEPORT_APPS_DISABLE=selkies`.
 
-Если через Teleport WebSocket получает `403` и в журнале
-`Rejected WebSocket upgrade from disallowed Origin` —
-`SELKIES_ALLOWED_ORIGINS=https://selkies.<нода>.<хост прокси>` в конфиге.
+WebSocket через Teleport проходит, потому что `teleport-agent` переписывает
+приложению на петле `Host` на публичный адрес, и Origin браузера с ним
+совпадает. Без этого (или за другим прокси, который передаёт `Host` петли)
+Selkies отвечает `403` и пишет `Rejected WebSocket upgrade from disallowed
+Origin` — тогда `SELKIES_ALLOWED_ORIGINS=https://<публичный адрес>`.
 
 ## Жизненный цикл службы
 
@@ -206,8 +209,12 @@ firstboot-commands:
   Selkies выпустил пару в `~/.local/state/selkies/`, страница отвечает `200`
   по `https://<адрес робота>` с другой машины. Без ручки — отказ старта.
 
+Через Teleport (tp2, 2026-09-14): WebSocket `101`, картинка и звук в браузере;
+звук робота (`paplay` в сессии) слышен в Selkies после захвата monitor
+sink'а по умолчанию.
+
 **Не проверено:** amd64 AppImage на Ubuntu 22.04; клавиатура и буфер обмена
-отдельно; работа через Teleport.
+отдельно; микрофон и камера клиента.
 
 ## Известное
 
