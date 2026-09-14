@@ -47,7 +47,7 @@ PyPI-torch, и его C++-операции с torch от NVIDIA несовмес
 быстрее:
 
 ```bash
-bs image build --smp 8 --memsize 16000 -f jetson-orin-workstation.vmfile ...
+bs image build --smp 8 --memsize 16000 -f jetson-orin-base.vmfile ...
 ```
 
 ## numpy 1.26.4 перекрывает системный — и почему это правильно

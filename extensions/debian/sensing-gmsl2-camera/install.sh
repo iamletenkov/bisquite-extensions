@@ -4,7 +4,7 @@
 #
 # ПОЧЕМУ ЭТО СЛОЙ, А НЕ ЧАСТЬ БАЗОВОГО ОБРАЗА. Камеры — не свойство платы
 # Jetson вообще, а свойство КОНКРЕТНОГО адаптера на КОНКРЕТНЫХ роботах.
-# Базовый образ (jetson-orin-base) остаётся общим для всего флота; этот
+# Образ из BSP (jetson-orin-bsp) остаётся общим для всего флота; этот
 # слой ложится только на VMFILE тех машин, где адаптер физически есть.
 #
 # ЧТО ДЕЛАЕТ. Копирует файлы и правит extlinux.conf — то, что раньше
@@ -320,7 +320,7 @@ install -m 0644 "$SCRIPT_DIR/bisquite-sensing-camera@.service" \
     "$SCRIPT_DIR/bisquite-sensing-clock.service" /etc/systemd/system/
 install -m 0644 "$SCRIPT_DIR/99-bisquite-sensing-camera.rules" /etc/udev/rules.d/
 # Включение ссылкой, а не `systemctl enable`: внутри virt-customize systemd
-# не запущен (тот же приём, что у маскирования в jetson-orin-camera.vmfile).
+# не запущен (тот же приём, что у маскирования в jetson-orin-base.vmfile).
 install -d /etc/systemd/system/multi-user.target.wants
 ln -sf /etc/systemd/system/bisquite-sensing-clock.service \
     /etc/systemd/system/multi-user.target.wants/bisquite-sensing-clock.service

@@ -344,8 +344,8 @@ i2ctransfer -y -f 10 w2@0x2d 0x00 0x0d r1
 
 ```bash
 sudo /opt/nvidia-jetpack/08-build-base-image.sh
-# -> $WORK/jetson-orin-base.img   (raw, со всей разметкой)
-# -> $WORK/jetson-orin-base.qcow2 (его же, для хранилища образов)
+# -> $WORK/jetson-orin-bsp.img   (raw, со всей разметкой)
+# -> $WORK/jetson-orin-bsp.qcow2 (его же, для хранилища образов)
 ```
 
 **Плата не нужна, и это свойство инструмента, а не удача.** В отличие от
@@ -389,11 +389,11 @@ sudo /opt/nvidia-jetpack/08-build-base-image.sh
 Дальше образ уезжает в хранилище и служит базой для прикладных слоёв:
 
 ```bash
-bs image import $WORK/jetson-orin-base.qcow2 --tag jetson-orin-base:36.4.3
+bs image import $WORK/jetson-orin-bsp.qcow2 --tag jetson-orin-bsp:36.4.3
 ```
 
 ```dockerfile
-FROM jetson-orin-base:36.4.3
+FROM jetson-orin-bsp:36.4.3
 LABEL arch=arm64
 ```
 
