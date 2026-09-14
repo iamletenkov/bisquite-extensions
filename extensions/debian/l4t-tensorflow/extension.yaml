@@ -1,0 +1,12 @@
+name: l4t-tensorflow
+version: 1.0.0
+family: deb
+arch: [arm64]
+phase: build
+provides: [tensorflow]
+# cuda: TF грузит libcublas, libcufft, libcusolver и прочие библиотеки
+# тулкита. cuDNN и numpy 1.26 расширение ставит само — теми же версиями,
+# что l4t-pytorch, поэтому вместе они не спорят (проверено на плате:
+# один numpy на оба фреймворка).
+requires: [cuda]
+conflicts: []
