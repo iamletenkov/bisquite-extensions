@@ -167,6 +167,24 @@ case "$addr" in
         ;;
 esac
 
+# --- Объявление для teleport-agent ---------------------------------------------
+#
+# Как у code-server: только NAME и URI на петле, кому видно — решает env ноды.
+# Без teleport-agent файл ничего не делает. Адрес 127.0.0.1 работает и при
+# SELKIES_ADDR=0.0.0.0; при адресе, не включающем петлю, объявлять нечего.
+scheme=http
+[[ "${VALUES[SELKIES_ENABLE_HTTPS]}" == true ]] && scheme=https
+case "$addr" in
+    127.0.0.1|localhost|0.0.0.0|"127.0.0.1,::1"|"")
+        install -d -m 0755 /etc/bisquite/teleport/apps.d
+        install -m 0644 /dev/null /etc/bisquite/teleport/apps.d/selkies.conf
+        printf 'NAME=selkies\nURI=%s://127.0.0.1:%s\n' "$scheme" "${VALUES[SELKIES_PORT]}" \
+            > /etc/bisquite/teleport/apps.d/selkies.conf
+        log_info "объявлен для Teleport: apps.d/selkies.conf (${scheme}://127.0.0.1:${VALUES[SELKIES_PORT]})"
+        ;;
+    *) rm -f /etc/bisquite/teleport/apps.d/selkies.conf ;;
+esac
+
 # --- Юниты ----------------------------------------------------------------------
 install -m 0644 "$SCRIPT_DIR/selkies@.service" /etc/systemd/system/selkies@.service
 install -m 0644 "$SCRIPT_DIR/configure-selkies.service" /etc/systemd/system/configure-selkies.service

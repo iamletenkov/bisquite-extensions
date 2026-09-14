@@ -158,6 +158,20 @@ firstboot-commands:
   - "systemctl restart 'selkies@*' || true"
 ```
 
+## Веб-приложение Teleport
+
+С 2.1.0 `install.sh` кладёт объявление для расширения `teleport-agent` —
+`/etc/bisquite/teleport/apps.d/selkies.conf` с `NAME=selkies` и
+`URI=<http|https>://127.0.0.1:<SELKIES_PORT>` (схема — по
+`SELKIES_ENABLE_HTTPS`). С ним Selkies публикуется как
+`https://selkies.<нода>.<хост прокси>`; кому видно — метка `env` ноды и
+`tpApps: selkies` пользователя. Не публиковать —
+`bisquite-teleport set TELEPORT_APPS_DISABLE=selkies`.
+
+Если через Teleport WebSocket получает `403` и в журнале
+`Rejected WebSocket upgrade from disallowed Origin` —
+`SELKIES_ALLOWED_ORIGINS=https://selkies.<нода>.<хост прокси>` в конфиге.
+
 ## Жизненный цикл службы
 
 - **Нет сессии** — обёртка ждёт (`жду X-сессию 'robot' на :0`), Selkies не запущен.
