@@ -68,7 +68,12 @@ source "$SCRIPT_DIR/lib/bisquite-conf"
 # (шаблон SELKIES_* в схеме) — отдельного словаря bisquite поверх Selkies нет.
 
 # --- AppImage -----------------------------------------------------------------
-URL="https://github.com/selkies-project/selkies/releases/download/v${SELKIES_VERSION}/selkies-${SELKIES_VERSION}-${APPARCH}.AppImage"
+# The release tag lost its `v` prefix upstream (v2.0.0rc0 -> 2.0.0rc0, seen
+# 2026-09-15: the old URL answers 404, the asset is byte-identical). Both
+# spellings are tried; the pinned sha256 below is what guards the content.
+ASSET="selkies-${SELKIES_VERSION}-${APPARCH}.AppImage"
+RELEASES="https://github.com/selkies-project/selkies/releases/download"
+URLS=("$RELEASES/${SELKIES_VERSION}/$ASSET" "$RELEASES/v${SELKIES_VERSION}/$ASSET")
 WORK="$(mktemp -d /var/tmp/selkies.XXXXXX)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -76,8 +81,14 @@ if [[ -x "$PREFIX/usr/conda/bin/selkies" ]]; then
     log_info "Selkies $SELKIES_VERSION уже распакован в $PREFIX"
 else
     command -v curl >/dev/null 2>&1 || { apt-get update -q && apt-get install -y -q curl ca-certificates; } || exit 1
-    log_info "скачиваю $URL"
-    curl -fL --retry 5 --retry-delay 5 -o "$WORK/selkies.AppImage" "$URL" || { log_error "AppImage не скачался"; exit 1; }
+    fetched=0
+    for URL in "${URLS[@]}"; do
+        log_info "скачиваю $URL"
+        if curl -fL --retry 5 --retry-delay 5 -o "$WORK/selkies.AppImage" "$URL"; then
+            fetched=1; break
+        fi
+    done
+    (( fetched )) || { log_error "AppImage не скачался ни по одной ссылке: ${URLS[*]}"; exit 1; }
     if ! echo "${APPIMAGE_SHA256[$APPARCH]}  $WORK/selkies.AppImage" | sha256sum -c --quiet -; then
         log_error "sha256 AppImage не совпал с закреплённым для $APPARCH"
         exit 1
