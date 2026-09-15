@@ -1,6 +1,8 @@
 name: l4t-gstreamer
-version: 1.1.0
+version: 1.2.0
 layout: 2
+# 1.2.0: ветка R32 (Jetson Nano) — ничего не ставит, сверяет nvidia-l4t-gstreamer
+#        и файлы плагинов NVIDIA; поведение на r36 прежнее.
 family: deb
 # Только arm64: аппаратные плагины (nvv4l2*, nvvidconv, nvarguscamerasrc)
 # лежат в репозитории jetson/common, который подключён только в образе L4T.

@@ -51,6 +51,47 @@ if [[ ! -f /etc/nv_tegra_release ]]; then
     exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -f "$SCRIPT_DIR/lib/l4t" ]] || { log_error "рядом нет lib/l4t — сборка не доставила lib/ источника"; exit 1; }
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/l4t"
+
+# ВЕТКА R32 (Jetson Nano, JetPack 4.6): ПРОВЕРИТЬ И ЗАКРЕПИТЬ.
+#
+# В образе Q-engineering OpenCV 4.8.0 уже собран — и в отличие от ветки r36
+# С CUDA 10.2 и GStreamer 1.16.3 (замер на живом Nano 2026-09-15). Ставить
+# нечего и неоткуда: репозитории NVIDIA отключены. Ветка сверяет, что cv2
+# импортируется и собран с CUDA и GStreamer, и отказывает, если нет.
+#
+# Одно она всё-таки меняет: OPENBLAS_CORETYPE=ARMV8 (см. lib/l4t). Без него
+# `import cv2` на Cortex-A57 падает `Illegal instruction`, а вендорский
+# образ экспортировал переменную из .bashrc удаляемой учётки jetson.
+r32_verify(){
+    local info
+    l4t_openblas_pin l4t-opencv || { log_error "OPENBLAS_CORETYPE не записан"; return 1; }
+    # Импорт — с окружением, собранным из записанных файлов, а не с export.
+    l4t_openblas_check 'import cv2; print("cv2", cv2.__version__)' || return 1
+    info="$(env -i OPENBLAS_CORETYPE="$L4T_OPENBLAS_CORETYPE" /usr/bin/python3 -c 'import cv2; print(cv2.getBuildInformation())' 2>&1)" || {
+        log_error "cv2.getBuildInformation() не прошёл:"
+        >&2 echo "$info"
+        return 1
+    }
+    if ! grep -qE "^\s*NVIDIA CUDA:\s*YES" <<<"$info"; then
+        log_error "cv2 собран без CUDA — это не образ Q-engineering с OpenCV под CUDA"
+        return 1
+    fi
+    if ! grep -qE "^\s*GStreamer:\s*YES" <<<"$info"; then
+        log_error "cv2 собран без GStreamer — кадры с камер через nvvidconv не взять"
+        return 1
+    fi
+    log_info "готово (R32): cv2 с CUDA и GStreamer, ничего не ставилось"
+}
+
+if [[ "$(l4t_major || true)" == 32 ]]; then
+    r32_verify || exit 1
+    exit 0
+fi
+
 log_info "apt-get update"
 apt_retry apt-get update -q || exit 1
 

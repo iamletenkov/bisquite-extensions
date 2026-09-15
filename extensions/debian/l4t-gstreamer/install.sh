@@ -50,6 +50,56 @@ if [[ ! -f /etc/nv_tegra_release ]]; then
 fi
 log_info "L4T: $(head -n 1 /etc/nv_tegra_release)"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -f "$SCRIPT_DIR/lib/l4t" ]] || { log_error "рядом нет lib/l4t — сборка не доставила lib/ источника"; exit 1; }
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/l4t"
+
+# ВЕТКА R32 (Jetson Nano, JetPack 4.6): ПРОВЕРИТЬ, А НЕ СТАВИТЬ.
+#
+# Репозитории NVIDIA в образе Q-engineering отключены («disabled on upgrade
+# to focal»), а собраны под bionic — включать их на focal нельзя. Плагины
+# при этом в образе уже есть и работают (замер на живом Nano 2026-09-15:
+# nvv4l2h264enc/h265enc, nvv4l2decoder, nvarguscamerasrc, пакет
+# nvidia-l4t-gstreamer 32.6.1). Поэтому ветка сверяет то, ради чего
+# расширение существует, и отказывает громко, если этого нет.
+#
+# Ревизия сравнивается по версии до дефиса: у пакетов R32 суффикс — дата
+# сборки, и у одного стека он разный (на Nano core 32.6.1-20210726122000,
+# gstreamer 32.6.1-20210916211029).
+r32_verify(){
+    local core gst missing=() so
+    local gst_dir=/usr/lib/aarch64-linux-gnu/gstreamer-1.0
+    core="$(dpkg-query -W -f='${Version}' nvidia-l4t-core 2>/dev/null || true)"
+    gst="$(dpkg-query -W -f='${Version}' nvidia-l4t-gstreamer 2>/dev/null || true)"
+    if [[ -z "$core" || -z "$gst" ]]; then
+        log_error "нет пакета nvidia-l4t-core или nvidia-l4t-gstreamer (core='$core', gstreamer='$gst')"
+        log_error "ветка R32 ничего не ставит: плагины NVIDIA обязаны быть в базовом образе"
+        return 1
+    fi
+    if [[ "${core%%-*}" != "${gst%%-*}" ]]; then
+        log_error "nvidia-l4t-gstreamer $gst не той ревизии, что nvidia-l4t-core $core"
+        return 1
+    fi
+    # Файлами, а не gst-inspect-1.0 — довод тот же, что в конце ветки r36.
+    for so in libgstnvvideo4linux2 libgstnvvidconv libgstnvarguscamerasrc; do
+        [[ -f "$gst_dir/$so.so" ]] || missing+=("$so")
+    done
+    if (( ${#missing[@]} )); then
+        log_error "не хватает плагинов NVIDIA: ${missing[*]}"
+        return 1
+    fi
+    # WebRTC без libnice соединения не устанавливает; в образе Q-engineering
+    # его нет. Не отказ: ставить на R32 нечем, а камеры и кодек работают.
+    [[ -f "$gst_dir/libgstnice.so" ]] || log_warn "нет libgstnice.so: webrtcbin не установит соединение (ICE)"
+    log_info "готово (R32): nvidia-l4t-gstreamer $gst, плагины NVIDIA на месте, ничего не ставилось"
+}
+
+if [[ "$(l4t_major || true)" == 32 ]]; then
+    r32_verify || exit 1
+    exit 0
+fi
+
 # ВЕРСИЯ ПЛАГИНОВ NVIDIA — ПО ВЕРСИИ СТЕКА, А НЕ ПО КАНДИДАТУ APT.
 #
 # Репозиторий r36.4 публикует обновления одной веткой: на 2026-09-14

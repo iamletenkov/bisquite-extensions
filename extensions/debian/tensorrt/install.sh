@@ -42,6 +42,54 @@ if [[ ! -f "$TEGRA_RELEASE" ]]; then
 fi
 log_info "L4T: $(head -n 1 "$TEGRA_RELEASE")"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -f "$SCRIPT_DIR/lib/l4t" ]] || { log_error "рядом нет lib/l4t — сборка не доставила lib/ источника"; exit 1; }
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/l4t"
+
+# ВЕТКА R32 (Jetson Nano, JetPack 4.6): ПРОВЕРИТЬ, А НЕ СТАВИТЬ.
+#
+# TensorRT 8.0.1.6 в образе Q-engineering уже есть (libnvinfer8, trtexec в
+# libnvinfer-bin), а репозитории NVIDIA отключены — ставить неоткуда. Ветка
+# сверяет движок и отказывает, если его нет.
+#
+# PYTHON-МОДУЛЯ НЕТ, И ЭТО НЕ ОТКАЗ. JetPack 4.6 публикует `tensorrt` только
+# под Python 3.6 (bionic), а в образе 3.8 (focal). Сборка биндингов из
+# исходников — часы ради модуля, которым сегодня никто не пользуется;
+# говорим об этом вслух, чтобы `import tensorrt` не стал сюрпризом.
+r32_verify(){
+    local ver ldcache
+    local trtexec=/usr/src/tensorrt/bin/trtexec
+    ver="$(dpkg-query -W -f='${db:Status-Abbrev}${Version}' libnvinfer8 2>/dev/null || true)"
+    if [[ "$ver" != ii* ]]; then
+        log_error "libnvinfer8 не установлен — ветка R32 ничего не ставит, движок обязан быть в базовом образе"
+        return 1
+    fi
+    ver="${ver#ii }"
+    if [[ ! -x "$trtexec" ]]; then
+        log_error "нет $trtexec (пакет libnvinfer-bin)"
+        return 1
+    fi
+    # В переменную, а не `ldconfig -p | grep -q`: pipefail и SIGPIPE.
+    ldcache="$(ldconfig -p 2>/dev/null || true)"
+    if ! grep -q "libnvinfer.so.8 " <<<"$ldcache"; then
+        log_error "libnvinfer.so.8 не виден загрузчику"
+        return 1
+    fi
+    # OPENBLAS_CORETYPE — чтобы numpy внутри модуля не выдал отсутствие за падение.
+    if OPENBLAS_CORETYPE="$L4T_OPENBLAS_CORETYPE" /usr/bin/python3 -c 'import tensorrt' >/dev/null 2>&1; then
+        log_info "Python-модуль tensorrt есть"
+    else
+        log_warn "Python-модуля tensorrt для $(/usr/bin/python3 -V 2>&1) нет: JetPack 4.6 публикует его только под 3.6; TensorRT доступен из C++ и trtexec"
+    fi
+    log_info "готово (R32): libnvinfer8 ${ver}, $trtexec, ничего не ставилось"
+}
+
+if [[ "$(l4t_major || true)" == 32 ]]; then
+    r32_verify || exit 1
+    exit 0
+fi
+
 SOURCE_LIST=/etc/apt/sources.list.d/nvidia-l4t-apt-source.list
 if [[ ! -f "$SOURCE_LIST" ]]; then
     log_error "нет $SOURCE_LIST — источник jetson/common не подключён"

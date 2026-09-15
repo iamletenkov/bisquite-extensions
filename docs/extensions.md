@@ -782,8 +782,8 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `gmsl2-camera` | `sensing-gmsl2-camera` | ядро и модули Sensing, DTB-оверлей, запуск камер на каждой загрузке (`modprobe.d`, правило udev, `bisquite-sensing-clock.service`) |
 | `gstreamer` | `l4t-gstreamer` | `gstreamer1.0-tools` и плагины base/good/bad/ugly/libav, RTSP-сервер, `gstreamer1.0-nice`, `python3-gst-1.0` |
 | `hw-video-codec` | `l4t-gstreamer` | `nvidia-l4t-gstreamer` версии `nvidia-l4t-core`: `nvv4l2h264enc`/`h265enc`/`decoder`, `nvvidconv` |
-| `opencv` | `l4t-opencv` | `libopencv` и `libopencv-python` 4.8.0 от NVIDIA, с GStreamer, без CUDA |
-| `pytorch` | `l4t-pytorch` | колесо torch nv24.08 с CDN NVIDIA, torchvision из исходников с CUDA |
+| `opencv` | `l4t-opencv` | `libopencv` и `libopencv-python` 4.8.0 от NVIDIA, с GStreamer, без CUDA; на R32 ничего не ставит — сверяет cv2 образа (с CUDA) и пишет `OPENBLAS_CORETYPE` |
+| `pytorch` | `l4t-pytorch` | колесо torch nv24.08 с CDN NVIDIA, torchvision из исходников с CUDA; на R32 ничего не ставит — сверяет torch образа и пишет `OPENBLAS_CORETYPE` |
 | `tensorflow` | `l4t-tensorflow` | колесо tensorflow nv24.08 с CDN NVIDIA |
 
 Кто чего требует:
@@ -794,7 +794,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `kiosk` | `x11-server`, `display-manager` | `install.sh` ставит клиентские утилиты X, но **не** `xorg`; `kiosk-chromium@.service` — `DISPLAY=:0`; `configure-kiosk.service:3` — `After=graphical.target … display-manager.service`. Путь к X authority в юните, как и у `x11vnc`, НЕ зашит — его ищет обёртка `run-kiosk.sh` |
 | `vino-vnc` | `x11-server`, `display-manager` | vino живёт ВНУТРИ пользовательской сессии: `configure.sh` пишет `gsettings` в dconf пользователя и кладёт автозапуск в его `~/.config/autostart`, а сессию открывает дисплей-менеджер. Системного юнита и поиска X authority здесь нет вовсе — этим он и отличается от `x11vnc` |
 | `selkies` | `x11-server`, `display-manager` | `run-selkies.sh` снимает экран существующего X-дисплея и ждёт сессию пользователя; без автологина показывать нечего |
-| `l4t-pytorch` | `cuda` | `install.sh` отказывает без `/usr/local/cuda/bin/nvcc`: им собирается torchvision с `FORCE_CUDA=1`; сам torch грузит `libcublas`, `libcufft` и прочие библиотеки тулкита |
+| `l4t-pytorch` | `cuda` | `install.sh` отказывает без `/usr/local/cuda/bin/nvcc`: им собирается torchvision с `FORCE_CUDA=1`; сам torch грузит `libcublas`, `libcufft` и прочие библиотеки тулкита. На R32 (Nano) не проверяется: torch и CUDA 10.2 уже в образе |
 | `l4t-tensorflow` | `cuda` | `install.sh` отказывает без `/usr/local/cuda/lib64`: TF грузит библиотеки тулкита |
 | остальные | — | ничего не требуют по коду |
 
@@ -844,7 +844,7 @@ apt-репозиторий, — на том основании, что стар�
 |---|---|
 | настройки расширений (`config`, `apps.d`) | `/etc/bisquite/<домен>/` |
 | код и данные расширения: `run-*.sh`, `configure.sh`, картинки | `/opt/bisquite/<имя>/` |
-| общий код источника (`get_cloud_user.sh`, `bisquite-desktop`) | `/opt/bisquite/lib/<sha256>/`; расширение видит его как `/opt/bisquite/<имя>/lib` |
+| общий код источника (`get_cloud_user.sh`, `bisquite-desktop`, `l4t`) | `/opt/bisquite/lib/<sha256>/`; расширение видит его как `/opt/bisquite/<имя>/lib` |
 | состояние | `/var/lib/bisquite/<имя>/` |
 | команды для человека | `/usr/local/sbin/bisquite-*` |
 

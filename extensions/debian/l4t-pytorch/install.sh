@@ -68,6 +68,35 @@ if [[ ! -f /etc/nv_tegra_release ]]; then
     log_error "в образе нет /etc/nv_tegra_release — это не образ NVIDIA Jetson (L4T)"
     exit 1
 fi
+
+[[ -f "$SCRIPT_DIR/lib/l4t" ]] || { log_error "рядом нет lib/l4t — сборка не доставила lib/ источника"; exit 1; }
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/l4t"
+
+# ВЕТКА R32 (Jetson Nano, JetPack 4.6): ПРОВЕРИТЬ И ЗАКРЕПИТЬ.
+#
+# В образе Q-engineering PyTorch 1.13 и torchvision 0.14 уже собраны
+# с CUDA 10.2 под Python 3.8 (замер на живом Nano 2026-09-15). Колёс под
+# Maxwell и 3.8 NVIDIA не публикует, сборка на месте — часы; всё, что
+# ниже (колесо 2.5.0, cuSPARSELt, torchvision из исходников), — только r36.
+#
+# torch.cuda.is_available() не проверяется: GPU в appliance нет. Проверяются
+# импорт, версия и то, что torch собран с CUDA (torch.version.cuda).
+#
+# OPENBLAS_CORETYPE=ARMV8 — тот же способ, что у l4t-opencv (lib/l4t):
+# без него `import torch` на Cortex-A57 падает `Illegal instruction`.
+r32_verify(){
+    l4t_openblas_pin l4t-pytorch || { log_error "OPENBLAS_CORETYPE не записан"; return 1; }
+    l4t_openblas_check 'import numpy, torch, torchvision
+assert torch.version.cuda, "torch собран без CUDA"
+print(f"torch {torch.__version__} (CUDA {torch.version.cuda}), torchvision {torchvision.__version__}, numpy {numpy.__version__}")' || return 1
+    log_info "готово (R32): ничего не ставилось"
+}
+
+if [[ "$(l4t_major || true)" == 32 ]]; then
+    r32_verify || exit 1
+    exit 0
+fi
 if [[ ! -x /usr/local/cuda/bin/nvcc ]]; then
     log_error "нет /usr/local/cuda/bin/nvcc — поставь EXTENSION cuda-toolkit раньше этого"
     exit 1

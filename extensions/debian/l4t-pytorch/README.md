@@ -7,6 +7,33 @@ PyTorch и torchvision с CUDA для Jetson (JetPack 6, L4T 36.4, Orin).
 > расширение не прибивает, поэтому версия минорная; нужен bisquite
 > с поддержкой `layout: 2`.
 
+## Ветка R32 (Jetson Nano, JetPack 4.6) — с 1.2.0
+
+Ветка выбирается по первой строке `/etc/nv_tegra_release` (`# R32 …`),
+разбор общий — `lib/l4t` источника. Поведение на r36 не меняется.
+
+В образе Q-engineering PyTorch 1.13 и torchvision 0.14 уже собраны с CUDA
+10.2 под Python 3.8. Ничего не ставится (всё про колесо 2.5.0, cuSPARSELt
+и сборку torchvision ниже — только r36); `requires: [cuda]` на R32 не
+выполняется и не нужен — CUDA в образе. Проверяются импорт `numpy`, `torch`,
+`torchvision`, версии и `torch.version.cuda`; `torch.cuda.is_available()` —
+нет, GPU в appliance нет.
+
+**`OPENBLAS_CORETYPE=ARMV8`.** На Cortex-A57 OpenBLAS из numpy выбирает ядро,
+которого у процессора нет, и `import numpy`/`cv2`/`torch` падают `Illegal
+instruction` (замер на Nano: rc=132). Вендорский образ экспортировал
+переменную из `.bashrc` учётки `jetson`, которую цепочка удаляет. Ветка R32
+пишет её в `/etc/environment` (входы) и
+`/etc/systemd/system.conf.d/<имя расширения>.conf` (`DefaultEnvironment=`,
+службы) — идемпотентно, `l4t-opencv` и `l4t-pytorch` одним способом.
+Проверка **не экспортирует переменную сама**: окружение собирается из
+записанных файлов так, как их прочтут pam_env и systemd, и импорт идёт под
+`env -i` с ним — опечатка в имени файла или ключа дала бы отказ. Падает ли
+импорт без переменной, на сборке не проверить: appliance видит CPU машины
+сборки (на AGX — Cortex-A78AE).
+
+Проверено на живом Nano (L4T R32.6.1, 2026-09-15) прогоном `install.sh` на работающей системе.
+
 ## Манифест
 
 | Поле | Значение |
