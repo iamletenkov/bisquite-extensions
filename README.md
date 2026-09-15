@@ -20,7 +20,8 @@ extensions/
     ├── uci-defaults/
     └── wrt_cloudinit/
 lib/                         # общий код; сборка доставляет его в гостя (контракт)
-tools/                       # check.sh, validate-extensions.py, new-extension.sh
+                             #   bisquite-conf — библиотека и CLI настроек, knobs/ — общие схемы
+tools/                       # check.sh, validate-extensions.py, test-conf.sh, new-extension.sh
 .github/workflows/check.yml  # CI: гоняет tools/check.sh на push и pull request
 docs/extensions.md           # конвенция целиком: манифест, фазы, способности
 ```
@@ -46,7 +47,8 @@ Ubuntu-образы используют расширения из `debian/` (Ub
 ├── install.sh                  # сборка: ставит софт, регистрирует configure-сервис
 ├── configure.sh                # первый запуск: до-настройка под конкретную ВМ
 ├── configure-<name>.service    # systemd-oneshot, гоняет configure.sh на загрузке
-├── config.yaml                 # опционально: умолчания сборки (на устройстве — /etc/bisquite/<name>/)
+├── knobs                       # опционально: схема настроек домена (/etc/bisquite/<домен>/config)
+├── knobs.apply, knobs.secret   # опционально: хуки применения и секретов
 └── README.md
 
 Общий код рядом НЕ лежит: в госте он виден как `$SCRIPT_DIR/lib/` (ссылка).
@@ -56,12 +58,11 @@ Ubuntu-образы используют расширения из `debian/` (Ub
    `$SCRIPT_DIR/lib/get_cloud_user.sh` и доделывает per-instance настройку
    (идемпотентно).
 
-**Где потом менять настройки.** Единого механизма нет, и различие
-намеренно видимое: у `x11vnc` это `EnvironmentFile` юнита
-(`/etc/bisquite/x11vnc/config`), у `kiosk` — `/var/lib/kiosk/config`,
-у `code-server` и `chromium-kiosk` — `/etc/bisquite/<имя>/config.yaml`,
-а у `vino-vnc` файла-ручки нет вовсе: действующее значение живёт в dconf.
-Таблица «что править и чем перезапускать» —
+**Где потом менять настройки.** Одной командой у всех:
+`bisquite-conf show <домен>` / `sudo bisquite-conf set <домен> KEY=VALUE`.
+Файлы — `/etc/bisquite/<домен>/config` в формате `KEY=VALUE` (грамматика systemd
+`EnvironmentFile`), схема — `knobs` расширения; `set` проверяет значение,
+пишет атомарно и применяет хуком домена. Таблица доменов —
 [docs/extensions.md](docs/extensions.md#где-живут-параметры-времени-выполнения).
 
 В образе нужны `cloud-init` и `yq`, и ставит их **не** расширение:

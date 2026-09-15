@@ -7,6 +7,12 @@
 > ссылкой на общий код источника, а не копией.
 > Нужен bisquite с поддержкой `layout: 2`.
 
+> **С 4.0.0 — библиотека настроек.** `/etc/bisquite/vino/config` — домен
+> `vino` библиотеки `bisquite-conf` (схема `knobs`): `configure.sh` его больше
+> **не исполняет** (`source`), установка не переписывает, `VINO_LISTEN` —
+> только `localhost` или `all`, пароль ставится
+> `bisquite-conf set vino VINO_PASSWORD=-`.
+
 **С 2.0.0 файл параметров — `/etc/bisquite/vino/config`** (был `/etc/default/bisquite-vino`).
 Прежний путь не читается; если файл по нему остался в базовом образе,
 установка его удаляет.
@@ -88,16 +94,18 @@ EXTENSION vino-vnc VINO_PORT=5901 VINO_PASSWORD=секрет
 EXTENSION vino-vnc VINO_PASSWORD="two words"
 ```
 
-`install.sh` кладёт `VINO_PORT`, `VINO_LISTEN` и `VINO_ENCRYPTION`
-в `/etc/bisquite/vino/config`; `configure.sh` читает оттуда. Пароль туда
-**не пишется**: ключ `vnc-password` схемы `org.gnome.Vino` хранит его
-в base64, поэтому base64 уезжает в отдельный файл `/etc/vino/vnc-password.b64`
-с правами `0600`, а в файл окружения — только путь (`VINO_PASSWORD_FILE`).
-В журнал не печатается ни пароль, ни его base64.
+`install.sh` отдаёт `VINO_PORT`, `VINO_LISTEN` и `VINO_ENCRYPTION` библиотеке
+`bisquite-conf`: она проверяет их по схеме `knobs` и пишет в
+`/etc/bisquite/vino/config`; `configure.sh` читает оттуда. Пароль туда
+**не пишется**: это ключ `secret:hook`, и хук `knobs.secret` кладёт base64
+(ключ `vnc-password` схемы `org.gnome.Vino` хранит пароль в base64) в
+отдельный файл `/etc/vino/vnc-password.b64` с правами `0600`, а в файл
+окружения — только путь (`VINO_PASSWORD_FILE`). В журнал не печатается ни
+пароль, ни его base64.
 
 Оговорка, важная при правке на живой машине: `/etc/bisquite/vino/config`
-здесь **не `EnvironmentFile` какого-то юнита**, как у `x11vnc`. Его
-`source`-ит `configure.sh` на первой загрузке и переносит значения
+здесь **не `EnvironmentFile` какого-то юнита**, как у `x11vnc`. Его читает
+`configure.sh` (библиотекой, не `source`) и переносит значения
 в dconf пользователя. Настоящий источник правды для работающего сервера —
 dconf, а файл параметров — то, из чего он заполняется.
 
@@ -140,40 +148,32 @@ vino: умеют не все.
 dconf пользователя.
 
 ```console
-$ cat /etc/bisquite/vino/config
-VINO_PORT=5900
-VINO_LISTEN=localhost
-VINO_ENCRYPTION=false
+$ bisquite-conf show vino
 ```
 
 Переключить прослушивание с петли на все интерфейсы:
 
 ```bash
-# 1. поменять значение (любое, кроме localhost, означает «все интерфейсы»)
-sudo sed -i 's/^VINO_LISTEN=.*/VINO_LISTEN=all/' /etc/bisquite/vino/config
+# 1. пароль — со stdin; хук кладёт base64 в /etc/vino/vnc-password.b64 (0600)
+echo 'пароль' | sudo bisquite-conf set vino VINO_PASSWORD=-
 
-# 2. задать пароль, если его ещё нет: ключ хранит его в base64
-sudo install -d -m 0700 /etc/vino
-printf '%s' 'пароль' | base64 -w0 | sudo tee /etc/vino/vnc-password.b64 >/dev/null
-sudo chmod 0600 /etc/vino/vnc-password.b64
-grep -q VINO_PASSWORD_FILE /etc/bisquite/vino/config ||   echo 'VINO_PASSWORD_FILE=/etc/vino/vnc-password.b64' | sudo tee -a /etc/bisquite/vino/config
-
-# 3. перенести значения в dconf пользователя — это и есть «перезапуск настройки»
-sudo systemctl restart configure-vino-vnc.service
+# 2. адрес; хук ставит в очередь configure-vino-vnc.service — перенос в dconf
+sudo bisquite-conf set vino VINO_LISTEN=all
 sudo journalctl -u configure-vino-vnc -b | tail -20   # видно каждый выставленный ключ
 
-# 4. поднять сервер с новыми ключами: он читает их при старте
+# 3. поднять сервер с новыми ключами: он читает их при старте
 #    надёжный путь — перелогиниться в сессию; без монитора —
 sudo systemctl restart display-manager.service        # ЗАКРОЕТ текущую сессию
 
-# 5. проверить
+# 4. проверить
 ss -ltnp | grep 5900
 ```
 
-Вернуть обратно — то же самое со значением `localhost`. Третий шаг обязателен:
-правка файла сама по себе не меняет ничего, потому что сервер читает dconf,
-а не файл. Четвёртый — потому что `network-interface` и порт `vino-server`
-берёт при запуске; правка dconf в уже работающей сессии на слушающий сокет
+Вернуть обратно — то же самое со значением `localhost`. Перенос в dconf (хук
+второго шага) обязателен: правка файла сама по себе не меняет ничего, потому
+что сервер читает dconf, а не файл; во время загрузки хук не зовётся, и
+перенос делает `configure-vino-vnc.service` при своём старте. Третий шаг —
+потому что `network-interface` и порт `vino-server` берёт при запуске; правка dconf в уже работающей сессии на слушающий сокет
 не переносится.
 
 Тот же эффект даёт прямая правка dconf от имени пользователя, если
@@ -202,9 +202,10 @@ sudo -u <пользователь> dbus-run-session --   gsettings set org.gnome
 
 ## Что делает
 
-- **Сборка** (`install.sh`) — проверяет параметры, ставит `vino`,
-  `libglib2.0-bin` и `dbus`, пишет `/etc/bisquite/vino/config`
-  и (если задан) файл пароля, включает `configure-vino-vnc.service`.
+- **Сборка** (`install.sh`) — проверяет и пишет параметры библиотекой
+  `bisquite-conf` (`/etc/bisquite/vino/config` и, если задан, файл пароля —
+  хуком), ставит `vino`, `libglib2.0-bin` и `dbus`, включает
+  `configure-vino-vnc.service`.
 - **Первая загрузка** (`configure.sh`) — резолвит пользователя cloud-init,
   применяет `gsettings` в его dconf и кладёт автозапуск
   в `~/.config/autostart/vino-server.desktop`.

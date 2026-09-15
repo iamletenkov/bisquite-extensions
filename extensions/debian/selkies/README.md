@@ -11,6 +11,14 @@ WebRTC, UDP и TURN не нужны.
 > `lib/get_cloud_user.sh` — ссылкой на общий код источника, а не копией.
 > Нужен bisquite с поддержкой `layout: 2`.
 
+> **С 4.0.0 — библиотека настроек.** `/etc/bisquite/selkies/config` — домен
+> `selkies` библиотеки `bisquite-conf` (схема `knobs`; `SELKIES_*` открыт
+> шаблоном, явные ключи проверяются своим типом). Установка файл не
+> переписывает; правка на устройстве — `bisquite-conf set selkies …`, её хук
+> обновляет объявление для Teleport и перезапускает `selkies@*`.
+> `BISQUITE_SELKIES_*`, кроме `BISQUITE_SELKIES_ALLOW_NO_AUTH`, больше не
+> принимаются.
+
 По умолчанию слушает `127.0.0.1:8080` без пароля: снаружи — только через того,
 кто проксирует.
 
@@ -50,8 +58,10 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
   и Debian trixie; AppImage несёт своё окружение и на Ubuntu 22.04
   (Jetson L4T 36.4) работает. Распакован, чтобы не зависеть от FUSE.
 - **`/etc/bisquite/selkies/config`** (0600) — переменные `SELKIES_*`, читает юнит.
-  До 2.0.0 файл лежал в `/etc/default/bisquite-selkies`; старый путь не читается,
-  `install.sh` его удаляет.
+  Пишет библиотека `bisquite-conf` по схеме `knobs`: создаётся один раз,
+  повторная установка не стирает правки; параметры VMFILE — поверх, через
+  проверку. До 2.0.0 файл лежал в `/etc/default/bisquite-selkies`; старый путь
+  не читается, `install.sh` его удаляет.
 - **`selkies@.service`** + **`run-selkies.sh`** — запуск от пользователя сессии.
 - **`configure-selkies.service`** — на первой загрузке включает
   `selkies@<пользователь cloud-init>`.
@@ -123,11 +133,14 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
 
   ```yaml
   firstboot-commands:
-    - "printf 'SELKIES_ENABLE_BASIC_AUTH=true\nSELKIES_BASIC_AUTH_PASSWORD=...\n' >> /etc/bisquite/selkies/config"
-    - "systemctl restart 'selkies@*' || true"
+    - >-
+      echo '<пароль>'
+      | bisquite-conf set selkies SELKIES_ENABLE_BASIC_AUTH=true SELKIES_BASIC_AUTH_PASSWORD=-
   ```
 
-  Файл `0600`, читает его systemd.
+  Файл `0600`, читает его systemd. `set` во время загрузки только пишет —
+  Selkies прочтёт файл при своём старте; на работающей машине хук
+  перезапускает `selkies@*` сам.
 - **Файлы и буфер обмена** включены: тот, кто получил доступ к приложению,
   может читать и писать `~/Downloads` и буфер обмена сессии. Не нужно —
   `SELKIES_FILE_TRANSFERS=none`, `SELKIES_ENABLE_CLIPBOARD=out`.
@@ -156,12 +169,17 @@ EXTENSION selkies SELKIES_ADDR=0.0.0.0 SELKIES_ENABLE_HTTPS=true \
 сертификата; пара не меняется между перезапусками, так что исключение
 держится. В образ ключ не попадает.
 
-С манифеста записи то же — строками в конфиг:
+С манифеста записи то же — одной командой (опечатка в ключе или значении —
+ненулевой код и строка в `cloud-init-output.log`, а не молчаливый пропуск,
+как у прежнего `sed -i`):
 
 ```yaml
 firstboot-commands:
-  - "sed -i -e 's/^SELKIES_ADDR=.*/SELKIES_ADDR=0.0.0.0/' -e 's/^SELKIES_ENABLE_HTTPS=.*/SELKIES_ENABLE_HTTPS=true/' -e 's/^BISQUITE_SELKIES_ALLOW_NO_AUTH=.*/BISQUITE_SELKIES_ALLOW_NO_AUTH=true/' /etc/bisquite/selkies/config"
-  - "systemctl restart 'selkies@*' || true"
+  - >-
+    bisquite-conf set selkies
+    SELKIES_ADDR=0.0.0.0
+    SELKIES_ENABLE_HTTPS=true
+    BISQUITE_SELKIES_ALLOW_NO_AUTH=true
 ```
 
 ## Веб-приложение Teleport
@@ -236,6 +254,6 @@ sink'а по умолчанию.
 ```bash
 systemctl status selkies@robot
 journalctl -u selkies@robot -b | grep -E 'selkies:|running on|Origin|ERROR'
-sudo cat /etc/bisquite/selkies/config
+sudo bisquite-conf show selkies
 ss -ltnp | grep 8080
 ```

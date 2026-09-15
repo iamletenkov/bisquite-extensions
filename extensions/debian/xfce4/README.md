@@ -10,6 +10,12 @@ Xfce4 с менеджером входа lightdm. Даёт X-сервер и с�
 > копией; прежний `/usr/local/lib/bisquite-desktop` установка удаляет.
 > Нужен bisquite с поддержкой `layout: 2`.
 
+> **С 4.1.0 — библиотека настроек.** Ручки — домен `desktop` библиотеки
+> `bisquite-conf` (схема `lib/knobs/desktop` источника): значения проверяет
+> схема, запись атомарная, повторная установка правок не стирает.
+> `bisquite-desktop set` — то же, что `sudo bisquite-conf set --apply desktop`,
+> а `bisquite-conf show desktop` показывает ключи с умолчаниями.
+
 **С 3.0.0 файл ручек — `/etc/bisquite/desktop/config`** (был
 `/etc/default/bisquite-desktop`). Прежний путь не читается; если файл
 по нему остался в базовом образе, установка его удаляет.

@@ -9,6 +9,13 @@ p3701-0000, носитель p3737-0000) с адаптером **SG8A-AGON-G2Y-A
 > расширение не прибивает, поэтому версия минорная; нужен bisquite
 > с поддержкой `layout: 2`.
 
+> **С 3.0.0 — библиотека настроек.** `/etc/bisquite/sensing-camera/config` —
+> домен `sensing-camera` библиотеки `bisquite-conf` (схема `knobs`):
+> `bisquite-sensing-camera-ctl` больше **не исполняет** файл (`. "$CONF"` —
+> строка `$(…)` в нём выполнялась от root на каждое появление узла), значения
+> проверяются, установка файл не переписывает. CLI ставится ссылкой в каталог
+> расширения.
+
 **С 2.0.0 файл ручек — `/etc/bisquite/sensing-camera/config`** (был
 `/etc/default/bisquite-sensing-camera`). Прежний путь не читается; если
 файл по нему остался в базовом образе, установка его удаляет.
@@ -89,9 +96,10 @@ GMSL1, а камеры — GMSL2. Узлы есть, картинки нет, и
 **Поменять на работающей машине:**
 
 ```bash
-sudoedit /etc/bisquite/sensing-camera/config         # профиль, частоты
-sudo systemctl restart 'bisquite-sensing-camera@*' bisquite-sensing-clock
-sudoedit /etc/modprobe.d/bisquite-sensing-gmsl2.conf # режим линка
+# профиль и частоты: проверка значения, запись, перезапуск юнитов (хук)
+sudo bisquite-conf set sensing-camera SENSING_CAMERA_CONTROLS=sensor_mode=1,trig_mode=0,trig_pin=0x00020007
+sudo bisquite-conf set sensing-camera SENSING_BOOST_CLOCK=0
+sudoedit /etc/modprobe.d/bisquite-sensing-gmsl2.conf # режим линка — не ручка, модуль
 sudo reboot
 ```
 
