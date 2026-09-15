@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Одна точка входа для проверок репозитория расширений.
 #
-# Сегодня проверка одна — валидация манифестов extension.yaml. Сверки копий
-# lib/ больше нет: копий нет, общий код доставляет в гостя сама сборка
-# (`/opt/bisquite/<имя>/lib`, см. docs/extensions.md). Точка входа остаётся,
-# чтобы следующая проверка встала рядом, а не заводила свой скрипт.
+# Две проверки: валидация манифестов extension.yaml и тесты библиотеки
+# настроек lib/bisquite-conf на подменённом корне. Сверки копий lib/ нет: копий нет,
+# общий код доставляет в гостя сама сборка (`/opt/bisquite/<имя>/lib`, см.
+# docs/extensions.md). Все проверки доводятся до конца, даже если первая упала.
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,6 +12,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 rc=0
 echo "== validate-extensions =="
 "$HERE/validate-extensions.py" || rc=1
+
+echo
+echo "== test-conf =="
+"$HERE/test-conf.sh" || rc=1
 
 echo
 if (( rc )); then
