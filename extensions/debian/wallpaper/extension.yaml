@@ -1,5 +1,5 @@
 name: wallpaper
-version: 2.0.0
+version: 2.0.1
 layout: 2
 family: deb
 # Обе оси: расширение кладёт картинку и правит dconf — ничего

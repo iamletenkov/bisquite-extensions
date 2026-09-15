@@ -116,10 +116,23 @@ skip_nvidia_background() {
 #
 # HOME задаётся ЯВНО: `runuser` без `-l` окружение не переопределяет, и
 # с HOME=/root настройки уехали бы в dconf рута — молча и мимо цели.
+#
+# НО ЕСЛИ СЕАНС УЖЕ ПОДНЯТ — ТОЛЬКО ЧЕРЕЗ ЕГО ШИНУ. Автологин не ждёт
+# cloud-final: строка `bisquite-teleport join` в firstboot держит его до двух
+# минут, и сессия успевает стартовать раньше нас. Тогда запись через
+# временную шину попадает в файл мимо работающей dconf-service сеанса, и та
+# при следующей своей записи возвращает файл к копии в памяти — с обоями
+# NVIDIA. Замер 2026-09-15 на AGX: служба записала в 13:26, файл переписан
+# в 13:30, picture-uri снова NVIDIA_Wallpaper.jpg.
+USER_BUS="/run/user/$(id -u "$CLOUD_USER")/bus"
+
 gset(){
-    local key="$1" value="$2"
+    local key="$1" value="$2" bus_cmd=(dbus-run-session --)
+    if [[ -S "$USER_BUS" ]]; then
+        bus_cmd=(env "DBUS_SESSION_BUS_ADDRESS=unix:path=$USER_BUS")
+    fi
     if runuser -u "$CLOUD_USER" -- \
-        env HOME="$USER_HOME" dbus-run-session -- \
+        env HOME="$USER_HOME" "${bus_cmd[@]}" \
         gsettings set org.gnome.desktop.background "$key" "$value"; then
         log_info "org.gnome.desktop.background $key = $value"
     else
