@@ -1,6 +1,7 @@
 name: l4t-kernel-kvm
-version: 1.1.0
+version: 1.2.0
 layout: 2
+# 1.2.0: L4T_KERNEL_JOBS ограничен ядрами и памятью appliance, урезание вслух.
 family: deb
 # Только arm64: L4T существует только под Tegra, а Tegra бывает только arm64.
 arch: [arm64]

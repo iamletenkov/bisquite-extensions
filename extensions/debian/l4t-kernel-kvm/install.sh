@@ -44,6 +44,27 @@ RELEASE_FILE=/etc/nv_tegra_release
 EXTLINUX=/boot/extlinux/extlinux.conf
 WORK=/usr/src/l4t-kernel-kvm
 
+# --- 0. Число заданий: не больше ядер и памяти appliance ---------------------
+#
+# install.sh выполняется в appliance virt-customize, а у него столько ядер
+# и памяти, сколько дали `bs image build --smp/--memsize` (по умолчанию 1 vCPU
+# и 2 ГБ), а не сколько у машины сборки. Задание сверх памяти OOM убивает
+# молча, и сборка падает через час-два. Потолок — nproc и MemAvailable
+# по 1.5 ГБ на задание, тот же расчёт, что у l4t-pytorch; урезание — вслух,
+# иначе заданное в VMFILE число читалось бы как применённое.
+if [[ ! "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
+    log_error "L4T_KERNEL_JOBS='$JOBS': ожидается целое число от 1"
+    exit 1
+fi
+mem_mb=$(( $(awk '/MemAvailable/{print $2}' /proc/meminfo) / 1024 ))
+jobs_cap=$(( mem_mb / 1536 )); (( jobs_cap < 1 )) && jobs_cap=1
+(( jobs_cap > $(nproc) )) && jobs_cap=$(nproc)
+if (( JOBS > jobs_cap )); then
+    log_warn "L4T_KERNEL_JOBS=$JOBS урезано до $jobs_cap: ядер $(nproc), свободно памяти ${mem_mb} МБ (по 1.5 ГБ на задание)"
+    log_warn "больше заданий — больше ресурсов appliance: bs image build --smp N --memsize M"
+    JOBS=$jobs_cap
+fi
+
 # --- 1. Это вообще Tegra? ----------------------------------------------------
 if [[ ! -f "$RELEASE_FILE" ]]; then
     log_error "нет $RELEASE_FILE — это не L4T и не Jetson"
