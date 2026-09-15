@@ -385,6 +385,7 @@ $ ss -ltnp | grep 5900
 |---|---|---|---|
 | Debian 12 | GDM | authority `/run/user/1000/gdm/Xauthority` (кандидат 2), `NRestarts=0` | 2026-09-03 |
 | Debian 12 | LightDM | authority `/home/check/.Xauthority` (кандидат 1), `NRestarts=0` | 2026-09-03 |
+| Ubuntu 20.04, Jetson Nano (образ Q-engineering, L4T R32.6.1) | GDM3 вендора, автологин | authority `/run/user/1000/gdm/Xauthority`, сервер на `127.0.0.1`/`::1`; `bisquite-conf set x11vnc X11VNC_PASSWORD=-` со stdin — файл 0600 пользователя, перезапуск, тип безопасности VNC Authentication вместо None | 2026-09-15 |
 
 Оба менеджера прогнаны подряд на одной машине, переключением симлинка
 `display-manager.service`. Замер подтвердил и то, ради чего заведена обёртка:

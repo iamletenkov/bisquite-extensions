@@ -21,11 +21,11 @@
 делает этот слой — за секунды, поверх готовой базы.
 
 ```
-jetson-nano-kvm:base          ядро + все деревья, без FDT     2 ч 15 мин
-      ↓ FROM + пакеты
-jetson-workstation:base       Docker, jtop, VNC               минуты
+jetson-nano-kvm:32.6.1        ядро + все деревья, без FDT     2 ч 15 мин на Nano
+      ↓ FROM + пакеты, стек CV/ML, рабочий стол
+jetson-nano-robot:32.6.1      минуты
       ↓ FROM + EXTENSION l4t-board-fdt
-jetson-workstation:a02   /   jetson-workstation:b00           СЕКУНДЫ
+jetson-nano-robot:32.6.1-a02   /   jetson-nano-robot:32.6.1-b01   СЕКУНДЫ
 ```
 
 ## Манифест
