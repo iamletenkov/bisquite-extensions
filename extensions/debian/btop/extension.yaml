@@ -1,6 +1,8 @@
 name: btop
-version: 1.1.0
+version: 1.2.0
 layout: 2
+# 1.2.0: без пакета в apt (focal — Jetson Nano) — статическая сборка релиза
+#        v1.4.4 с закреплённым sha256 в /usr/local/bin.
 family: deb
 # Обычный apt-пакет из universe, ничего платформенного: проверено на
 # живом Jetson (jammy/arm64) 2026-09-12, версия 1.2.3-2. Не ограничено
