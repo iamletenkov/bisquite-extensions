@@ -1,0 +1,10 @@
+# Настройки киоска — /etc/bisquite/kiosk/config. Читают configure.sh
+# (пользователь, клавиатура, панель Xfce) и run-kiosk.sh (адрес, дисплей,
+# флаги) — оба через bisquite-conf. Применяет хук перезапуском configure-kiosk.
+#
+# ключ                     тип                        умолчание                                            описание
+KIOSK_USER                 re:^[a-zA-Z0-9._-]+$       —                                                    пользователь киоска; ПЕРЕКРЫВАЕТ cloud-init; пусто — пользователь cloud-init
+KIOSK_URL                  str                        https://github.com/iamletenkov/bisquite              страница киоска
+KIOSK_DISPLAY              re:^:[0-9]+(\.[0-9]+)?$    :0                                                   X-дисплей Chromium
+KIOSK_KEYBOARD_ENABLED     enum:true,false            true                                                 экранная клавиатура — только под GNOME
+KIOSK_CHROMIUM_FLAGS       str?                       "--disable-pinch --overscroll-history-navigation=0"  флаги Chromium через пробел, добавляются к базовому набору

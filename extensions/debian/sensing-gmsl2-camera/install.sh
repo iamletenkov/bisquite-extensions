@@ -39,25 +39,20 @@ PKG_REL="${SENSING_CAMERA_PKG_REL:-Jetson AGX Orin Devkit/SG8A-AGON-G2Y-A1/JetPa
 # 2=GMSL2 3 Гбит/с. Умолчание 1 — то же, что предлагает вендорский
 # quick_bring_up.sh, если на его вопросы ответить Enter.
 SENSING_GMSLMODE="${SENSING_GMSLMODE:-1,1,1,1,1,1,1,1}"
-# Профиль камеры (контролы v4l2), ставится на все узлы драйвера. Умолчание —
-# пункт 3 вендорского меню, SG2-AR0233-5200-G-Hxxx. Другая модель — строка
-# из quick_bring_up.sh для её номера.
-SENSING_CAMERA_CONTROLS="${SENSING_CAMERA_CONTROLS:-sensor_mode=1,trig_mode=0,trig_pin=0x00020007}"
-SENSING_BOOST_CLOCK="${SENSING_BOOST_CLOCK:-1}"
+# Профиль камеры (SENSING_CAMERA_CONTROLS) и частоты (SENSING_BOOST_CLOCK) —
+# ручки домена sensing-camera: имена, типы и умолчания в схеме knobs рядом,
+# проверяет и пишет библиотека bisquite-conf (после опознания платы).
 
 if [[ ! "$SENSING_GMSLMODE" =~ ^[012](,[012]){7}$ ]]; then
     log_error "SENSING_GMSLMODE='$SENSING_GMSLMODE': нужно 8 значений 0/1/2 через запятую"
     exit 1
 fi
-if [[ ! "$SENSING_CAMERA_CONTROLS" =~ ^[a-z_]+=[0-9a-fx]+(,[a-z_]+=[0-9a-fx]+)*$ ]]; then
-    log_error "SENSING_CAMERA_CONTROLS='$SENSING_CAMERA_CONTROLS': ожидали имя=число[,имя=число…]"
-    exit 1
-fi
-if [[ "$SENSING_BOOST_CLOCK" != 0 && "$SENSING_BOOST_CLOCK" != 1 ]]; then
-    log_error "SENSING_BOOST_CLOCK='$SENSING_BOOST_CLOCK': только 0 или 1"
-    exit 1
-fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for f in knobs knobs.apply bisquite-sensing-camera-ctl lib/bisquite-conf; do
+    [[ -f "$SCRIPT_DIR/$f" ]] || { log_error "рядом нет $f"; exit 1; }
+done
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/bisquite-conf"
 
 # --- 1. Опознать плату ------------------------------------------------------
 #
@@ -76,6 +71,13 @@ if [[ ! -f "/boot/dtb/kernel_${BOARD_DTB}" ]]; then
     exit 1
 fi
 log_info "плата: $(head -n1 /etc/nv_tegra_release)"
+
+# Ручки камер — до сети: опечатка в SENSING_CAMERA_CONTROLS роняет сборку за
+# секунду, а не после клона. Файл создаётся один раз и не переписывается;
+# параметры VMFILE — поверх, через проверку схемы. Правка на работающей машине —
+# `bisquite-conf set sensing-camera …`, хук перезапускает юниты.
+conf_init sensing-camera "$SCRIPT_DIR/knobs" --env || { log_error "/etc/bisquite/sensing-camera/config не записан"; exit 1; }
+conf_load sensing-camera
 
 # --- 2. Скачать пакет драйверов ---------------------------------------------
 WORKDIR="$(mktemp -d)"
@@ -305,14 +307,7 @@ if [[ -e /etc/default/bisquite-sensing-camera ]]; then
     log_info "удаляю /etc/default/bisquite-sensing-camera: ручки теперь в /etc/bisquite/sensing-camera/config"
     rm -f /etc/default/bisquite-sensing-camera
 fi
-install -d -m 0755 /etc/bisquite/sensing-camera
-cat > /etc/bisquite/sensing-camera/config <<EOF
-# Положено расширением sensing-gmsl2-camera. Ручка на работающей машине:
-# после правки — sudo systemctl restart 'bisquite-sensing-camera@*' bisquite-sensing-clock
-SENSING_CAMERA_CONTROLS=${SENSING_CAMERA_CONTROLS}
-SENSING_BOOST_CLOCK=${SENSING_BOOST_CLOCK}
-EOF
-chmod 0644 /etc/bisquite/sensing-camera/config
+# Ручки — /etc/bisquite/sensing-camera/config (записаны до скачивания, см. выше).
 
 # v4l2-ctl — единственная утилита скрипта. В базе L4T она есть не всегда.
 if ! command -v v4l2-ctl >/dev/null 2>&1; then
@@ -323,7 +318,10 @@ if ! command -v v4l2-ctl >/dev/null 2>&1; then
     }
 fi
 
-install -m 0755 "$SCRIPT_DIR/bisquite-sensing-camera-ctl" /usr/local/sbin/
+# Ссылка, а не копия: скрипт находит lib/bisquite-conf рядом с собой через
+# `readlink -f`. Прежнюю копию из образа до 3.0.0 `ln -f` заменяет.
+chmod +x "$SCRIPT_DIR/bisquite-sensing-camera-ctl"
+ln -sfn "$SCRIPT_DIR/bisquite-sensing-camera-ctl" /usr/local/sbin/bisquite-sensing-camera-ctl
 install -m 0644 "$SCRIPT_DIR/bisquite-sensing-camera@.service" \
     "$SCRIPT_DIR/bisquite-sensing-clock.service" /etc/systemd/system/
 install -m 0644 "$SCRIPT_DIR/99-bisquite-sensing-camera.rules" /etc/udev/rules.d/

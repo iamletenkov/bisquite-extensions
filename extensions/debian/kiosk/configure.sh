@@ -13,15 +13,10 @@ log_warn(){ echo -e "${YELLOW}[WARN]${NC} $*" >&2; }
 log_error(){ echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Settings of the device, written by install.sh from the build defaults
-# (config.yaml next to this script). Edit this file, not the one in /opt.
-CONFIG_YAML=/etc/bisquite/kiosk/config.yaml
+# Settings of the device: the kiosk domain of bisquite-conf,
+# /etc/bisquite/kiosk/config (schema: knobs next to this script).
 
 check_prereqs(){
-  if ! command -v yq >/dev/null 2>&1; then
-    log_error "yq is not installed"
-    exit 1
-  fi
   if ! command -v chromium >/dev/null 2>&1; then
     log_error "chromium is not installed"
     exit 1
@@ -30,10 +25,13 @@ check_prereqs(){
     log_error "get_cloud_user.sh not found or not executable at $SCRIPT_DIR/lib/get_cloud_user.sh"
     exit 1
   fi
-  if [[ ! -f "$CONFIG_YAML" ]]; then
-    log_error "Config file not found at $CONFIG_YAML"
+  if [[ ! -f "$SCRIPT_DIR/lib/bisquite-conf" ]]; then
+    log_error "lib/bisquite-conf not found at $SCRIPT_DIR/lib/bisquite-conf"
     exit 1
   fi
+  # shellcheck source=/dev/null
+  source "$SCRIPT_DIR/lib/bisquite-conf"
+  conf_load kiosk || exit 1
 }
 
 resolve_user(){
@@ -41,14 +39,14 @@ resolve_user(){
   local attempts=0
   local max_attempts=40
 
-  # Ключ USER из config.yaml ПЕРЕКРЫВАЕТ cloud-init.
+  # Ключ KIOSK_USER ПЕРЕКРЫВАЕТ cloud-init.
   #
   # Раньше его не читал никто: configure.sh всегда шёл в get_cloud_user.sh,
   # а ключ стоял в config.yaml и в README как ручка, которой нет. Это та же
   # болезнь «мёртвых ручек», из-за которой у расширения x11vnc config.yaml
   # удалён целиком. Здесь выбран второй исход — ключ включён, а не удалён:
   #   * у соседнего code-server ровно этот ключ работает именно так
-  #     (configure.sh: USER из файла, иначе get_cloud_user.sh), и два
+  #     (CODE_SERVER_USER, иначе get_cloud_user.sh), и два
   #     одноимённых ключа с разным поведением хуже любого из двух;
   #   * случай, который он закрывает, реален — киоск на образе, где сессию
   #     держит не тот пользователь, которого создал cloud-init.
@@ -56,10 +54,9 @@ resolve_user(){
   # Молчаливого отката на cloud-init при заданном USER НЕТ: оператор назвал
   # пользователя, и подмена его другим вернула бы ту же немоту с другой
   # стороны. Ждём именно названного — cloud-init мог ещё не создать и его.
-  local configured
-  configured="$(read_config "USER")"
+  local configured="$KIOSK_USER"
   if [[ -n "$configured" ]]; then
-    log_info "Пользователь задан в config.yaml: $configured"
+    log_info "Пользователь задан в KIOSK_USER: $configured"
     while true; do
       if id "$configured" >/dev/null 2>&1; then
         echo "$configured"
@@ -67,8 +64,8 @@ resolve_user(){
       fi
       attempts=$((attempts+1))
       if (( attempts >= max_attempts )); then
-        log_error "пользователь '$configured' из config.yaml так и не появился"
-        log_error "уберите ключ USER, чтобы взять пользователя из cloud-init"
+        log_error "пользователь '$configured' из KIOSK_USER так и не появился"
+        log_error "сбросьте ключ (bisquite-conf set kiosk KIOSK_USER=), чтобы взять пользователя из cloud-init"
         exit 1
       fi
       log_info "Waiting for user '$configured' (attempt $attempts/$max_attempts)..."
@@ -95,13 +92,6 @@ resolve_user(){
     log_info "Waiting for cloud-init user (attempt $attempts/$max_attempts)..."
     sleep 3
   done
-}
-
-read_config(){
-  local key="$1"
-  local value
-  value=$(yq -r ".$key // \"\"" "$CONFIG_YAML" 2>/dev/null || echo "")
-  echo "$value"
 }
 
 # Какой рабочий стол здесь на самом деле.
@@ -150,7 +140,7 @@ enable_gnome_keyboard(){
   # проходила успешно и не давала НИЧЕГО — плюс в автозапуск ложился .desktop,
   # который выглядел как включённая клавиатура. Отказ вслух вместо этого.
   if [[ "$desktop" != "gnome" ]]; then
-    log_warn "KEYBOARD_ENABLED: true, но рабочий стол — $desktop, а клавиатура здесь только GNOME"
+    log_warn "KIOSK_KEYBOARD_ENABLED=true, но рабочий стол — $desktop, а клавиатура здесь только GNOME"
     log_warn "экранной клавиатуры не будет; onboard/matchbox-keyboard расширение не ставит"
     return 0
   fi
@@ -267,7 +257,7 @@ XFCE_PANEL_EOF
 #
 # `systemctl enable kiosk-chromium@<user>` кладёт симлинк в
 # graphical.target.wants/ (шаблон объявлен WantedBy=graphical.target), а
-# `disable` прежнего не делал никто. После смены ключа `USER` в config.yaml
+# `disable` прежнего не делал никто. После смены ключа `KIOSK_USER`
 # — а ключ этот живой, см. resolve_user — там оставались ОБА экземпляра,
 # и на следующей загрузке поднимались два браузера на один дисплей :0,
 # оба с `Restart=always`.
@@ -301,34 +291,22 @@ configure_kiosk_service(){
 
   log_info "Configuring kiosk service for user '$cloud_user'"
 
-  # Read configuration from YAML
-  local url display keyboard_enabled chromium_flags
-  url=$(read_config "URL")
-  display=$(read_config "DISPLAY")
-  keyboard_enabled=$(read_config "KEYBOARD_ENABLED")
-  chromium_flags=$(read_config "CHROMIUM_FLAGS")
-
-  # Set defaults if not specified.
+  # Settings: loaded by check_prereqs (conf_load kiosk). Defaults live in the
+  # schema — one value per key for the whole chain (knobs -> configure.sh ->
+  # run-kiosk.sh), not three copies.
   #
-  # Здесь стояло http://192.168.202.785 — адреса с октетом 785 не существует,
-  # и Chromium показывал бы ошибку разрешения имени, то есть дефект читался бы
-  # как неисправность сети. Умолчание НЕ приведено к 192.168.202.78 из
-  # config.yaml: это адрес конкретной лаборатории, и для любого другого
-  # оператора он ровно так же недостижим, просто молча. Взято то же значение,
-  # что и в обёртке, — теперь во всей цепочке (config.yaml -> configure.sh ->
-  # /var/lib/kiosk/config -> run-kiosk.sh) умолчание одно, а не три разных.
-  # Значение из config.yaml по-прежнему сильнее и никуда не делось.
-  url="${url:-https://github.com/iamletenkov/bisquite}"
-  display="${display:-:0}"
-  keyboard_enabled="${keyboard_enabled:-true}"
-  chromium_flags="${chromium_flags:-}"
+  # The URL default used to be http://192.168.202.785 here (octet 785 does
+  # not exist) and the lab address 192.168.202.78 in config.yaml — both
+  # unreachable for anyone else, and silently so: Chromium shows a network
+  # error. The schema default is a public page instead.
+  local keyboard_enabled="$KIOSK_KEYBOARD_ENABLED"
 
   log_info "Kiosk configuration:"
   log_info "  User: $cloud_user"
-  log_info "  URL: $url"
-  log_info "  Display: $display"
+  log_info "  URL: $KIOSK_URL"
+  log_info "  Display: $KIOSK_DISPLAY"
   log_info "  Keyboard enabled: $keyboard_enabled (GNOME on-screen keyboard)"
-  log_info "  Chromium flags: ${chromium_flags:-<none>}"
+  log_info "  Chromium flags: ${KIOSK_CHROMIUM_FLAGS:-<none>}"
 
   local desktop
   desktop="$(detect_desktop "$cloud_user")"
@@ -340,20 +318,10 @@ configure_kiosk_service(){
   # Enable GNOME on-screen keyboard
   enable_gnome_keyboard "$cloud_user" "$keyboard_enabled" "$desktop"
 
-  # Create kiosk configuration file for the systemd service to read
-  local kiosk_config_dir="/var/lib/kiosk"
-  mkdir -p "$kiosk_config_dir"
-
-  cat > "$kiosk_config_dir/config" <<EOF
-# Kiosk configuration generated by configure-kiosk.service
-USER=$cloud_user
-URL=$url
-DISPLAY=$display
-CHROMIUM_FLAGS=$chromium_flags
-EOF
-
-  chmod 644 "$kiosk_config_dir/config"
-  log_info "Created kiosk configuration at $kiosk_config_dir/config"
+  # Before 3.0.0 a copy of URL/DISPLAY/flags went to /var/lib/kiosk/config for
+  # the unit's EnvironmentFile — two copies that drifted apart. run-kiosk.sh
+  # reads /etc/bisquite/kiosk/config itself now.
+  rm -f /var/lib/kiosk/config
 
   # Enable and start kiosk-chromium service for user
   disable_stale_instances "$cloud_user"

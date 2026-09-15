@@ -1,6 +1,9 @@
 name: selkies
-version: 3.0.0
+version: 4.0.0
 layout: 2
+# 4.0.0: настройки — домен selkies библиотеки bisquite-conf (схема knobs,
+#        SELKIES_* — шаблоном): установка не переписывает файл; BISQUITE_SELKIES_*
+#        вне схемы больше не принимаются.
 family: deb
 # AppImage публикуется для x86_64 и aarch64; install.sh выбирает по dpkg-архитектуре.
 arch: [amd64, arm64]

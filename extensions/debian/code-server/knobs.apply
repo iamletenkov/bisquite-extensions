@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Apply hook of the code-server domain: rebuild the user's config and restart
+# the server (configure.sh sees the settings file newer than its last run).
+# Non-blocking: configure-code-server.service is ordered After=cloud-final,
+# and `bisquite-conf set` may run inside cloud-final — a blocking restart
+# from there is the deadlock measured on Jetson Nano.
+set -uo pipefail
+systemctl --no-block restart configure-code-server.service
+>&2 echo "code-server: перенастройка поставлена в очередь (journalctl -u configure-code-server)"

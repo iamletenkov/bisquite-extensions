@@ -1,6 +1,10 @@
 name: code-server
-version: 2.0.0
+version: 3.0.0
 layout: 2
+# 3.0.0: /etc/bisquite/code-server/config.yaml -> config (KEY=VALUE, домен
+#        code-server библиотеки bisquite-conf); прежний файл переносится и
+#        удаляется при установке; config.yaml в каталоге расширения удалён;
+#        версия (CODE_SERVER_VERSION) — только параметр сборки.
 family: deb
 # amd64 и arm64. Ограничение вносил не code-server, а mkcert: install.sh
 # качал его по прибитой ссылке mkcert-v1.4.4-linux-amd64 и валидировал ELF,
@@ -14,7 +18,7 @@ family: deb
 arch: [amd64, arm64]
 # build     — install.sh ставит mkcert и code-server;
 # firstboot — configure-code-server.service выпускает сертификат и заводит
-#             сервис под пользователем (из config.yaml либо из cloud-init).
+#             сервис под пользователем (CODE_SERVER_USER либо из cloud-init).
 phase: [build, firstboot]
 provides: [web-ide]
 requires: []

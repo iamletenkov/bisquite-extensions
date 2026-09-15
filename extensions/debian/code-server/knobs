@@ -1,0 +1,14 @@
+# Настройки code-server — /etc/bisquite/code-server/config (0600: пароль).
+# Формат bisquite, а не code-server: configure.sh собирает из него
+# ~<пользователь>/.config/code-server/config.yaml на первой загрузке и хуком
+# применения (перезапуск configure-code-server.service).
+#
+# CODE_SERVER_VERSION здесь нет намеренно: версия — решение сборки, а не
+# настройка устройства. Записанная в файл, она пережила бы пересборку поверх
+# образа и закрепила бы старую версию при обновлённом расширении.
+#
+# ключ                   тип                                      умолчание  описание
+CODE_SERVER_USER         re:^[a-zA-Z0-9._-]+$                     —          пользователь; пусто — из cloud-init
+CODE_SERVER_PASSWORD     secret                                   —          пароль; пусто или none — без аутентификации
+CODE_SERVER_PORT         port                                     9001       порт
+CODE_SERVER_BIND         host                                     0.0.0.0    адрес прослушивания; 127.0.0.1 закрывает сервер от сети (доступ ssh-туннелем или Teleport)

@@ -7,8 +7,9 @@ Requires=display-manager.service
 Type=simple
 User=%i
 Environment=DISPLAY=:0
-# Параметры пишет install.sh из переменных окружения VMFILE; дефис означает
-# «нет файла — не ошибка», умолчания живут в самой обёртке.
+# Параметры — домен x11vnc библиотеки bisquite-conf (схема knobs, правка —
+# `bisquite-conf set x11vnc …`); дефис означает «нет файла — не ошибка»,
+# умолчания живут в самой обёртке.
 EnvironmentFile=-/etc/bisquite/x11vnc/config
 # Ждём сокет X. Он есть и под Wayland (его создаёт mutter для Xwayland),
 # поэтому сокет — не признак пригодной сессии; тип сессии проверяет обёртка.

@@ -1,13 +1,16 @@
 name: chromium-kiosk
-version: 2.0.0
+version: 3.0.0
 layout: 2
+# 3.0.0: /etc/bisquite/chromium-kiosk/config.yaml (формат пакета) -> config
+#        (KEY=VALUE, CHROMIUM_KIOSK_*); /etc/chromium-kiosk/config.yml
+#        собирается из ручек, прежний файл переносится и удаляется.
 family: deb
 # Пакет тянется из стороннего репозитория repository.salamek.cz (suite `all`),
 # набор архитектур там не проверялся; на сборках bisquite подтверждён amd64
 # (debian12/chromium-kiosk.vmfile, debian12/nuc-kiosk.vmfile).
 arch: [amd64, arm64]
 # build     — install.sh ставит пакет chromium-kiosk и локаль;
-# firstboot — configure-chromium-kiosk.service раскладывает config.yaml
+# firstboot — configure-chromium-kiosk.service собирает из ручек
 #             в /etc/chromium-kiosk/config.yml до старта config watcher'а.
 phase: [build, firstboot]
 provides: [kiosk-browser]

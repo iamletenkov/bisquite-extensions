@@ -1,0 +1,37 @@
+# Настройки Selkies — /etc/bisquite/selkies/config (0600: пароли basic auth).
+# Имена — родные переменные Selkies (`selkies --help`, «Env:»): юнит читает
+# файл как EnvironmentFile, и Selkies берёт их сам. Словарь Selkies — свойство
+# версии AppImage, поэтому SELKIES_* открыт шаблоном: явно объявлены умолчания
+# робота и то, что проверять стоит, остальное принимается как строка.
+#
+# ключ                                  тип                                умолчание        описание
+SELKIES_ADDR                            list:host                          127.0.0.1        адрес прослушивания; снаружи — через Teleport или ssh-туннель
+SELKIES_PORT                            port                               8080             порт
+SELKIES_MODE                            enum:websockets,webrtc             websockets       WebRTC через веб-приложение Teleport не проходит
+SELKIES_ENABLE_DUAL_MODE                enum:true,false                    false            оба режима сразу
+SELKIES_ENABLE_HTTPS                    enum:true,false                    false            TLS; TLS на петле завершает прокси
+SELKIES_ENABLE_BASIC_AUTH               enum:true,false                    false            пароль на вход; наружу без него обёртка не запустится
+SELKIES_BASIC_AUTH_PASSWORD             secret                             —                пароль basic auth
+SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD    secret                             —                пароль только для просмотра
+SELKIES_MASTER_TOKEN                    secret                             —                токен совместной работы
+SELKIES_ENABLE_RESIZE                   enum:true,false                    false            true — Selkies меняет разрешение МОНИТОРА под окно браузера
+SELKIES_ENCODER                         str                                h264enc          кодер: h264enc, h264enc-striped, jpeg
+SELKIES_FRAMERATE                       str                                30,8-60          частота кадров: старт,мин-макс
+SELKIES_AUDIO_ENABLED                   enum:true,false                    true             звук сессии
+SELKIES_MICROPHONE_ENABLED              enum:true,false                    false            микрофон браузера на робота
+SELKIES_GAMEPAD_ENABLED                 enum:true,false                    false            геймпады (заводят сокеты в /tmp)
+SELKIES_WEBCAM_ENABLED                  enum:true,false                    false            веб-камера браузера на робота
+SELKIES_ENABLE_CLIPBOARD                enum:true,false,in,out             true             буфер обмена: обе стороны или по направлениям
+SELKIES_FILE_TRANSFERS                  str                                upload,download  передача файлов в ~/Downloads пользователя; none — выключить
+SELKIES_COMMAND_ENABLED                 enum:true,false                    false            API выполнения команд
+SELKIES_ENABLE_SHARING                  enum:true,false                    false            ссылки для просмотра другими
+SELKIES_SECOND_SCREEN                   enum:true,false                    false            второй монитор
+SELKIES_UI_SIDEBAR_SHOW_GAMEPADS        enum:true,false                    false            панель: геймпады
+SELKIES_UI_SIDEBAR_SHOW_WEBCAM          enum:true,false                    false            панель: веб-камера
+SELKIES_UI_SIDEBAR_SHOW_SHARING         enum:true,false                    false            панель: совместный доступ
+SELKIES_UI_SIDEBAR_SHOW_APPS            enum:true,false                    false            панель: приложения
+SELKIES_DISPLAY                         re:^:[0-9]+(\.[0-9]+)?$            —                X-дисплей; пусто — :0 (ключ обёртки)
+SELKIES_HTTPS_CERT                      path                               —                сертификат; пусто — пара, выпущенная на устройстве
+SELKIES_HTTPS_KEY                       path                               —                ключ сертификата
+SELKIES_*                               str                                —                любая переменная Selkies (selkies --help)
+BISQUITE_SELKIES_ALLOW_NO_AUTH          enum:true,false                    false            ручка обёртки, не Selkies: true — адрес не петли без пароля

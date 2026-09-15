@@ -1,6 +1,9 @@
 name: kiosk
-version: 2.0.0
+version: 3.0.0
 layout: 2
+# 3.0.0: /etc/bisquite/kiosk/config.yaml -> config (KEY=VALUE, KIOSK_*, домен
+#        kiosk библиотеки bisquite-conf); yq не нужен; /var/lib/kiosk/config
+#        больше нет — обёртка читает настройки сама.
 family: deb
 arch: [amd64, arm64]
 # build     — install.sh ставит chromium и кладёт kiosk-chromium@.service;

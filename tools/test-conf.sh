@@ -17,7 +17,9 @@ trap 'rm -r -f -- "$TMP"' EXIT
 
 pass=0; fail=0
 ok(){ pass=$((pass + 1)); }
-bad(){ fail=$((fail + 1)); echo "FAIL: $*" >&2; }
+# fd 3: the real stderr — a check called with 2>/dev/null must still report.
+exec 3>&2
+bad(){ fail=$((fail + 1)); echo "FAIL: $*" >&3; }
 check(){ local what="$1"; shift; if "$@"; then ok; else bad "$what"; fi; }
 check_not(){ local what="$1"; shift; if "$@"; then bad "$what"; else ok; fi; }
 eq(){ local what="$1" want="$2" got="$3"; if [[ "$want" == "$got" ]]; then ok; else bad "$what: ждали [$want], получили [$got]"; fi; }
@@ -62,6 +64,7 @@ T_PASSFILE      ro:path                      —              файл паро�
 T_RO            ro:str                       —              только через --allow-ro
 OPEN_*          str                          —              открытое пространство
 OPEN_PORT       port                         8080           явный ключ внутри шаблона
+T_FLAGS         str?                         "--a --b"      флаги, которые можно очистить
 EOF
 }
 
@@ -75,6 +78,7 @@ valid=(
     T_HOST=robot.example.org T_PATH=/etc/x T_PATH= "T_STR=a b c" T_ENUM=all
     "T_RE=abc def" T_RE= T_LIST=1,2,3 T_LISTENUM=home,back
     'T_SECRET=p$ss`w"o\rd' T_SECRE=Abcdefgh1 OPEN_ANYTHING=x OPEN_PORT=9000
+    T_FLAGS= "T_FLAGS=--c"
 )
 for p in "${valid[@]}"; do check "допустимо: $p" lib conf_validate t "$p"; done
 
@@ -88,6 +92,7 @@ for p in "${invalid[@]}"; do check_not "отказ: $p" lib conf_validate t "$p"
 check_not "отказ: перевод строки в str" lib conf_validate t $'T_STR=a\nb' 2>/dev/null
 check_not "отказ: перевод строки в secret" lib conf_validate t $'T_SECRET=a\nT_BOOL=1' 2>/dev/null
 check_not "отказ: CR в secret" lib conf_validate t $'T_SECRET=a\rb' 2>/dev/null
+check_not "отказ: перевод строки и \$ во втором элементе списка" lib conf_validate t $'T_LIST=1\n$(id)' 2>/dev/null
 
 msg="$(lib conf_validate t T_ENUM=al 2>&1)"
 check "текст отказа перечисляет допустимые значения" grep -q 'допустимо: localhost,all' <<< "$msg"
@@ -226,6 +231,11 @@ eq "значение со stdin без перевода строки" s3cr3t-fro
 printf 'with-newline\n' | conf set --no-apply t T_SECRET=- 2>/dev/null
 eq "значение со stdin с переводом строки" with-newline "$(lib conf_get t T_SECRET)"
 check_not "два значения со stdin — отказ" bash -c 'echo x | bash "$1" set --no-apply t T_SECRET=- T_STR=- 2>/dev/null' _ "$LIB"
+printf '' | conf set --no-apply t T_SECRET=- 2>/dev/null; rc=$?
+check "пустой stdin — отказ, а не пустое значение" test "$rc" -ne 0
+eq "пустой stdin — значение прежнее" with-newline "$(lib conf_get t T_SECRET)"
+printf '\n' | conf set --no-apply t T_SECRET=- 2>/dev/null; rc=$?
+check "пустая строка со stdin — отказ" test "$rc" -ne 0
 
 # ===========================================================================
 echo "== secret:hook =="
@@ -303,6 +313,7 @@ Y_FLAGS   str                      —         флаги
 Y_NAV     enum:true,false          false     панель
 Y_LIST    list:enum:home,back      home      кнопки
 Y_URLS    list:str                 —         адреса
+Y_FEAT    list:str                 —         возможности
 EOF
 mkdir -p "$ROOT/etc/bisquite/y"
 cat > "$ROOT/etc/bisquite/y/config.yaml" <<'EOF'
@@ -315,9 +326,16 @@ NAV_BAR:
   ENABLED: true
   BUTTONS: ['home', 'back']
 URLS: []
+FEATURES:
+#  - commented
+  - geolocation  # comment
+  - 'mouse-lock'
 EOF
-check "миграция" lib conf_init y "$ROOT/ext/knobs" \
-    --migrate-yaml USER=Y_USER,PORT=Y_PORT,FLAGS=Y_FLAGS,NAV_BAR.ENABLED=Y_NAV,NAV_BAR.BUTTONS=Y_LIST,URLS=Y_URLS 2>/dev/null
+msg="$(lib conf_init y "$ROOT/ext/knobs" \
+    --migrate-yaml USER=Y_USER,PORT=Y_PORT,FLAGS=Y_FLAGS,NAV_BAR.ENABLED=Y_NAV,NAV_BAR.BUTTONS=Y_LIST,URLS=Y_URLS,FEATURES=Y_FEAT 2>&1)"; rc=$?
+eq "миграция" 0 "$rc"
+check "ключ вне карты назван в журнале" grep -q 'не переносятся (не ручки домена): IGNORED' <<< "$msg"
+eq "блочный список" geolocation,mouse-lock "$(lib conf_get y Y_FEAT)"
 eq "скаляр с комментарием" 9002 "$(lib conf_get y Y_PORT)"
 eq "строка в кавычках" "--a --b" "$(lib conf_get y Y_FLAGS)"
 eq "вложенный ключ" true "$(lib conf_get y Y_NAV)"
@@ -328,6 +346,9 @@ printf 'Y_PORT port 9001 порт\n' > "$ROOT/ext/knobs"
 mkdir -p "$ROOT/etc/bisquite/y"; printf 'PORT: http\n' > "$ROOT/etc/bisquite/y/config.yaml"
 check_not "неверное значение в YAML — отказ" lib conf_init y "$ROOT/ext/knobs" --migrate-yaml PORT=Y_PORT 2>/dev/null
 check "после отказа config.yaml на месте" test -e "$ROOT/etc/bisquite/y/config.yaml"
+printf 'PORT: 9002\n!!weird line\n' > "$ROOT/etc/bisquite/y/config.yaml"
+check_not "неразобранная строка YAML — отказ" lib conf_init y "$ROOT/ext/knobs" --migrate-yaml PORT=Y_PORT 2>/dev/null
+check "после неразобранной строки config.yaml на месте" test -e "$ROOT/etc/bisquite/y/config.yaml"
 
 # ===========================================================================
 echo "== совместимость с systemd EnvironmentFile =="
@@ -399,6 +420,209 @@ while IFS= read -r schema; do
         bash -c 'source "$1"; _conf_schema_load "$2" "$3"' _ "$LIB" "$domain" "$schema"
 done < <(find "$REPO/lib/knobs" "$REPO/extensions" \( -path '*/lib/knobs/*' -o -name knobs \) -type f ! -name '*.*' 2>/dev/null | sort)
 
+
+# ===========================================================================
+# Domains: the real schemas, hooks and scripts of the extensions, staged the
+# way the build lays them out — /opt/bisquite/<имя>/ with lib/ linked in.
+# ===========================================================================
+stage(){
+    local name="$1" src
+    src="$(find "$REPO/extensions" -mindepth 2 -maxdepth 2 -type d -name "$name" | head -n 1)"
+    mkdir -p "$ROOT/opt/bisquite"
+    cp -a "$src" "$ROOT/opt/bisquite/$name"
+    ln -sfn "$REPO/lib" "$ROOT/opt/bisquite/$name/lib"
+    STAGED="$ROOT/opt/bisquite/$name"
+}
+# The --migrate-yaml map exactly as install.sh passes it.
+yaml_map(){ grep -o -- '--migrate-yaml [^ ]*' "$STAGED/install.sh" | head -n 1 | cut -d' ' -f2; }
+
+echo "== домен x11vnc: пароль через хук =="
+new_root; stage x11vnc; fake_systemctl
+cat > "$ROOT/bin/x11vnc" <<'EOF'
+#!/usr/bin/env bash
+[[ -e "${BISQUITE_CONF_ROOT}/x11vnc.fail" ]] && exit 1
+[[ "$1" == -storepasswd ]] && printf 'rfbauth:%s' "$2" | sha256sum > "$3"
+EOF
+chmod +x "$ROOT/bin/x11vnc"
+check "install: conf_init --env с паролем" env PATH="$ROOT/bin:$PATH" X11VNC_LISTEN=all X11VNC_PASSWORD=hunter2 \
+    bash -c 'set -euo pipefail; source "$1/lib/bisquite-conf"; conf_init x11vnc "$1/knobs" --env 2>/dev/null' _ "$STAGED"
+check "rfbauth создан" test -s "$ROOT/etc/x11vnc/passwd"
+eq "rfbauth 0600" 600 "$(stat -c %a "$ROOT/etc/x11vnc/passwd")"
+eq "X11VNC_PASSFILE записан хуком" /etc/x11vnc/passwd "$(lib conf_get x11vnc X11VNC_PASSFILE)"
+check_not "пароль не попал в config" grep -rq hunter2 "$ROOT/etc/bisquite"
+eq "config без секретов — 0644" 644 "$(stat -c %a "$(cfg x11vnc)")"
+msg="$(PATH="$ROOT/bin:$PATH" conf set x11vnc X11VNC_LISTEN=al 2>&1)"; rc=$?
+check "X11VNC_LISTEN=al — ненулевой код" test "$rc" -ne 0
+check "X11VNC_LISTEN=al — текст про допустимые значения" grep -q 'допустимо: localhost,all' <<< "$msg"
+check_not "X11VNC_PASSFILE через set — отказ" env PATH="$ROOT/bin:$PATH" bash "$LIB" set x11vnc X11VNC_PASSFILE= 2>/dev/null
+touch "$ROOT/x11vnc.fail"; cp "$(cfg x11vnc)" "$ROOT/snap"; cp "$ROOT/etc/x11vnc/passwd" "$ROOT/snap.pw"
+printf 'other' | PATH="$ROOT/bin:$PATH" conf set --no-apply x11vnc X11VNC_PASSWORD=- 2>/dev/null; rc=$?
+check "-storepasswd отказал — код ненулевой" test "$rc" -ne 0
+check "-storepasswd отказал — config не тронут" cmp -s "$ROOT/snap" "$(cfg x11vnc)"
+check "-storepasswd отказал — прежний rfbauth на месте" cmp -s "$ROOT/snap.pw" "$ROOT/etc/x11vnc/passwd"
+rm -f "$ROOT/x11vnc.fail"
+mkdir -p "$ROOT/etc/systemd/system/graphical.target.wants"
+touch "$ROOT/etc/systemd/system/graphical.target.wants/x11vnc@robot.service"
+FAKE_STATE=running PATH="$ROOT/bin:$PATH" conf set x11vnc X11VNC_PORT=5901 2>/dev/null
+check "хук apply: экземпляр перезапущен без ожидания" grep -qx -- '--no-block restart x11vnc@robot.service' "$ROOT/systemctl.log"
+printf '' | PATH="$ROOT/bin:$PATH" conf set --no-apply x11vnc X11VNC_PASSWORD=- 2>/dev/null; rc=$?
+check "пустой stdin для пароля — отказ" test "$rc" -ne 0
+check "пустой stdin для пароля — rfbauth на месте" test -s "$ROOT/etc/x11vnc/passwd"
+PATH="$ROOT/bin:$PATH" conf set --no-apply x11vnc X11VNC_PASSWORD= 2>/dev/null
+check_not "явный пустой пароль — rfbauth удалён" test -e "$ROOT/etc/x11vnc/passwd"
+eq "явный пустой пароль — X11VNC_PASSFILE пуст" "" "$(lib conf_get x11vnc X11VNC_PASSFILE)"
+check "повторная установка без параметров" \
+    bash -c 'set -euo pipefail; source "$1/lib/bisquite-conf"; conf_init x11vnc "$1/knobs" --env' _ "$STAGED"
+eq "повторная установка не стёрла порт, заданный set" 5901 "$(lib conf_get x11vnc X11VNC_PORT)"
+
+echo "== домен vino: без source, пароль через хук =="
+new_root; stage vino-vnc
+check "conf_init vino с паролем" env VINO_PASSWORD=verylongpass VINO_PORT=5901 \
+    bash -c 'set -euo pipefail; source "$1/lib/bisquite-conf"; conf_init vino "$1/knobs" --env 2>/dev/null' _ "$STAGED"
+eq "base64 пароля" "$(printf verylongpass | base64 -w0)" "$(cat "$ROOT/etc/vino/vnc-password.b64")"
+eq "каталог пароля 0700" 700 "$(stat -c %a "$ROOT/etc/vino")"
+eq "VINO_PASSWORD_FILE" /etc/vino/vnc-password.b64 "$(lib conf_get vino VINO_PASSWORD_FILE)"
+check_not "VINO_PORT=80 — вне диапазона vino" lib conf_validate vino VINO_PORT=80 2>/dev/null
+check_not "configure.sh vino не исполняет файл настроек" grep -qE '^[^#]*(source|\.) +"?\$ENV_FILE' "$STAGED/configure.sh"
+
+echo "== домен selkies: открытое пространство и объявление для Teleport =="
+new_root; stage selkies
+check "conf_init selkies с SELKIES_*" env SELKIES_PORT=8090 SELKIES_VIDEO_CRF=25 BISQUITE_SELKIES_ALLOW_NO_AUTH=true \
+    bash -c 'set -euo pipefail; source "$1/lib/bisquite-conf"; conf_init selkies "$1/knobs" --env' _ "$STAGED"
+eq "шаблонный ключ принят" 25 "$(lib conf_get selkies SELKIES_VIDEO_CRF)"
+check_not "явный ключ с префиксом проверяется своим типом" lib conf_validate selkies SELKIES_PORT=http 2>/dev/null
+check_not "BISQUITE_SELKIES_* вне схемы — отказ" lib conf_validate selkies BISQUITE_SELKIES_OTHER=1 2>/dev/null
+eq "config 0600 (пароли basic auth)" 600 "$(stat -c %a "$(cfg selkies)")"
+check "teleport-app.sh" bash "$STAGED/teleport-app.sh" 2>/dev/null
+eq "объявление с портом из настроек" "URI=http://127.0.0.1:8090" "$(grep URI "$ROOT/etc/bisquite/teleport/apps.d/selkies.conf")"
+
+echo "== домен teleport: bisquite-teleport через библиотеку =="
+new_root; stage teleport-agent
+export BISQUITE_TELEPORT_ROOT="$ROOT"
+check "conf_init teleport" bash -c 'set -euo pipefail; source "$1/lib/bisquite-conf"; conf_init teleport "$1/knobs"' _ "$STAGED"
+tp(){ bash "$STAGED/bisquite-teleport" "$@"; }
+msg="$(tp set TELEPORT_ENV=prod 2>&1)"; rc=$?
+eq "set TELEPORT_ENV — успех" 0 "$rc"
+check "set без кластера — хук говорит, что кластер не задан" grep -q 'кластер не задан' <<< "$msg"
+eq "TELEPORT_ENV записан" prod "$(lib conf_get teleport TELEPORT_ENV)"
+msg="$(tp set TELEPORT_PROXY=evil.example.org 2>&1)"; rc=$?
+check "set TELEPORT_PROXY — отказ" test "$rc" -ne 0
+check "set TELEPORT_PROXY — текст про join" grep -q 'только через bisquite-teleport join' <<< "$msg"
+check_not "set TELEPORT_LABELS=env=… — отказ" tp set TELEPORT_LABELS=env=dev 2>/dev/null
+check_not "set TELEPORT_APPS с кавычкой — отказ" tp set 'TELEPORT_APPS=a="x' 2>/dev/null
+check_not "join: неверный прокси отвергнут до сети" env TELEPORT_BIN=/nonexistent bash "$STAGED/bisquite-teleport" join 'TELEPORT_PROXY=bad proxy' TELEPORT_TOKEN=abcdefgh1 2>/dev/null
+lib conf_set teleport --allow-ro TELEPORT_PROXY=teleport.example.org TELEPORT_NODENAME=robot-1
+check "render" tp render
+check "teleport.yaml собран" grep -q 'proxy_server: "teleport.example.org:443"' "$ROOT/etc/teleport.yaml"
+check "метка env в teleport.yaml" grep -q '"env": "prod"' "$ROOT/etc/teleport.yaml"
+printf 'TELEPORT_ENV="a\\"b"\n' >> "$(cfg teleport)"
+check_not "render отказывает на правке руками с кавычкой" tp render 2>/dev/null
+eq "права config teleport 0600" 600 "$(stat -c %a "$(cfg teleport)")"
+unset BISQUITE_TELEPORT_ROOT
+
+echo "== домен desktop: схема из lib, хук находит CLI того же lib =="
+new_root; stage gnome
+check "conf_init desktop через каталог расширения" env DESKTOP_AUTOLOGIN=1 \
+    bash -c 'set -euo pipefail; source "$1/lib/bisquite-conf"; conf_init desktop "$1/lib/knobs/desktop" --env' _ "$STAGED"
+eq "хук desktop.apply ведёт в lib/ с bisquite-desktop" "$REPO/lib" \
+    "$(dirname "$(dirname "$(readlink -f "$ROOT/opt/bisquite/knobs/desktop.apply")")")"
+check "bisquite-desktop status читает через библиотеку" grep -qx 'DESKTOP_AUTOLOGIN=1' <<< "$(bash "$REPO/lib/bisquite-desktop" status 2>/dev/null)"
+check_not "DESKTOP_AUTOLOGIN=yes — отказ" lib conf_validate desktop DESKTOP_AUTOLOGIN=yes 2>/dev/null
+check_not "DESKTOP_AUTOLOGIN_USER с пробелом — отказ" lib conf_validate desktop "DESKTOP_AUTOLOGIN_USER=a b" 2>/dev/null
+
+echo "== домен sensing-camera: файл не исполняется =="
+new_root; stage sensing-gmsl2-camera
+check "conf_init sensing-camera" env SENSING_BOOST_CLOCK=0 \
+    bash -c 'set -euo pipefail; source "$1/lib/bisquite-conf"; conf_init sensing-camera "$1/knobs" --env' _ "$STAGED"
+ln -sfn "$STAGED/bisquite-sensing-camera-ctl" "$ROOT/ctl"
+check "ctl через ссылку читает ручку" grep -q 'частоты не трогаю' <<< "$(bash "$ROOT/ctl" --boost-clock 2>&1)"
+printf 'SENSING_BOOST_CLOCK=$(touch %s/pwned)\n' "$ROOT" >> "$(cfg sensing-camera)"
+bash "$ROOT/ctl" --boost-clock >/dev/null 2>&1; rc=$?
+check "ctl: неверное значение — отказ" test "$rc" -ne 0
+check_not "ctl: \$(…) не исполнен" test -e "$ROOT/pwned"
+
+echo "== домен code-server: YAML -> KEY=VALUE =="
+new_root; stage code-server
+mkdir -p "$ROOT/etc/bisquite/code-server"
+printf 'USER:\nPASSWORD: none\nPORT: 9002\n# comment\nBIND: 127.0.0.1\nVERSION: 4.135.0\n' > "$ROOT/etc/bisquite/code-server/config.yaml"
+map="$(yaml_map)"
+check "карта миграции найдена в install.sh" test -n "$map"
+check "миграция config.yaml code-server" env CODE_SERVER_PORT=9003 \
+    bash -c 'set -euo pipefail; source "$1/lib/bisquite-conf"; conf_init code-server "$1/knobs" --env --migrate-yaml "$2" 2>/dev/null' _ "$STAGED" "$map"
+eq "BIND перенесён" 127.0.0.1 "$(lib conf_get code-server CODE_SERVER_BIND)"
+eq "параметр VMFILE поверх перенесённого" 9003 "$(lib conf_get code-server CODE_SERVER_PORT)"
+eq "PASSWORD none перенесён" none "$(lib conf_get code-server CODE_SERVER_PASSWORD)"
+check_not "config.yaml code-server удалён" test -e "$ROOT/etc/bisquite/code-server/config.yaml"
+check_not "версия сборки не попала в файл устройства" grep -q CODE_SERVER_VERSION "$(cfg code-server)"
+check "teleport-app.sh code-server" bash "$STAGED/teleport-app.sh" 2>/dev/null
+eq "объявление code-server с портом" "URI=https://127.0.0.1:9003" "$(grep URI "$ROOT/etc/bisquite/teleport/apps.d/code-server.conf")"
+
+echo "== домен kiosk: YAML -> KEY=VALUE =="
+new_root; stage kiosk
+mkdir -p "$ROOT/etc/bisquite/kiosk"
+cat > "$ROOT/etc/bisquite/kiosk/config.yaml" <<'EOF'
+USER:
+URL: "http://192.168.202.78"       # URL для отображения в киоске
+DISPLAY: ":0"                      # X Display для Chromium
+KEYBOARD_ENABLED: true             # Экранная клавиатура — ТОЛЬКО под GNOME
+CHROMIUM_FLAGS: "--disable-pinch --overscroll-history-navigation=0"
+EOF
+map="$(yaml_map)"
+check "миграция config.yaml kiosk" \
+    bash -c 'set -euo pipefail; source "$1/lib/bisquite-conf"; conf_init kiosk "$1/knobs" --env --migrate-yaml "$2" 2>/dev/null' _ "$STAGED" "$map"
+eq "URL перенесён" http://192.168.202.78 "$(lib conf_get kiosk KIOSK_URL)"
+eq "флаги с пробелом перенесены" "--disable-pinch --overscroll-history-navigation=0" "$(lib conf_get kiosk KIOSK_CHROMIUM_FLAGS)"
+
+echo "== домен chromium-kiosk: YAML пакета из ручек =="
+new_root; stage chromium-kiosk
+mkdir -p "$ROOT/etc/bisquite/chromium-kiosk"
+cat > "$ROOT/etc/bisquite/chromium-kiosk/config.yaml" <<'EOF'
+WINDOW_MODE: 'fullscreen' # In what mode to run
+TOUCHSCREEN: true # Enables support for touchscreen
+HOME_PAGE: 'http://localhost/'
+IDLE_TIME: 0 # Seconds
+WHITE_LIST:
+  ENABLED: true  # is white list enabled
+  URLS:   # List of whitelisted urls
+    - https://kiosk.local/*
+    - '*.example.org'
+  IFRAME_ENABLED: true
+NAV_BAR:
+  ENABLED: false # is nav bar enabled
+  ENABLED_BUTTONS: ['home', 'reload', 'back', 'forward'] # order matters
+  WIDTH: 100 # Width of a bar in %
+VIRTUAL_KEYBOARD:
+  ENABLED: true
+DISPLAY_ROTATION: 'right'
+#SCREEN_ROTATION: 'normal'  #Rotates screen individually
+EXTRA_ARGUMENTS: "--disable-pinch --overscroll-history-navigation=0" # Pass extra arguments
+ALLOWED_FEATURES:
+#  - geolocation  # Allows geolocation
+  - invalid-certificate  # Ignores invalid certificate
+CURSOR:
+    ENABLED: false  # Cursor enabled by default
+EOF
+map="$(yaml_map)"
+check "миграция config.yaml chromium-kiosk" \
+    bash -c 'set -euo pipefail; source "$1/lib/bisquite-conf"; conf_init chromium-kiosk "$1/knobs" --migrate-yaml "$2" 2>/dev/null' _ "$STAGED" "$map"
+eq "HOME_PAGE перенесён" http://localhost/ "$(lib conf_get chromium-kiosk CHROMIUM_KIOSK_HOME_PAGE)"
+eq "кнопки перенесены" home,reload,back,forward "$(lib conf_get chromium-kiosk CHROMIUM_KIOSK_NAV_BAR_BUTTONS)"
+eq "поворот перенесён" right "$(lib conf_get chromium-kiosk CHROMIUM_KIOSK_DISPLAY_ROTATION)"
+eq "блочный список адресов перенесён" "https://kiosk.local/*,*.example.org" "$(lib conf_get chromium-kiosk CHROMIUM_KIOSK_WHITE_LIST_URLS)"
+eq "блочный список возможностей перенесён" invalid-certificate "$(lib conf_get chromium-kiosk CHROMIUM_KIOSK_ALLOWED_FEATURES)"
+check "флаги chromium-kiosk можно очистить" lib conf_validate chromium-kiosk CHROMIUM_KIOSK_EXTRA_ARGUMENTS=
+lib conf_set chromium-kiosk "CHROMIUM_KIOSK_HOME_PAGE=http://kiosk.local/it's" CHROMIUM_KIOSK_ALLOWED_FEATURES=geolocation,mouse-lock
+check "configure.sh собирает config.yml" bash "$STAGED/configure.sh" 2>/dev/null
+if python3 -c 'import yaml' 2>/dev/null; then
+    parsed="$(python3 - "$ROOT/etc/chromium-kiosk/config.yml" <<'EOF'
+import sys, yaml
+c = yaml.safe_load(open(sys.argv[1]))
+print(c["HOME_PAGE"], c["DISPLAY_ROTATION"], ",".join(c["ALLOWED_FEATURES"]),
+      ",".join(c["NAV_BAR"]["ENABLED_BUTTONS"]), ",".join(c["WHITE_LIST"]["URLS"]), c["TOUCHSCREEN"], sep="|")
+EOF
+)"
+    eq "config.yml разбирается YAML и несёт ручки" "http://kiosk.local/it's|right|geolocation,mouse-lock|home,reload,back,forward|https://kiosk.local/*,*.example.org|True" "$parsed"
+fi
 
 echo
 echo "проверок: $((pass + fail)), не прошло: $fail"

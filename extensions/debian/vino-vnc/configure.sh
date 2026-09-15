@@ -35,21 +35,18 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} vino-vnc: $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-ENV_FILE=/etc/bisquite/vino/config
 DESKTOP_SRC=/usr/share/applications/vino-server.desktop
 
-# Умолчания те же, что в install.sh. Файла может не быть, если расширение
-# подключили не целиком, — тогда работаем на умолчаниях, а не падаем.
-VINO_PORT=5900
-VINO_LISTEN=localhost
-VINO_ENCRYPTION=false
-VINO_PASSWORD_FILE=""
-if [[ -f "$ENV_FILE" ]]; then
-    # shellcheck source=/dev/null
-    source "$ENV_FILE"
-else
-    log_warn "нет $ENV_FILE — беру умолчания"
+# Параметры — через библиотеку bisquite-conf, а НЕ `source`: файл правится
+# руками и из firstboot-команд, и исполнять его значило бы исполнить от root
+# всё, что туда попало (`VINO_PORT=$(…)`). Нет файла — умолчания схемы.
+if [[ ! -f "$SCRIPT_DIR/lib/bisquite-conf" ]]; then
+    log_error "нет $SCRIPT_DIR/lib/bisquite-conf — сборка не доставила lib/ источника"
+    exit 1
 fi
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/bisquite-conf"
+conf_load vino || exit 1
 
 check_prereqs(){
     local missing=()

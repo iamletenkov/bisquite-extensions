@@ -20,13 +20,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #
 #   EXTENSION x11vnc X11VNC_PORT=5901 X11VNC_LISTEN=all
 #
-# Раньше на их месте лежал config.yaml, чьи ключи PORT/PASSWORD/DISPLAY
-# читались и НИГДЕ не использовались — юнит хардкодил свои значения, а README
-# обещал парольный доступ, которого не было. Файл удалён вместе с обещанием.
-X11VNC_PORT="${X11VNC_PORT:-5900}"
-X11VNC_DISPLAY="${X11VNC_DISPLAY:-:0}"
-X11VNC_PASSWORD="${X11VNC_PASSWORD:-}"
-X11VNC_LISTEN="${X11VNC_LISTEN:-localhost}"
+# Имена, типы и умолчания объявлены один раз — в схеме knobs рядом; пишет
+# их библиотека bisquite-conf. Умолчаний здесь НЕТ намеренно: присвоение
+# `X11VNC_PORT="${X11VNC_PORT:-5900}"` экспортированной переменной выглядело
+# бы для conf_init --env как явный параметр VMFILE и затирало бы правку
+# оператора при повторной установке.
+[[ -f "$SCRIPT_DIR/lib/bisquite-conf" ]] || { log_error "рядом нет lib/bisquite-conf — сборка не доставила lib/ источника"; exit 1; }
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/bisquite-conf"
 
 log_info "Installing x11vnc and dependencies..."
 
@@ -58,7 +59,7 @@ apt-get install -y \
 # /opt/bisquite абсолютным путём и после смены раскладки правятся вместе
 # с ней — но это правка одного файла, а не отказ конвейера.)
 for f in x11vnc@.service configure-x11vnc.service run-x11vnc.sh \
-         configure.sh lib/get_cloud_user.sh; do
+         configure.sh knobs knobs.secret knobs.apply lib/get_cloud_user.sh; do
   if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
     log_error "рядом нет $f — донастройка на первой загрузке не состоится,"
     log_error "а без неё x11vnc не запустится ни при каком параметре"
@@ -84,51 +85,22 @@ if [[ -e /etc/default/bisquite-x11vnc ]]; then
   log_info "удаляю /etc/default/bisquite-x11vnc: параметры теперь в /etc/bisquite/x11vnc/config"
   rm -f /etc/default/bisquite-x11vnc
 fi
-install -d -m 0755 /etc/bisquite/x11vnc
-{
-  echo "X11VNC_PORT=${X11VNC_PORT}"
-  echo "X11VNC_DISPLAY=${X11VNC_DISPLAY}"
-  echo "X11VNC_LISTEN=${X11VNC_LISTEN}"
-} > /etc/bisquite/x11vnc/config
 
-if [[ -n "$X11VNC_PASSWORD" ]]; then
-  # Файл пароля VNC, а не открытый пароль в окружении: у -rfbauth формат свой.
-  #
-  # Каталог остаётся 0755: пользователю, под которым работает сервер, нужно
-  # пройти сквозь него к файлу. Секрет закрывают права файла, а не каталога.
-  install -d -m 0755 /etc/x11vnc
-  if x11vnc -storepasswd "$X11VNC_PASSWORD" /etc/x11vnc/passwd >/dev/null 2>&1; then
-    # 0600, а не 0644. Формат `-rfbauth` — НЕ хеш: пароль в нём зашифрован
-    # обратимо (DES с фиксированным ключом), поэтому файл, читаемый всеми,
-    # отдаёт сам пароль любой локальной учётной записи. И отдаёт его ровно
-    # тогда, когда пароль задали, — то есть когда сервер выставлен в сеть.
-    # Соседний vino-vnc кладёт свой файл 0600 по тому же доводу
-    # (vino-vnc/install.sh, раздел про vnc-password).
-    #
-    # ВЛАДЕЛЬЦА файл получает не здесь, а на первой загрузке. Сервер работает
-    # юнитом `x11vnc@<пользователь>` с `User=%i`, то есть пароль читает НЕ
-    # root, а учётка, которой на сборке ещё не существует (её создаёт
-    # cloud-init). `chown` на найденного пользователя делает configure.sh.
-    # Без этой пары ужесточение прав ОТКРЫЛО БЫ рабочий стол вместо того,
-    # чтобы его закрыть: обёртка проверяет файл на читаемость и при отказе
-    # прежде поднимала сервер с `-nopw`.
-    chmod 0600 /etc/x11vnc/passwd
-    echo "X11VNC_PASSFILE=/etc/x11vnc/passwd" >> /etc/bisquite/x11vnc/config
-    log_info "пароль записан в /etc/x11vnc/passwd"
-  else
-    # Отказ, а не предупреждение: пароль просили, пароля не будет, а сервер
-    # без `X11VNC_PASSFILE` поднимается с `-nopw`. Собранный образ выглядел
-    # бы защищённым, а рабочий стол был бы открыт — узнать об этом можно
-    # только на устройстве.
-    log_error "не удалось записать файл пароля /etc/x11vnc/passwd"
-    log_error "пароль задан, значит сервер без него поднимать нельзя"
-    exit 1
-  fi
-fi
-chmod 0644 /etc/bisquite/x11vnc/config
+# Файл создаётся один раз и дальше не переписывается: недостающие ключи
+# дописываются, заданные остаются. Параметры VMFILE (--env) ложатся поверх
+# через проверку схемы — опечатка `X11VNC_LISTEN=al` роняет сборку здесь, а не
+# службу на устройстве.
+#
+# Пароль — ключ secret:hook: в файл он не попадает, хук knobs.secret делает из
+# него /etc/x11vnc/passwd (0600; владельца отдаёт configure.sh на первой
+# загрузке) и пишет X11VNC_PASSFILE. Отказ хука — отказ сборки: пароль
+# просили, а сервер без X11VNC_PASSFILE поднимается с -nopw — образ выглядел
+# бы защищённым, а рабочий стол был бы открыт.
+conf_init x11vnc "$SCRIPT_DIR/knobs" --env || { log_error "/etc/bisquite/x11vnc/config не записан"; exit 1; }
+conf_load x11vnc
 
-log_info "порт ${X11VNC_PORT}, дисплей ${X11VNC_DISPLAY}, слушает ${X11VNC_LISTEN}"
-if [[ "$X11VNC_LISTEN" != "localhost" && -z "$X11VNC_PASSWORD" ]]; then
+log_info "порт ${X11VNC_PORT}, дисплей ${X11VNC_DISPLAY}, слушает ${X11VNC_LISTEN}${X11VNC_PASSFILE:+, пароль в ${X11VNC_PASSFILE}}"
+if [[ "$X11VNC_LISTEN" != "localhost" && -z "$X11VNC_PASSFILE" ]]; then
   log_warn "X11VNC_LISTEN=${X11VNC_LISTEN} без пароля: рабочий стол будет открыт всей сети"
 fi
 

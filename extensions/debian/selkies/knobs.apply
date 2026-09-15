@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Apply hook of the selkies domain: refresh the Teleport declaration and
+# restart the enabled instances. Non-blocking: `bisquite-conf set` may run
+# inside cloud-final.
+set -uo pipefail
+dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+rc=0
+bash "$dir/teleport-app.sh" || rc=1
+shopt -s nullglob
+for unit in "${BISQUITE_CONF_ROOT:-}"/etc/systemd/system/graphical.target.wants/selkies@*.service; do
+    systemctl --no-block restart "${unit##*/}" || rc=1
+    >&2 echo "selkies: перезапуск ${unit##*/} поставлен в очередь"
+done
+exit "$rc"

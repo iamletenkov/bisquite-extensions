@@ -1,0 +1,9 @@
+# Настройки x11vnc — /etc/bisquite/x11vnc/config. Читает юнит x11vnc@.service
+# (EnvironmentFile) и обёртка run-x11vnc.sh.
+#
+# ключ             тип                        умолчание  описание
+X11VNC_PORT        port                       5900       порт RFB
+X11VNC_DISPLAY     re:^:[0-9]+(\.[0-9]+)?$    :0         X-дисплей
+X11VNC_LISTEN      enum:localhost,all         localhost  localhost — только петля (доступ ssh-туннелем), all — все интерфейсы
+X11VNC_PASSWORD    secret:hook                —          пароль VNC; в файл не пишется — хук кладёт /etc/x11vnc/passwd (-rfbauth); пусто — снять пароль
+X11VNC_PASSFILE    ro:path                    —          файл пароля для -rfbauth; пишет хук X11VNC_PASSWORD, пусто — сервер без пароля

@@ -1,0 +1,10 @@
+# Ручки рабочего стола — /etc/bisquite/desktop/config. Схема общая для gnome,
+# xfce4, lxde и cloud-user-desktop: её регистрирует `bisquite-desktop install`.
+# Применяет bisquite-desktop.service на каждой загрузке до менеджера входа;
+# на работающей машине — хук desktop.apply (`bisquite-desktop set`).
+#
+# ключ                          тип                      умолчание  описание
+DESKTOP_AUTOLOGIN               bool                     0          1 — вход без пароля
+DESKTOP_AUTOLOGIN_USER          re:^[a-z_][a-z0-9_-]*$   —          имя пользователя автологина; пусто — пользователь cloud-init
+DESKTOP_DISABLE_SCREEN_LOCK     bool                     0          1 — без автоблокировки (вручную заблокировать можно)
+DESKTOP_DISABLE_SCREEN_BLANK    bool                     0          1 — без затемнения, гашения, DPMS и сна

@@ -8,17 +8,23 @@
 # Зовут его юниты, а не человек: bisquite-sensing-camera@videoN.service
 # (по правилу udev, на появление узла) и bisquite-sensing-clock.service.
 #
-# Настройка — /etc/bisquite/sensing-camera/config. Правка применяется
-# перезапуском юнитов, перезагрузка не нужна; режим GMSL живёт отдельно,
+# Настройка — /etc/bisquite/sensing-camera/config, домен sensing-camera
+# библиотеки bisquite-conf. Правка — `bisquite-conf set sensing-camera …`, её
+# хук перезапускает юниты, перезагрузка не нужна; режим GMSL живёт отдельно,
 # в /etc/modprobe.d/bisquite-sensing-gmsl2.conf, потому что это параметр
 # модуля, и меняется только его перезагрузкой.
 set -uo pipefail
 
-CONF=/etc/bisquite/sensing-camera/config
-SENSING_CAMERA_CONTROLS="sensor_mode=1,trig_mode=0,trig_pin=0x00020007"
-SENSING_BOOST_CLOCK=1
+# Не `. "$CONF"`: файл правится руками и командами первой загрузки, а этот
+# скрипт работает от root на каждое появление узла — исполнять файл значило бы
+# исполнять всё, что туда попало. /usr/local/sbin/bisquite-sensing-camera-ctl —
+# ссылка в каталог расширения; её разрешение находит lib/ той же сборки.
+SELF_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 # shellcheck source=/dev/null
-[[ -r "$CONF" ]] && . "$CONF"
+source "$SELF_DIR/lib/bisquite-conf" || exit 1
+conf_load sensing-camera || exit 1
+# A hand edit is checked before it reaches v4l2-ctl.
+conf_check sensing-camera || exit 1
 
 case "${1:-}" in
     --boost-clock)

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Apply hook of the chromium-kiosk domain: regenerate /etc/chromium-kiosk/config.yml;
+# the package's config watcher picks it up. Non-blocking: `bisquite-conf set`
+# may run inside cloud-final.
+set -uo pipefail
+systemctl --no-block restart configure-chromium-kiosk.service
+>&2 echo "chromium-kiosk: пересборка /etc/chromium-kiosk/config.yml поставлена в очередь"

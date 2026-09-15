@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Apply hook of the kiosk domain: configure-kiosk re-reads the settings and
+# restarts the browser. Non-blocking: `bisquite-conf set` may run inside
+# cloud-final.
+set -uo pipefail
+systemctl --no-block restart configure-kiosk.service
+>&2 echo "kiosk: перенастройка поставлена в очередь (journalctl -u configure-kiosk)"

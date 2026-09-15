@@ -27,7 +27,6 @@ declare -A APPIMAGE_SHA256=(
     [aarch64]="a1abb4658c3117188afa6881eaab93a24c172a5db5c0cbb18889c43c60e59043"
 )
 PREFIX="/opt/selkies/${SELKIES_VERSION}"
-CONF=/etc/bisquite/selkies/config
 
 case "$(dpkg --print-architecture)" in
     amd64) APPARCH=x86_64 ;;
@@ -35,21 +34,21 @@ case "$(dpkg --print-architecture)" in
     *) log_error "архитектура $(dpkg --print-architecture) — AppImage Selkies только для amd64 и arm64"; exit 1 ;;
 esac
 
-for f in selkies@.service configure-selkies.service run-selkies.sh configure.sh lib/get_cloud_user.sh; do
+for f in selkies@.service configure-selkies.service run-selkies.sh configure.sh \
+         knobs knobs.apply teleport-app.sh lib/get_cloud_user.sh lib/bisquite-conf; do
     if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
         log_error "рядом нет $f — Selkies на устройстве не запустится"
         exit 1
     fi
 done
 
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/bisquite-conf"
+
 # --- Умолчания для робота -----------------------------------------------------
 #
-# Имена — родные переменные Selkies (`selkies --help`, «Env:»): юнит читает
-# файл как EnvironmentFile, и Selkies берёт их сам. Любую `SELKIES_*`,
-# переданную параметром расширения, дописываем поверх умолчаний — отдельного
-# словаря bisquite поверх Selkies нет.
-#
-# Каждое умолчание — ответ на конкретное свойство робота:
+# Объявлены в схеме knobs рядом, вместе с типами. Каждое умолчание — ответ на
+# конкретное свойство робота:
 #   ADDR 127.0.0.1         снаружи — через Teleport или ssh-туннель
 #   ENABLE_BASIC_AUTH      аутентификацию делает Teleport; на петле пароль ничего
 #   false                  не добавляет (открыть наружу без него обёртка не даст)
@@ -58,37 +57,15 @@ done
 #   MICROPHONE false
 #   COMMAND_ENABLED false  API выполнения команд
 #   ENABLE_SHARING false   ссылки для просмотра другими
+#   FILE_TRANSFERS         передача файлов в обе стороны; каталог — ~/Downloads
+#   upload,download        пользователя, его ставит обёртка
 #
 # BISQUITE_SELKIES_ALLOW_NO_AUTH — не переменная Selkies, а ручка обёртки:
 # true снимает отказ стартовать на адресе не петли без basic auth. Решение
 # «рабочий стол любому в сети» принимается явно, в VMFILE или манифесте.
-#   FILE_TRANSFERS         передача файлов в обе стороны; каталог — ~/Downloads
-#   upload,download        пользователя, его ставит обёртка
-declare -A DEFAULTS=(
-    [SELKIES_ADDR]="127.0.0.1"
-    [SELKIES_PORT]="8080"
-    [SELKIES_MODE]="websockets"
-    [SELKIES_ENABLE_DUAL_MODE]="false"
-    [SELKIES_ENABLE_HTTPS]="false"
-    [SELKIES_ENABLE_BASIC_AUTH]="false"
-    [SELKIES_ENABLE_RESIZE]="false"
-    [SELKIES_ENCODER]="h264enc"
-    [SELKIES_FRAMERATE]="30,8-60"
-    [SELKIES_AUDIO_ENABLED]="true"
-    [SELKIES_MICROPHONE_ENABLED]="false"
-    [SELKIES_GAMEPAD_ENABLED]="false"
-    [SELKIES_WEBCAM_ENABLED]="false"
-    [SELKIES_ENABLE_CLIPBOARD]="true"
-    [SELKIES_FILE_TRANSFERS]="upload,download"
-    [SELKIES_COMMAND_ENABLED]="false"
-    [SELKIES_ENABLE_SHARING]="false"
-    [SELKIES_SECOND_SCREEN]="false"
-    [SELKIES_UI_SIDEBAR_SHOW_GAMEPADS]="false"
-    [SELKIES_UI_SIDEBAR_SHOW_WEBCAM]="false"
-    [SELKIES_UI_SIDEBAR_SHOW_SHARING]="false"
-    [SELKIES_UI_SIDEBAR_SHOW_APPS]="false"
-    [BISQUITE_SELKIES_ALLOW_NO_AUTH]="false"
-)
+#
+# Любая `SELKIES_*`, переданная параметром расширения, ложится поверх
+# (шаблон SELKIES_* в схеме) — отдельного словаря bisquite поверх Selkies нет.
 
 # --- AppImage -----------------------------------------------------------------
 URL="https://github.com/selkies-project/selkies/releases/download/v${SELKIES_VERSION}/selkies-${SELKIES_VERSION}-${APPARCH}.AppImage"
@@ -122,42 +99,27 @@ ln -sfn "$PREFIX" /opt/selkies/current
 apt-get install -y -q x11-utils xauth >/dev/null || { log_error "x11-utils не поставился"; exit 1; }
 
 # --- /etc/bisquite/selkies/config ---------------------------------------------
-declare -A VALUES=()
-for k in "${!DEFAULTS[@]}"; do VALUES[$k]="${DEFAULTS[$k]}"; done
-while IFS='=' read -r k v; do
-    [[ "$k" =~ ^(SELKIES|BISQUITE_SELKIES)_[A-Z0-9_]+$ ]] || continue
-    VALUES[$k]="$v"
-done < <(env)
 # The file moved from /etc/default/bisquite-selkies in 2.0.0. The old path is
 # not read as a fallback; remove it so the image has one source of truth.
 if [[ -e /etc/default/bisquite-selkies ]]; then
-    log_info "удаляю /etc/default/bisquite-selkies: параметры теперь в $CONF"
+    log_info "удаляю /etc/default/bisquite-selkies: параметры теперь в /etc/bisquite/selkies/config"
     rm -f /etc/default/bisquite-selkies
 fi
-install -d -m 0755 "$(dirname "$CONF")"
-# 0600 before the first byte: SELKIES_BASIC_AUTH_PASSWORD may land here.
-install -m 0600 /dev/null "$CONF"
-{
-    echo "# Положено расширением selkies. Имена — переменные Selkies (selkies --help)."
-    echo "# После правки: sudo systemctl restart 'selkies@*'"
-    for k in $(printf '%s\n' "${!VALUES[@]}" | sort); do
-        v="${VALUES[$k]}"
-        if [[ "$v" == *$'\n'* ]]; then log_error "$k: перевод строки в значении"; exit 1; fi
-        printf '%s=%s\n' "$k" "$v"
-    done
-} > "$CONF"
-# Читает файл systemd (EnvironmentFile), а не пользователь.
-chmod 0600 "$CONF"
+# Создаётся один раз и не переписывается: повторная установка оставляет
+# правки `bisquite-conf set selkies …`; параметры VMFILE — поверх, через
+# проверку схемы. 0600 — в файле бывают пароли basic auth.
+conf_init selkies "$SCRIPT_DIR/knobs" --env || { log_error "/etc/bisquite/selkies/config не записан"; exit 1; }
+conf_load selkies
 
-addr="${VALUES[SELKIES_ADDR]}"
-auth="${VALUES[SELKIES_ENABLE_BASIC_AUTH]}"
-log_info "адрес ${addr}:${VALUES[SELKIES_PORT]}, basic auth ${auth}, файлы ${VALUES[SELKIES_FILE_TRANSFERS]}, буфер ${VALUES[SELKIES_ENABLE_CLIPBOARD]}"
+addr="$SELKIES_ADDR"
+auth="$SELKIES_ENABLE_BASIC_AUTH"
+log_info "адрес ${addr}:${SELKIES_PORT}, basic auth ${auth}, файлы ${SELKIES_FILE_TRANSFERS}, буфер ${SELKIES_ENABLE_CLIPBOARD}"
 case "$addr" in
     127.0.0.1|::1|localhost|"127.0.0.1,::1") ;;
     *)
         if [[ "$auth" == true ]]; then
             :
-        elif [[ "${VALUES[BISQUITE_SELKIES_ALLOW_NO_AUTH]}" == true ]]; then
+        elif [[ "$BISQUITE_SELKIES_ALLOW_NO_AUTH" == true ]]; then
             log_warn "SELKIES_ADDR=$addr БЕЗ АУТЕНТИФИКАЦИИ (BISQUITE_SELKIES_ALLOW_NO_AUTH=true):"
             log_warn "  рабочий стол, буфер обмена и файлы — любому, кто достаёт до робота по сети"
         else
@@ -170,25 +132,14 @@ esac
 # --- Объявление для teleport-agent ---------------------------------------------
 #
 # Как у code-server: только NAME и URI на петле, кому видно — решает env ноды.
-# Без teleport-agent файл ничего не делает. Адрес 127.0.0.1 работает и при
-# SELKIES_ADDR=0.0.0.0; при адресе, не включающем петлю, объявлять нечего.
-scheme=http
-[[ "${VALUES[SELKIES_ENABLE_HTTPS]}" == true ]] && scheme=https
-case "$addr" in
-    127.0.0.1|localhost|0.0.0.0|"127.0.0.1,::1"|"")
-        install -d -m 0755 /etc/bisquite/teleport/apps.d
-        install -m 0644 /dev/null /etc/bisquite/teleport/apps.d/selkies.conf
-        printf 'NAME=selkies\nURI=%s://127.0.0.1:%s\n' "$scheme" "${VALUES[SELKIES_PORT]}" \
-            > /etc/bisquite/teleport/apps.d/selkies.conf
-        log_info "объявлен для Teleport: apps.d/selkies.conf (${scheme}://127.0.0.1:${VALUES[SELKIES_PORT]})"
-        ;;
-    *) rm -f /etc/bisquite/teleport/apps.d/selkies.conf ;;
-esac
+# Скрипт общий с хуком применения и первой загрузкой: сменённый порт доезжает
+# до объявления любым из трёх путей.
+bash "$SCRIPT_DIR/teleport-app.sh" || { log_error "объявление для Teleport не положено"; exit 1; }
 
 # --- Юниты ----------------------------------------------------------------------
 install -m 0644 "$SCRIPT_DIR/selkies@.service" /etc/systemd/system/selkies@.service
 install -m 0644 "$SCRIPT_DIR/configure-selkies.service" /etc/systemd/system/configure-selkies.service
-chmod +x "$SCRIPT_DIR/run-selkies.sh" "$SCRIPT_DIR/configure.sh"
+chmod +x "$SCRIPT_DIR/run-selkies.sh" "$SCRIPT_DIR/configure.sh" "$SCRIPT_DIR/teleport-app.sh"
 # Включение ссылкой: внутри virt-customize systemd не работает.
 install -d /etc/systemd/system/graphical.target.wants
 ln -sf /etc/systemd/system/configure-selkies.service \

@@ -48,7 +48,7 @@ if (( ! loopback )) && [[ "${SELKIES_ENABLE_BASIC_AUTH:-false}" != true ]]; then
     log_warn "SELKIES_ADDR=$addr без аутентификации (BISQUITE_SELKIES_ALLOW_NO_AUTH=true) — стол открыт всей сети"
   else
     log_error "SELKIES_ADDR=$addr не петля, а SELKIES_ENABLE_BASIC_AUTH не true — не запускаюсь"
-    log_error "задайте SELKIES_ENABLE_BASIC_AUTH=true и SELKIES_BASIC_AUTH_PASSWORD в /etc/bisquite/selkies/config"
+    log_error "задайте пароль: echo <пароль> | sudo bisquite-conf set selkies SELKIES_ENABLE_BASIC_AUTH=true SELKIES_BASIC_AUTH_PASSWORD=-"
     log_error "или откройте без пароля осознанно: BISQUITE_SELKIES_ALLOW_NO_AUTH=true"
     exit 1
   fi

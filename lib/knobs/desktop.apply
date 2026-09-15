@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Apply hook of the desktop domain: `bisquite-conf set desktop …` ends here.
+# Resolved through the link chain to lib/<sha256>/knobs/, so the CLI it calls
+# is bisquite-desktop of the same lib/ as this schema.
+set -uo pipefail
+lib="$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")"
+exec "$lib/bisquite-desktop" apply --set

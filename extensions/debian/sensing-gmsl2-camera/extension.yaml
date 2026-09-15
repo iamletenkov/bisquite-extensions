@@ -1,6 +1,8 @@
 name: sensing-gmsl2-camera
-version: 2.1.0
+version: 3.0.0
 layout: 2
+# 3.0.0: ручки — домен sensing-camera библиотеки bisquite-conf (схема knobs):
+#        bisquite-sensing-camera-ctl не исполняет файл (`.`) и ставится ссылкой.
 # 2.0.0: файл ручек переехал в /etc/bisquite/sensing-camera/config (был
 #        /etc/default/bisquite-sensing-camera; прежний не читается, установка удаляет).
 family: deb

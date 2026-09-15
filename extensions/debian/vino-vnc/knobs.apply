@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Apply hook of the vino domain: re-run the gsettings step for the user.
+# Non-blocking: `bisquite-conf set` may run inside cloud-final, and
+# configure-vino-vnc.service is ordered After=cloud-final.
+set -uo pipefail
+systemctl --no-block restart configure-vino-vnc.service
+>&2 echo "vino-vnc: перенос настроек в dconf поставлен в очередь (journalctl -u configure-vino-vnc)"

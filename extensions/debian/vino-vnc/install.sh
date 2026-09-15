@@ -12,8 +12,8 @@
 # месте лежал config.yaml, чьи ключи читались и нигде не использовались:
 # юнит хардкодил свои значения, а README обещал парольный доступ, которого
 # не было. Файл удалили вместе с обещанием. Здесь параметры приезжают из
-# VMFILE, install.sh кладёт их в /etc/bisquite/vino/config, а configure.sh
-# читает оттуда — единственный источник правды об их именах — этот файл.
+# VMFILE, библиотека bisquite-conf кладёт их в /etc/bisquite/vino/config, а
+# configure.sh читает оттуда. Имена, типы и умолчания — схема knobs рядом.
 #
 # ПОЧЕМУ НАСТРОЙКА НЕ ЗДЕСЬ. `gsettings` пишет в dconf конкретного
 # пользователя, а автозапуск — в его домашний каталог. Пользователя создаёт
@@ -28,38 +28,40 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} vino-vnc: $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Умолчания объявлены здесь, и README обязан совпадать с этим местом.
-VINO_PORT="${VINO_PORT:-5900}"
-VINO_LISTEN="${VINO_LISTEN:-localhost}"
-VINO_PASSWORD="${VINO_PASSWORD:-}"
-VINO_ENCRYPTION="${VINO_ENCRYPTION:-false}"
-
 ENV_FILE=/etc/bisquite/vino/config
 # Path before 2.0.0. Not read as a fallback: removed below so the image never
 # carries two sources of truth.
 LEGACY_ENV_FILE=/etc/default/bisquite-vino
-PASS_FILE=/etc/vino/vnc-password.b64
 
-# --- Проверка параметров до установки ---------------------------------------
-#
-# Диапазон 5000–50000 взят не с потолка: он записан в описании ключа
-# `alternative-port` схемы org.gnome.Vino («Valid values are in the range of
-# 5000 to 50000»). Значение вне него vino молча не применит, и отказ вылез бы
-# на плате в виде «порт закрыт».
-if [[ ! "$VINO_PORT" =~ ^[0-9]+$ ]] || (( VINO_PORT < 5000 || VINO_PORT > 50000 )); then
-    log_error "VINO_PORT=${VINO_PORT} вне диапазона 5000–50000"
-    log_error "диапазон задан схемой org.gnome.Vino (ключ alternative-port)"
-    exit 1
-fi
-
-case "$VINO_ENCRYPTION" in
-    true|false) ;;
-    *)
-        log_error "VINO_ENCRYPTION=${VINO_ENCRYPTION}: допустимо только true или false"
-        log_error "значение уезжает в gsettings как булев ключ require-encryption"
+for f in knobs knobs.secret knobs.apply lib/bisquite-conf; do
+    if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
+        log_error "рядом нет $f — параметры vino записать нечем"
         exit 1
-        ;;
-esac
+    fi
+done
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/bisquite-conf"
+
+# --- Параметры: проверка и запись до установки ------------------------------
+#
+# Проверяет схема (knobs): диапазон порта 5000–50000 взят из описания ключа
+# `alternative-port` схемы org.gnome.Vino («Valid values are in the range of
+# 5000 to 50000») — значение вне него vino молча не применит, и отказ вылез бы
+# на плате в виде «порт закрыт»; VINO_ENCRYPTION уезжает в gsettings булевым
+# ключом require-encryption, поэтому только true или false. До apt: опечатка
+# видна за секунды, а хуку пароля пакет vino не нужен (только base64).
+#
+# Файл создаётся один раз и не переписывается — повторная установка оставляет
+# правки `bisquite-conf set vino …`. Пароль — ключ secret:hook: хук
+# knobs.secret кладёт его base64 в /etc/vino/vnc-password.b64 (0600) и пишет
+# VINO_PASSWORD_FILE; сам пароль в журнал не печатается — ни в открытом виде,
+# ни в base64.
+if [[ -e "$LEGACY_ENV_FILE" ]]; then
+    log_info "удаляю $LEGACY_ENV_FILE: параметры теперь в $ENV_FILE"
+    rm -f "$LEGACY_ENV_FILE"
+fi
+conf_init vino "$SCRIPT_DIR/knobs" --env || { log_error "$ENV_FILE не записан"; exit 1; }
+conf_load vino
 
 # --- Пакеты -----------------------------------------------------------------
 #
@@ -74,40 +76,6 @@ apt-get install -y \
     libglib2.0-bin \
     dbus || exit 1
 
-# --- Параметры для первой загрузки ------------------------------------------
-if [[ -e "$LEGACY_ENV_FILE" ]]; then
-    log_info "удаляю $LEGACY_ENV_FILE: параметры теперь в $ENV_FILE"
-    rm -f "$LEGACY_ENV_FILE"
-fi
-install -d -m 0755 "$(dirname "$ENV_FILE")"
-{
-    echo "VINO_PORT=${VINO_PORT}"
-    echo "VINO_LISTEN=${VINO_LISTEN}"
-    echo "VINO_ENCRYPTION=${VINO_ENCRYPTION}"
-} > "$ENV_FILE"
-chmod 0644 "$ENV_FILE"
-
-if [[ -n "$VINO_PASSWORD" ]]; then
-    # Ключ `vnc-password` схемы org.gnome.Vino хранит пароль в base64 —
-    # так написано в его описании. Кодируем здесь, чтобы configure.sh
-    # не занимался форматом, и держим отдельным файлом с правами 0600:
-    # base64 разворачивается тривиально, поэтому файл — секрет, а не
-    # «закодированное значение».
-    install -d -m 0700 /etc/vino
-    printf '%s' "$VINO_PASSWORD" | base64 -w0 > "$PASS_FILE"
-    chmod 0600 "$PASS_FILE"
-    echo "VINO_PASSWORD_FILE=${PASS_FILE}" >> "$ENV_FILE"
-    # Сам пароль в журнал не печатаем — ни в открытом виде, ни в base64.
-    log_info "пароль записан в ${PASS_FILE}"
-
-    if (( ${#VINO_PASSWORD} > 8 )); then
-        # Аутентификация VNC (RFB, тип 2) кладёт в ключ DES ровно 8 байт,
-        # остальное отбрасывается. Двадцатисимвольный пароль здесь не
-        # сильнее восьмисимвольного, и знать это надо до, а не после.
-        log_warn "пароль длиннее 8 символов: VNC-аутентификация использует только первые 8"
-    fi
-fi
-
 # --- Предупреждения о доступе -----------------------------------------------
 log_info "порт ${VINO_PORT}, слушает ${VINO_LISTEN}, шифрование ${VINO_ENCRYPTION}"
 
@@ -115,7 +83,7 @@ if [[ "$VINO_LISTEN" == "localhost" ]]; then
     log_info "наружу порт не выставлен; доступ — SSH-туннелем"
 else
     log_warn "VINO_LISTEN=${VINO_LISTEN}: сервер будет слушать ВСЕ интерфейсы"
-    if [[ -z "$VINO_PASSWORD" ]]; then
+    if [[ -z "$VINO_PASSWORD_FILE" ]]; then
         log_warn "и БЕЗ ПАРОЛЯ — рабочий стол получит кто угодно в этой сети,"
         log_warn "с правами вошедшего пользователя и без следа в журнале"
     fi

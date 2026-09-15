@@ -3,16 +3,20 @@
 #
 #   bisquite-desktop set KEY=VALUE…       записать ручку и применить, если можно
 #   bisquite-desktop apply [--boot|--now] применить то, что записано
-#   bisquite-desktop defaults [KEY=VALUE…] завести файл ручек (сборка образа)
+#   bisquite-desktop defaults [KEY=VALUE…] записать ручки, не применяя
 #   bisquite-desktop status               показать ручки и что из них применено
 #   bisquite-desktop install <каталог>    поставить CLI и службу (install.sh расширения)
 #
-# Ручки — /etc/bisquite/desktop/config, все булевы и по умолчанию 0:
+# Ручки — /etc/bisquite/desktop/config, домен `desktop` библиотеки
+# bisquite-conf; схема (ключи, типы, умолчания) — lib/knobs/desktop:
 #
 #   DESKTOP_AUTOLOGIN=0             1 — вход без пароля
 #   DESKTOP_AUTOLOGIN_USER=         пусто — пользователь cloud-init
 #   DESKTOP_DISABLE_SCREEN_LOCK=0   1 — без автоблокировки (вручную — можно)
 #   DESKTOP_DISABLE_SCREEN_BLANK=0  1 — без затемнения, гашения, DPMS и сна
+#
+# `bisquite-desktop set` — то же, что `bisquite-conf set --apply desktop`:
+# хук desktop.apply применяет сразу, если менеджер входа уже работает.
 #
 # КТО ПРИМЕНЯЕТ. bisquite-desktop.service зовёт `apply --boot` на каждой
 # загрузке ДО менеджера входа; `set` на работающей машине применяет сразу.
@@ -33,8 +37,10 @@ LIBDIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 # Before layout 2 install copied the CLI's helper here. Not read as a fallback:
 # install removes it so a base image built earlier leaves no stale copy behind.
 LEGACY_LIBDIR=/usr/local/lib/bisquite-desktop
-KEYS=(DESKTOP_AUTOLOGIN DESKTOP_AUTOLOGIN_USER DESKTOP_DISABLE_SCREEN_LOCK DESKTOP_DISABLE_SCREEN_BLANK)
-BOOL_KEYS=(DESKTOP_AUTOLOGIN DESKTOP_DISABLE_SCREEN_LOCK DESKTOP_DISABLE_SCREEN_BLANK)
+# The settings library of the same lib/: parsing, validation and writing of
+# the knob file live there, not here.
+# shellcheck source=/dev/null
+source "$LIBDIR/bisquite-conf"
 
 # Файлы, которыми владеет этот скрипт. Выключенная ручка = файла нет:
 # тогда действует поведение ОС, а не наше «выключено».
@@ -52,63 +58,10 @@ log(){ >&2 echo "bisquite-desktop: $*"; }
 die(){ log "ОШИБКА: $*"; exit 1; }
 
 # ---------------------------------------------------------------------------
-# Файл ручек. Не `source`: файл правится руками и из firstboot-команд,
-# и исполнять его как shell значило бы исполнить всё, что туда попало.
+# Файл ручек — через bisquite-conf: без `source`, со схемой lib/knobs/desktop.
 # ---------------------------------------------------------------------------
 load_conf(){
-    DESKTOP_AUTOLOGIN=0; DESKTOP_AUTOLOGIN_USER=""
-    DESKTOP_DISABLE_SCREEN_LOCK=0; DESKTOP_DISABLE_SCREEN_BLANK=0
-    [[ -r "$CONF" ]] || return 0
-    local line key val
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        [[ "$line" =~ ^[[:space:]]*(DESKTOP_[A-Z_]+)=(.*)$ ]] || continue
-        key="${BASH_REMATCH[1]}"; val="${BASH_REMATCH[2]}"
-        val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
-        case "$key" in
-            DESKTOP_AUTOLOGIN|DESKTOP_AUTOLOGIN_USER|DESKTOP_DISABLE_SCREEN_LOCK|DESKTOP_DISABLE_SCREEN_BLANK)
-                printf -v "$key" '%s' "$val" ;;
-        esac
-    done < "$CONF"
-}
-
-is_bool_key(){ local k; for k in "${BOOL_KEYS[@]}"; do [[ "$1" == "$k" ]] && return 0; done; return 1; }
-is_key(){ local k; for k in "${KEYS[@]}"; do [[ "$1" == "$k" ]] && return 0; done; return 1; }
-
-validate_pair(){
-    local pair="$1" key val
-    [[ "$pair" == *=* ]] || die "ожидали KEY=VALUE, получили '$pair'"
-    key="${pair%%=*}"; val="${pair#*=}"
-    is_key "$key" || die "неизвестная ручка '$key' (есть: ${KEYS[*]})"
-    if is_bool_key "$key"; then
-        [[ "$val" == 0 || "$val" == 1 ]] || die "$key='$val': только 0 или 1"
-    elif [[ -n "$val" && ! "$val" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
-        die "$key='$val': не похоже на имя пользователя"
-    fi
-}
-
-write_conf_pair(){
-    local key="$1" val="$2"
-    if grep -qE "^[[:space:]]*${key}=" "$CONF" 2>/dev/null; then
-        sed -i -E "s|^[[:space:]]*${key}=.*|${key}=${val}|" "$CONF"
-    else
-        printf '%s=%s\n' "$key" "$val" >> "$CONF"
-    fi
-}
-
-ensure_conf_file(){
-    [[ -f "$CONF" ]] && return 0
-    install -d -m 0755 "$(dirname "$CONF")"
-    install -m 0644 /dev/null "$CONF"
-    cat > "$CONF" <<'EOF'
-# Ручки рабочего стола. Положено расширением рабочего стола bisquite.
-# Все 0/1, по умолчанию 0. Менять командой, она же применяет:
-#   sudo bisquite-desktop set DESKTOP_AUTOLOGIN=1 DESKTOP_DISABLE_SCREEN_LOCK=1 DESKTOP_DISABLE_SCREEN_BLANK=1
-DESKTOP_AUTOLOGIN=0
-# Пусто — пользователь cloud-init.
-DESKTOP_AUTOLOGIN_USER=
-DESKTOP_DISABLE_SCREEN_LOCK=0
-DESKTOP_DISABLE_SCREEN_BLANK=0
-EOF
+    conf_load desktop || die "ручки $CONF не прочитаны"
 }
 
 # ---------------------------------------------------------------------------
@@ -466,17 +419,23 @@ cmd_apply(){
         return 0
     fi
     log "перезапускаю $dm, чтобы автологин применился сейчас"
-    systemctl restart "$dm.service" || log "$dm не перезапустился"
+    # --no-block: `set` бывает внутри cloud-final и guestfs-firstboot, а
+    # блокирующий перезапуск оттуда — взаимная блокировка (валидатор хуков).
+    systemctl --no-block restart "$dm.service" || log "$dm не перезапустился"
 }
 
+# `set` — проверка и запись библиотекой, применение — хуком desktop.apply,
+# то есть `apply --set` ниже. --apply: хук зовётся и во время загрузки, как
+# это делал `set` до библиотеки; сам хук безопасен — он смотрит, работает ли
+# менеджер входа, и перезапускает его без ожидания.
 cmd_set(){
     (( $# )) || die "set: нужен хотя бы один KEY=VALUE"
-    local pair
-    for pair in "$@"; do validate_pair "$pair"; done
-    ensure_conf_file
-    for pair in "$@"; do write_conf_pair "${pair%%=*}" "${pair#*=}"; done
-    # Менеджер входа ещё не запущен (FIRSTBOOT_COMMAND, compose) — применит
-    # bisquite-desktop.service перед его стартом, и пользователя он дождётся.
+    conf_cli_set --apply desktop "$@" || exit 1
+}
+
+# Хук применения: менеджер входа ещё не запущен (FIRSTBOOT_COMMAND, compose) —
+# применит bisquite-desktop.service перед его стартом, и пользователя он дождётся.
+cmd_apply_set(){
     if active_dm >/dev/null; then
         cmd_apply --now
     else
@@ -526,8 +485,8 @@ EOF
 # стола перенаправляет ссылку на свой lib/; ручки в /etc/bisquite/desktop
 # при этом не трогаются.
 # Умолчания ручек — из переменных окружения DESKTOP_*, если заданы
-# (`EXTENSION gnome DESKTOP_AUTOLOGIN=1`); не заданные не трогаются, чтобы
-# второе расширение рабочего стола не сбросило то, что задало первое.
+# (`EXTENSION gnome DESKTOP_AUTOLOGIN=1`): conf_init --env берёт только ключи
+# схемы и только экспортированные, прочие ключи файла не трогает.
 cmd_install(){
     local src="${1:-}" k pairs=()
     [[ -d "$src" ]] || die "install: нужен каталог расширения"
@@ -535,6 +494,7 @@ cmd_install(){
     [[ "$src" == /* ]] || die "install: путь каталога расширения должен быть абсолютным: '$src'"
     [[ -x "$src/lib/bisquite-desktop" ]] || die "install: нет $src/lib/bisquite-desktop — сборка не доставила lib/ источника"
     [[ -x "$src/lib/get_cloud_user.sh" ]] || die "install: нет $src/lib/get_cloud_user.sh — сборка не доставила lib/ источника"
+    [[ -f "$src/lib/knobs/desktop" ]] || die "install: нет $src/lib/knobs/desktop — сборка не доставила lib/ источника"
     if [[ -e "$LEGACY_CONF" ]]; then
         log "удаляю $LEGACY_CONF: ручки теперь в $CONF, прежний файл не читается"
         rm -f "$LEGACY_CONF"
@@ -550,24 +510,25 @@ cmd_install(){
     write_unit
     install -d /etc/systemd/system/graphical.target.wants
     ln -sf /etc/systemd/system/bisquite-desktop.service /etc/systemd/system/graphical.target.wants/bisquite-desktop.service
-    for k in "${KEYS[@]}"; do
-        [[ -n "${!k+x}" ]] && pairs+=("$k=${!k}")
-    done
-    cmd_defaults "${pairs[@]}"
-    log "установлен; ручки: $(grep -E '^DESKTOP_' "$CONF" | paste -sd' ')"
+    # Схема и хук регистрируются через каталог расширения, как и сам CLI.
+    # Файл ручек не перезаписывается: недостающие ключи дописываются,
+    # заданные остаются — второе расширение рабочего стола не сбросит то,
+    # что задало первое, а повторная установка — правки оператора.
+    conf_init desktop "$src/lib/knobs/desktop" --env || die "ручки рабочего стола не записаны"
+    load_conf
+    for k in $(conf_keys desktop); do pairs+=("$k=${!k}"); done
+    log "установлен; ручки: ${pairs[*]}"
 }
 
 cmd_defaults(){
-    local pair
-    for pair in "$@"; do validate_pair "$pair"; done
-    ensure_conf_file
-    for pair in "$@"; do write_conf_pair "${pair%%=*}" "${pair#*=}"; done
+    (( $# )) || return 0
+    conf_set desktop "$@" || exit 1
 }
 
 cmd_status(){
     load_conf
     local k
-    for k in "${KEYS[@]}"; do printf '%s=%s\n' "$k" "${!k}"; done
+    for k in $(conf_keys desktop); do printf '%s=%s\n' "$k" "${!k}"; done
     printf 'dconf блокировка: %s; dconf затемнение: %s; X DPMS: %s\n' \
         "$([[ -f $DCONF_LOCK ]] && echo да || echo нет)" \
         "$([[ -f $DCONF_BLANK ]] && echo да || echo нет)" \
@@ -576,9 +537,10 @@ cmd_status(){
 
 case "${1:-}" in
     set) shift; [[ $EUID -eq 0 ]] || die "нужен root"; cmd_set "$@" ;;
-    apply) shift; [[ $EUID -eq 0 ]] || die "нужен root"; cmd_apply "${1:---now}" ;;
+    apply) shift; [[ $EUID -eq 0 ]] || die "нужен root"
+        if [[ "${1:-}" == --set ]]; then cmd_apply_set; else cmd_apply "${1:---now}"; fi ;;
     defaults) shift; [[ $EUID -eq 0 ]] || die "нужен root"; cmd_defaults "$@" ;;
     install) shift; [[ $EUID -eq 0 ]] || die "нужен root"; cmd_install "$@" ;;
     status) cmd_status ;;
-    *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

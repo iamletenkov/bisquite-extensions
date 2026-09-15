@@ -1,0 +1,10 @@
+# Настройки vino — /etc/bisquite/vino/config. Читает configure.sh и переносит
+# в dconf пользователя через gsettings: на первой загрузке и хуком применения
+# (перезапуск configure-vino-vnc.service); vino в сессии подхватывает dconf сам.
+#
+# ключ                 тип                                       умолчание  описание
+VINO_PORT              re:^(5[0-9]{3}|[1-4][0-9]{4}|50000)$      5900       порт 5000–50000 (диапазон ключа alternative-port схемы org.gnome.Vino)
+VINO_LISTEN            enum:localhost,all                        localhost  localhost — только петля, all — все интерфейсы
+VINO_ENCRYPTION        enum:true,false                           false      require-encryption
+VINO_PASSWORD          secret:hook                               —          пароль VNC; в файл не пишется — хук кладёт /etc/vino/vnc-password.b64; пусто — снять пароль
+VINO_PASSWORD_FILE     ro:path                                   —          файл пароля в base64; пишет хук VINO_PASSWORD

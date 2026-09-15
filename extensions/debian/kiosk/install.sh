@@ -65,11 +65,11 @@ log_info "Chromium installed successfully"
 # каталога, куда его скопировали, поэтому $SCRIPT_DIR верен при любой
 # раскладке, и её смена не уронит все сборки разом.
 #
-# config.yaml и lib/get_cloud_user.sh в списке потому, что без них `configure.sh`
-# откажет на первой загрузке (его check_prereqs), — то есть их отсутствие
-# стоит ровно столько же, сколько отсутствие юнита.
+# knobs, lib/bisquite-conf и lib/get_cloud_user.sh в списке потому, что без
+# них `configure.sh` откажет на первой загрузке (его check_prereqs), — то есть
+# их отсутствие стоит ровно столько же, сколько отсутствие юнита.
 for f in configure-kiosk.service kiosk-chromium@.service run-kiosk.sh \
-         configure.sh config.yaml lib/get_cloud_user.sh; do
+         configure.sh knobs knobs.apply lib/get_cloud_user.sh lib/bisquite-conf; do
     if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
         log_error "рядом нет $f — настройка киоска на первой загрузке не состоится,"
         log_error "а без неё браузер не развернётся ни при какой конфигурации"
@@ -84,13 +84,21 @@ install -m 0644 "$SCRIPT_DIR/configure-kiosk.service" \
 install -m 0644 "$SCRIPT_DIR/kiosk-chromium@.service" \
     /etc/systemd/system/kiosk-chromium@.service
 
-# Настройки устройства — в /etc/bisquite/kiosk/config.yaml; config.yaml рядом
-# со скриптом — умолчания сборки. В /opt по FHS живёт код, а настройки держат
-# в /etc: их правят манифесты записи, их берут etckeeper и бэкапы. Файл
-# переписывается умолчаниями на каждой установке — свой config.yaml кладётся
-# UPLOAD-ом ПОСЛЕ `EXTENSION kiosk`. Секретов в нём нет, отсюда 0644.
-install -d -m 0755 /etc/bisquite/kiosk
-install -m 0644 "$SCRIPT_DIR/config.yaml" /etc/bisquite/kiosk/config.yaml
+# Настройки устройства — /etc/bisquite/kiosk/config, домен kiosk библиотеки
+# bisquite-conf (схема knobs рядом). В /opt по FHS живёт код, а настройки держат
+# в /etc: их правят манифесты записи (`bisquite-conf set kiosk …`), их берут
+# etckeeper и бэкапы. Файл создаётся один раз и не переписывается; параметры
+# VMFILE (`EXTENSION kiosk KIOSK_URL=…`) ложатся поверх через проверку схемы.
+# Прежний /etc/bisquite/kiosk/config.yaml (2.x) переносится один раз и
+# удаляется. Секретов в нём нет, отсюда 0644.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/bisquite-conf"
+conf_init kiosk "$SCRIPT_DIR/knobs" --env \
+    --migrate-yaml USER=KIOSK_USER,URL=KIOSK_URL,DISPLAY=KIOSK_DISPLAY,KEYBOARD_ENABLED=KIOSK_KEYBOARD_ENABLED,CHROMIUM_FLAGS=KIOSK_CHROMIUM_FLAGS \
+    || { log_error "/etc/bisquite/kiosk/config не записан"; exit 1; }
+# Before 3.0.0 configure.sh generated a second copy for the unit; the wrapper
+# reads the settings itself now.
+rm -f /var/lib/kiosk/config
 
 # Обёртка, которая ищет X authority в рантайме и запускает chromium. Юнит
 # зовёт её через `/bin/bash`, то есть бит исполнения ему не нужен; он нужен

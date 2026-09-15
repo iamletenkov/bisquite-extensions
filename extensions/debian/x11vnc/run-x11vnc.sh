@@ -65,9 +65,9 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} x11vnc: $*"; }
 USERNAME="${1:?usage: run-x11vnc.sh <user>}"
 UID_OF_USER="$(id -u "$USERNAME")"
 
-# Параметры приходят из EnvironmentFile, который пишет install.sh из
-# переменных окружения VMFILE. Умолчания те же, что были зашиты в юните,
-# кроме прослушиваемого адреса — см. ниже.
+# Параметры приходят из EnvironmentFile /etc/bisquite/x11vnc/config (домен
+# x11vnc библиотеки bisquite-conf, схема knobs). Умолчания здесь — последний
+# рубеж на случай отсутствующего файла и совпадают со схемой.
 PORT="${X11VNC_PORT:-5900}"
 DISPLAY_NUM="${X11VNC_DISPLAY:-:0}"
 PASSFILE="${X11VNC_PASSFILE:-}"

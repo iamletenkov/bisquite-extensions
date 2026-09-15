@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Apply hook of the x11vnc domain: restart the enabled server instances.
+# Non-blocking: `bisquite-conf set` may run inside cloud-final.
+set -uo pipefail
+shopt -s nullglob
+rc=0
+for unit in "${BISQUITE_CONF_ROOT:-}"/etc/systemd/system/graphical.target.wants/x11vnc@*.service; do
+    systemctl --no-block restart "${unit##*/}" || rc=1
+    >&2 echo "x11vnc: перезапуск ${unit##*/} поставлен в очередь"
+done
+exit "$rc"

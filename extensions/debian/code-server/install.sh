@@ -96,42 +96,19 @@ wget_with_retry() {
     return 1
 }
 
-# Функция получения версии из config.yaml
-get_version_from_config() {
-    # Путь от каталога СКРИПТА, а не от cwd.
-    #
-    # Инструкция `EXTENSION` запускает install.sh, НЕ меняя текущий каталог,
-    # поэтому относительное "config.yaml" не находилось никогда: закреплённая
-    # версия молча схлопывалась в latest, и два образа из одного VMFILE могли
-    # разойтись содержимым. Соседний configure.sh делает это правильно —
-    # через свой $SCRIPT_DIR.
-    local config_file="$SCRIPT_DIR/config.yaml"
-    local version=""
-
-    if [[ -f "$config_file" ]]; then
-        # Используем grep для поиска VERSION, так как yq может не быть установлен на ранних этапах
-        if command -v yq >/dev/null 2>&1; then
-            version=$(yq -r '.VERSION // ""' "$config_file" 2>/dev/null || true)
-        else
-            # Fallback к grep/sed если yq недоступен
-            version=$(grep -E '^VERSION:' "$config_file" | sed 's/VERSION: *//' | tr -d ' ' || true)
-        fi
-    fi
-
-    echo "$version"
-}
-
 # Парсинг аргументов
-# Переменная окружения имеет приоритет над config.yaml и уступает --version.
-# Безусловное затирание пустой строкой означало, что
-# `EXTENSION code-server CODE_SERVER_VERSION=4.104.3` ТИХО терял пин: значение
-# приходило в окружении и стиралось здесь, до разбора аргументов.
-CODE_SERVER_VERSION="${CODE_SERVER_VERSION:-}"
+# Версия — решение сборки, а не настройка устройства, поэтому в
+# /etc/bisquite/code-server/config её нет: --version сильнее параметра VMFILE,
+# параметр — сильнее закреплённой здесь. Прежнее безусловное затирание пустой
+# строкой означало, что `EXTENSION code-server CODE_SERVER_VERSION=4.104.3`
+# ТИХО терял пин.
+DEFAULT_CODE_SERVER_VERSION="4.135.0"
+ARG_VERSION=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --version)
-            CODE_SERVER_VERSION="$2"
+            ARG_VERSION="$2"
             shift 2
             ;;
         -h|--help)
@@ -139,7 +116,7 @@ while [[ $# -gt 0 ]]; do
             echo "Install mkcert and code-server"
             echo ""
             echo "Options:"
-            echo "  --version VERSION    Specify code-server version (default: from config.yaml)"
+            echo "  --version VERSION    Specify code-server version (default: CODE_SERVER_VERSION)"
             echo "  -h, --help          Show this help message"
             exit 0
             ;;
@@ -152,16 +129,36 @@ done
 
 log_info "Starting code-server installation..."
 
-# Если версия не указана, пробуем получить из config.yaml
-if [[ -z "$CODE_SERVER_VERSION" ]]; then
-    CODE_SERVER_VERSION=$(get_version_from_config)
-    if [[ -n "$CODE_SERVER_VERSION" ]]; then
-        log_info "Using code-server version from config.yaml: $CODE_SERVER_VERSION"
-    else
-        log_warn "No version specified and VERSION not found in config.yaml, using latest"
-        CODE_SERVER_VERSION="latest"
+for f in knobs knobs.apply teleport-app.sh lib/bisquite-conf; do
+    if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
+        log_error "рядом нет $f — настройки code-server записать нечем"
+        exit 1
     fi
+done
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/bisquite-conf"
+
+# Настройки устройства — /etc/bisquite/code-server/config, до скачивания:
+# опечатка в CODE_SERVER_PORT роняет сборку за секунду.
+#
+# ПОЧЕМУ В /etc. В /opt по FHS живёт код, а настройки держат etckeeper и
+# бэкапы. Файл создаётся один раз и не переписывается: повторная установка
+# оставляет правки `bisquite-conf set code-server …`; параметры VMFILE
+# ложатся поверх через проверку схемы (knobs). 0600: в файле бывает пароль.
+#
+# Прежний /etc/bisquite/code-server/config.yaml (2.x) переносится сюда один раз
+# и удаляется.
+CODE_SERVER_VERSION="${ARG_VERSION:-${CODE_SERVER_VERSION:-$DEFAULT_CODE_SERVER_VERSION}}"
+if [[ ! "$CODE_SERVER_VERSION" =~ ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    log_error "CODE_SERVER_VERSION='$CODE_SERVER_VERSION': ожидали X.Y.Z или latest"
+    exit 1
 fi
+# VERSION прежнего config.yaml не переносится: версия — не настройка устройства.
+conf_init code-server "$SCRIPT_DIR/knobs" --env \
+    --migrate-yaml USER=CODE_SERVER_USER,PASSWORD=CODE_SERVER_PASSWORD,PORT=CODE_SERVER_PORT,BIND=CODE_SERVER_BIND \
+    || { log_error "/etc/bisquite/code-server/config не записан"; exit 1; }
+conf_load code-server
+log_info "code-server version: $CODE_SERVER_VERSION"
 
 # Установка зависимостей
 log_info "Installing system dependencies..."
@@ -263,10 +260,7 @@ fi
 # который читает собиравший: он у своей машины и чинит за минуту.
 # Образец — vino-vnc/install.sh.
 #
-# config.yaml в списке не за компанию: configure.sh читает его первым делом
-# (`read_config`) и без него выходит с ошибкой, то есть его отсутствие стоит
-# ровно столько же, сколько отсутствие юнита.
-for f in configure-code-server.service configure.sh lib/get_cloud_user.sh config.yaml; do
+for f in configure-code-server.service configure.sh lib/get_cloud_user.sh; do
     if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
         log_error "рядом нет $f — донастройка на первой загрузке не состоится,"
         log_error "а без неё code-server не получит ни сертификата, ни юнита"
@@ -279,92 +273,36 @@ done
 install -m 0644 "$SCRIPT_DIR/configure-code-server.service" \
     /etc/systemd/system/configure-code-server.service
 
-# Настройки устройства — /etc/bisquite/code-server/config.yaml.
-#
-# ПОЧЕМУ В /etc. config.yaml в каталоге расширения — умолчания СБОРКИ, и
-# лежит он в /opt/bisquite, где по FHS живёт код, а не настройки. Манифесты
-# записи правят порт, адрес и пароль `sed`-ом — правят они теперь файл
-# в /etc, который держат etckeeper и бэкапы. Копия ставится всегда, а не
-# только при параметрах из VMFILE: configure.sh читает только её.
-#
-# Параметры из VMFILE перекрывают умолчания. config.yaml в кеше источников
-# перезаписывается на каждом `bs extension sync`, поэтому правка порта в нём
-# держалась бы до первой синхронизации — ровно та болезнь «мёртвых ручек»,
-# из-за которой у x11vnc настройки переехали в переменные окружения
-# (2026-09-03).
-#
-# 0600 всегда: в файле может лежать пароль, в том числе из умолчаний.
-# Права ставятся ДО записи — промежутка с правами по umask быть не должно.
-_cs_defaults="$SCRIPT_DIR/config.yaml"
-_cs_config=/etc/bisquite/code-server/config.yaml
-install -d -m 0755 /etc/bisquite/code-server
-install -m 0600 /dev/null "$_cs_config"
-cat "$_cs_defaults" > "$_cs_config"
-if [[ -n "${CODE_SERVER_PORT:-}${CODE_SERVER_PASSWORD:-}${CODE_SERVER_USER:-}${CODE_SERVER_BIND:-}" ]]; then
-  # Значения, которых не задали, берём из умолчаний, чтобы
-  # `EXTENSION code-server CODE_SERVER_PORT=9002` не сбрасывал версию.
-  _cs_old_user=$(sed -n 's/^USER:[[:space:]]*//p' "$_cs_defaults" | head -1)
-  _cs_old_pass=$(sed -n 's/^PASSWORD:[[:space:]]*//p' "$_cs_defaults" | head -1)
-  _cs_old_port=$(sed -n 's/^PORT:[[:space:]]*//p' "$_cs_defaults" | head -1)
-  _cs_old_ver=$(sed -n 's/^VERSION:[[:space:]]*//p' "$_cs_defaults" | head -1)
-  _cs_old_bind=$(sed -n 's/^BIND:[[:space:]]*//p' "$_cs_defaults" | head -1)
-  _cs_pass="${CODE_SERVER_PASSWORD:-${_cs_old_pass:-none}}"
-  _cs_port="${CODE_SERVER_PORT:-${_cs_old_port:-9001}}"
-  _cs_bind="${CODE_SERVER_BIND:-${_cs_old_bind:-0.0.0.0}}"
-
-  cat > "$_cs_config" <<CSCONF
-USER: ${CODE_SERVER_USER:-${_cs_old_user:-}}
-PASSWORD: ${_cs_pass}
-PORT: ${_cs_port}
-BIND: ${_cs_bind}
-VERSION: ${CODE_SERVER_VERSION:-${_cs_old_ver:-latest}}
-CSCONF
-
-  # Пароль в журнал НЕ печатается — только факт его наличия. Журнал сборки
-  # уезжает в CI и в переписку чаще, чем сам образ.
-  if [[ "$_cs_pass" == "none" ]]; then
-    log_info "$_cs_config записан из VMFILE: порт ${_cs_port}, адрес ${_cs_bind}, пароль не задан"
-    # Это ЕДИНСТВЕННОЕ место, где решение видно до того, как образ уедет
-    # на устройство, поэтому формулировка прямая. Но громкость идёт по
-    # АДРЕСУ, а не по одному лишь отсутствию пароля: без пароля на
-    # 127.0.0.1 — обычная связка для доступа по ssh-туннелю, и крик на
-    # неё приучает не читать предупреждения.
-    case "$_cs_bind" in
-      127.*|::1|localhost)
-        log_info "аутентификации нет, но адрес ${_cs_bind} — снаружи сервер недоступен"
-        ;;
-      *)
-        log_warn "code-server будет слушать ${_cs_bind} БЕЗ АУТЕНТИФИКАЦИИ:"
-        log_warn "  любой, кто достаёт до этой машины по сети, получает шелл"
-        log_warn "  от имени пользователя code-server со всеми его правами"
-        ;;
-    esac
-  else
-    log_info "$_cs_config записан из VMFILE: порт ${_cs_port}, пароль задан"
-    # Пароль лежит в образе открытым текстом — и в /etc/bisquite/code-server,
-    # и потом в ~/.config/code-server. Кто получит образ, получит и пароль.
-    log_warn "пароль хранится в образе открытым текстом: образ = пароль"
-    # Оговорка не лишняя: до 2026-09-03 configure.sh писал `auth: none`
-    # безусловно, и заданный пароль не включал ничего. Теперь включает.
-  fi
-  unset _cs_pass
+# Пароль в журнал НЕ печатается — только факт его наличия. Журнал сборки
+# уезжает в CI и в переписку чаще, чем сам образ.
+if [[ -z "$CODE_SERVER_PASSWORD" || "$CODE_SERVER_PASSWORD" == none ]]; then
+  log_info "порт ${CODE_SERVER_PORT}, адрес ${CODE_SERVER_BIND}, пароль не задан"
+  # Это ЕДИНСТВЕННОЕ место, где решение видно до того, как образ уедет
+  # на устройство, поэтому формулировка прямая. Но громкость идёт по
+  # АДРЕСУ, а не по одному лишь отсутствию пароля: без пароля на
+  # 127.0.0.1 — обычная связка для доступа по ssh-туннелю, и крик на
+  # неё приучает не читать предупреждения.
+  case "$CODE_SERVER_BIND" in
+    127.*|::1|localhost)
+      log_info "аутентификации нет, но адрес ${CODE_SERVER_BIND} — снаружи сервер недоступен"
+      ;;
+    *)
+      log_warn "code-server будет слушать ${CODE_SERVER_BIND} БЕЗ АУТЕНТИФИКАЦИИ:"
+      log_warn "  любой, кто достаёт до этой машины по сети, получает шелл"
+      log_warn "  от имени пользователя code-server со всеми его правами"
+      ;;
+  esac
+else
+  log_info "порт ${CODE_SERVER_PORT}, адрес ${CODE_SERVER_BIND}, пароль задан"
+  # Пароль лежит в образе открытым текстом — и в /etc/bisquite/code-server,
+  # и потом в ~/.config/code-server. Кто получит образ, получит и пароль.
+  log_warn "пароль хранится в образе открытым текстом: образ = пароль"
 fi
 
 # Declaration for teleport-agent: publish code-server as a Teleport app.
-# Only NAME and URI — who may open it is decided by the operator's env label,
-# not here. Harmless without teleport-agent. configure.sh always serves TLS
-# (mkcert), hence https; loopback works whatever BIND says. The port is read
-# from the installed config, so CODE_SERVER_PORT from the VMFILE counts.
-_cs_decl_port="$(sed -n 's/^PORT:[[:space:]]*//p' "$_cs_config" 2>/dev/null | head -1)"
-if [[ "$_cs_decl_port" =~ ^[0-9]{1,5}$ ]]; then
-  install -d -m 0755 /etc/bisquite/teleport/apps.d
-  install -m 0644 /dev/null /etc/bisquite/teleport/apps.d/code-server.conf
-  printf 'NAME=code-server\nURI=https://127.0.0.1:%s\n' "$_cs_decl_port" \
-    > /etc/bisquite/teleport/apps.d/code-server.conf
-  log_info "объявлен для Teleport: apps.d/code-server.conf (https://127.0.0.1:${_cs_decl_port})"
-else
-  log_warn "порт в $_cs_config не прочитан — объявление для Teleport не положено"
-fi
+# The same script runs on every reconfiguration (configure.sh), so a port
+# changed with `bisquite-conf set` reaches the declaration too.
+bash "$SCRIPT_DIR/teleport-app.sh" || { log_error "объявление для Teleport не положено"; exit 1; }
 
 systemctl daemon-reload || true
 systemctl enable configure-code-server.service || true

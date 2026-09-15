@@ -52,10 +52,10 @@ apt-get install -y chromium-kiosk || exit 1
 # запускается из того самого каталога, куда его скопировали, поэтому
 # $SCRIPT_DIR верен при любой раскладке, и её смена не уронит все сборки разом.
 #
-# config.yaml в списке потому, что без него configure.sh откажет на первой
-# загрузке (его check_prereqs) — то есть его отсутствие стоит столько же,
-# сколько отсутствие юнита.
-for f in configure-chromium-kiosk.service configure.sh config.yaml; do
+# knobs и lib/bisquite-conf в списке потому, что без них configure.sh откажет
+# на первой загрузке — то есть их отсутствие стоит столько же, сколько
+# отсутствие юнита.
+for f in configure-chromium-kiosk.service configure.sh knobs knobs.apply lib/bisquite-conf; do
   if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
     log_error "рядом нет $f — настройка chromium-kiosk на первой загрузке"
     log_error "не состоится, и киоск останется с конфигом пакета Salamek"
@@ -68,14 +68,19 @@ done
 install -m 0644 "$SCRIPT_DIR/configure-chromium-kiosk.service" \
   /etc/systemd/system/configure-chromium-kiosk.service
 
-# Настройки устройства — /etc/bisquite/chromium-kiosk/config.yaml; config.yaml
-# рядом со скриптом — умолчания сборки. В /opt по FHS живёт код, а настройки
-# держат в /etc: их правят манифесты записи, их берут etckeeper и бэкапы.
-# Файл переписывается умолчаниями на каждой установке — свой config.yaml
-# кладётся UPLOAD-ом ПОСЛЕ `EXTENSION chromium-kiosk`. Права — как у файла,
-# который из него делает configure.sh (/etc/chromium-kiosk/config.yml): 0644.
-install -d -m 0755 /etc/bisquite/chromium-kiosk
-install -m 0644 "$SCRIPT_DIR/config.yaml" /etc/bisquite/chromium-kiosk/config.yaml
+# Настройки устройства — /etc/bisquite/chromium-kiosk/config, домен
+# chromium-kiosk библиотеки bisquite-conf (схема knobs рядом). В /opt по FHS
+# живёт код, а настройки держат в /etc: их правят манифесты записи
+# (`bisquite-conf set chromium-kiosk …`), их берут etckeeper и бэкапы. Файл
+# создаётся один раз и не переписывается; параметры VMFILE
+# (`EXTENSION chromium-kiosk CHROMIUM_KIOSK_HOME_PAGE=…`) — поверх, через
+# проверку схемы. Прежний config.yaml (2.x, формат пакета) переносится один раз
+# в части ручек и удаляется; остальные ключи пакета — постоянные configure.sh.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/bisquite-conf"
+conf_init chromium-kiosk "$SCRIPT_DIR/knobs" --env \
+  --migrate-yaml HOME_PAGE=CHROMIUM_KIOSK_HOME_PAGE,WINDOW_MODE=CHROMIUM_KIOSK_WINDOW_MODE,TOUCHSCREEN=CHROMIUM_KIOSK_TOUCHSCREEN,IDLE_TIME=CHROMIUM_KIOSK_IDLE_TIME,WHITE_LIST.ENABLED=CHROMIUM_KIOSK_WHITE_LIST_ENABLED,WHITE_LIST.URLS=CHROMIUM_KIOSK_WHITE_LIST_URLS,WHITE_LIST.IFRAME_ENABLED=CHROMIUM_KIOSK_WHITE_LIST_IFRAME_ENABLED,NAV_BAR.ENABLED=CHROMIUM_KIOSK_NAV_BAR_ENABLED,NAV_BAR.ENABLED_BUTTONS=CHROMIUM_KIOSK_NAV_BAR_BUTTONS,VIRTUAL_KEYBOARD.ENABLED=CHROMIUM_KIOSK_VIRTUAL_KEYBOARD_ENABLED,DISPLAY_ROTATION=CHROMIUM_KIOSK_DISPLAY_ROTATION,SCREEN_ROTATION=CHROMIUM_KIOSK_SCREEN_ROTATION,TOUCHSCREEN_ROTATION=CHROMIUM_KIOSK_TOUCHSCREEN_ROTATION,EXTRA_ARGUMENTS=CHROMIUM_KIOSK_EXTRA_ARGUMENTS,ALLOWED_FEATURES=CHROMIUM_KIOSK_ALLOWED_FEATURES,CURSOR.ENABLED=CHROMIUM_KIOSK_CURSOR_ENABLED \
+  || { log_error "/etc/bisquite/chromium-kiosk/config не записан"; exit 1; }
 
 # Enable configuration service
 systemctl daemon-reload || true

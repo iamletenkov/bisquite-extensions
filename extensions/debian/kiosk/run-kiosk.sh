@@ -33,13 +33,17 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} kiosk: $*"; }
 USERNAME="${1:?usage: run-kiosk.sh <user>}"
 UID_OF_USER="$(id -u "$USERNAME")"
 HOME_OF_USER="$(getent passwd "$USERNAME" | cut -d: -f6)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Параметры приходят из /var/lib/kiosk/config через EnvironmentFile юнита;
-# его пишет configure.sh из config.yaml. Умолчания здесь — последний рубеж
-# на случай отсутствующего файла, и они совпадают с умолчаниями configure.sh.
-DISPLAY_NUM="${DISPLAY:-:0}"
-URL="${URL:-https://github.com/iamletenkov/bisquite}"
-EXTRA_FLAGS_RAW="${CHROMIUM_FLAGS:-}"
+# Параметры — /etc/bisquite/kiosk/config через библиотеку bisquite-conf (без
+# `source`: файл правят манифесты). Нет файла — умолчания схемы knobs. До 3.0.0
+# их приносила копия /var/lib/kiosk/config через EnvironmentFile юнита.
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/lib/bisquite-conf"
+conf_load kiosk
+DISPLAY_NUM="$KIOSK_DISPLAY"
+URL="$KIOSK_URL"
+EXTRA_FLAGS_RAW="$KIOSK_CHROMIUM_FLAGS"
 
 # Кандидаты в authority — в порядке убывания надёжности, у каждого источник
 # знания. Список пересобирается на каждой попытке: под GDM файл
@@ -110,7 +114,7 @@ log_info "authority: $AUTH"
 export XAUTHORITY="$AUTH"
 export DISPLAY="$DISPLAY_NUM"
 
-# Базовый набор — тот же, что был зашит в юните. Флаги из CHROMIUM_FLAGS
+# Базовый набор — тот же, что был зашит в юните. Флаги из KIOSK_CHROMIUM_FLAGS
 # ДОБАВЛЯЮТСЯ к нему, а не заменяют его.
 args=(
     --kiosk

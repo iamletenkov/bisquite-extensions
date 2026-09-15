@@ -11,7 +11,9 @@ Environment="DISPLAY=:0"
 # только под LightDM: под GDM >= 42 файл лежит в /run/user/<uid>/gdm/Xauthority,
 # и юнит уходил в вечный цикл рестарта молча. Путь ищет обёртка — разбор
 # и замеры в её шапке.
-EnvironmentFile=-/var/lib/kiosk/config
+# EnvironmentFile больше нет: адрес, дисплей и флаги обёртка читает сама из
+# /etc/bisquite/kiosk/config (bisquite-conf) — копии в /var/lib/kiosk/config,
+# которая расходилась с оригиналом, не стало.
 
 # ExecStartPre с `xdpyinfo` убран: он проверял дисплей тем же неверным
 # authority, что и сам запуск, то есть повторял ошибку. Ожидание дисплея

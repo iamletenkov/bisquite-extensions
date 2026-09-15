@@ -39,10 +39,11 @@ log_debug() {
     >&2 echo -e "${BLUE}[DEBUG]${NC} $*"
 }
 
-# Settings live in /etc, not next to the script: install.sh writes the build
-# defaults plus VMFILE overrides there, and write manifests edit this file.
-# config.yaml in the extension directory is only the build-time default.
-CONFIG_FILE=/etc/bisquite/code-server/config.yaml
+# Settings live in /etc, not next to the script: the code-server domain of
+# bisquite-conf (schema: knobs next to this script). Write manifests change it
+# with `bisquite-conf set code-server …`.
+CONFIG_FILE=/etc/bisquite/code-server/config
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Проверка наличия необходимых команд
 check_dependencies() {
@@ -63,60 +64,27 @@ check_dependencies() {
     fi
 }
 
-# Чтение одного скалярного поля из config.yaml.
-#
-# ПОЧЕМУ ЗДЕСЬ ЗАПАСНОЙ ПУТЬ, А НЕ ТРЕБОВАНИЕ yq. Асимметрия между фазами
-# была багом: install.sh (сборка) с самого начала читает ЭТОТ ЖЕ файл через
-# grep/sed, когда yq недоступен, — с комментарием «yq может не быть
-# установлен на ранних этапах». А configure.sh на тех же четырёх полях
-# падал с "Missing required dependencies: yq".
-#
-# Воспроизведено 2026-09-12 на живой плате AGX Orin: code-server и mkcert
-# установились, служба configure-code-server упала на первой загрузке,
-# и code-server остался ненастроенным и незапущенным. Узнать об этом можно
-# было только на устройстве — то есть худший из возможных моментов.
-#
-# Требовать `requires: [yq]` было бы вторым решением, и оно хуже: yq тянет
-# бинарь с GitHub, и каждый профиль с code-server обязан был бы нести это
-# расширение ради чтения четырёх скаляров.
-#
-# Разбор grep/sed достаточен, потому что файл НАШ и плоский: его пишет
-# install.sh рядом, поля скалярные, без вложенности и многострочных
-# значений. yq, если он есть, по-прежнему используется первым.
-read_config_value() {
-    local key="$1" file="$2" value=""
-    if command -v yq >/dev/null 2>&1; then
-        value=$(env -i PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" TERM=dumb \
-            yq -r ".${key} // \"\"" "$file" 2>/dev/null || true)
-    else
-        value=$(sed -n "s/^${key}:[[:space:]]*//p" "$file" | head -n1 | tr -d "\"'" || true)
-    fi
-    printf '%s' "$value"
-}
-
-# Чтение конфигурации из config.yaml
+# Чтение настроек — через библиотеку bisquite-conf: без yq и без `source`,
+# по тем же правилам, по которым файл прочтёт кто угодно ещё. Раньше здесь был
+# разбор config.yaml через yq с запасным grep/sed: на AGX Orin без yq служба
+# падала на первой загрузке (2026-09-12), и чинили это вторым разборщиком.
 read_config() {
-    local config_file="$CONFIG_FILE"
-
-    if [[ ! -f "$config_file" ]]; then
-        log_error "Configuration file not found: $config_file"
+    if [[ ! -f "$SCRIPT_DIR/lib/bisquite-conf" ]]; then
+        log_error "lib/bisquite-conf not found at $SCRIPT_DIR/lib/bisquite-conf"
         exit 1
     fi
+    # shellcheck source=/dev/null
+    source "$SCRIPT_DIR/lib/bisquite-conf"
+    conf_load code-server || exit 1
 
-    CODE_USER=$(read_config_value USER "$config_file")
-    CODE_PASSWORD=$(read_config_value PASSWORD "$config_file")
-    CODE_PASSWORD="${CODE_PASSWORD:-none}"
-    CODE_PORT=$(read_config_value PORT "$config_file")
-    CODE_PORT="${CODE_PORT:-9001}"
-    CODE_BIND=$(read_config_value BIND "$config_file")
-    # Умолчание историческое: до появления параметра адрес был прибит
+    CODE_USER="$CODE_SERVER_USER"
+    CODE_PASSWORD="${CODE_SERVER_PASSWORD:-none}"
+    CODE_PORT="$CODE_SERVER_PORT"
+    # Умолчание схемы историческое: до появления параметра адрес был прибит
     # к 0.0.0.0, и образы, собранные раньше, обязаны вести себя как прежде.
-    CODE_BIND="${CODE_BIND:-0.0.0.0}"
-    # VERSION отсюда НЕ читается, и это не упущение: поле относится к фазе
-    # сборки — его берёт install.sh (`get_version_from_config`) своим
-    # способом. Прежняя CODE_VERSION вычиталась здесь и не использовалась
-    # больше нигде, то есть была мёртвой ручкой: читатель думал, что версия
-    # на что-то влияет на первой загрузке, а менять её тут уже поздно.
+    CODE_BIND="$CODE_SERVER_BIND"
+    # CODE_SERVER_VERSION отсюда НЕ читается: версию ставит install.sh на
+    # сборке, менять её на первой загрузке уже поздно.
 }
 
 # Определение пользователя
@@ -124,16 +92,15 @@ resolve_user() {
     if [[ -z "$CODE_USER" ]]; then
         log_info "USER not specified in config, trying to get from cloud-init..."
 
-        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        if [[ -x "$script_dir/lib/get_cloud_user.sh" ]]; then
-            if CODE_USER=$("$script_dir/lib/get_cloud_user.sh"); then
+        if [[ -x "$SCRIPT_DIR/lib/get_cloud_user.sh" ]]; then
+            if CODE_USER=$("$SCRIPT_DIR/lib/get_cloud_user.sh"); then
                 log_info "Found user from cloud-init: $CODE_USER"
             else
                 log_error "Failed to get user from cloud-init"
                 exit 1
             fi
         else
-            log_error "get_cloud_user.sh not found at $script_dir/lib/get_cloud_user.sh"
+            log_error "get_cloud_user.sh not found at $SCRIPT_DIR/lib/get_cloud_user.sh"
             exit 1
         fi
     else
@@ -321,8 +288,7 @@ should_reconfigure() {
     # проверку своего config.yaml, которая стоит ниже (замер 2026-09-06).
     #
     # Различие взято у lib/get_cloud_user.sh, где оно уже сделано по тому же
-    # признаку. `yq` здесь в признак не входит: без него check_dependencies
-    # уже завершил бы скрипт, то есть до этой строки дело не дошло бы.
+    # признаку.
     if [[ ! -f "$user_data_file" ]]; then
         if command -v cloud-init >/dev/null 2>&1; then
             # cloud-init есть, а данных пока нет — это ГОНКА, и она законна.
@@ -333,7 +299,7 @@ should_reconfigure() {
         fi
         # cloud-init в системе нет — файл не появится никогда, и решают
         # остальные признаки: отметка last-config-time и mtime своего
-        # config.yaml. Дальше по тексту.
+        # файла настроек. Дальше по тексту.
     fi
 
     # Получаем время последней конфигурации
@@ -343,9 +309,9 @@ should_reconfigure() {
     # НИ РАЗУ НЕ НАСТРАИВАЛИ — НАСТРОИТЬ ХОТЯ БЫ РАЗ.
     #
     # Без этого случая первая настройка на образе без cloud-init висела бы
-    # на mtime config.yaml — то есть на файле, который расширение вправе
-    # удалить (у x11vnc он удалён целиком). Зависимость от того, чего может
-    # не быть, здесь означала бы «не настроено никогда».
+    # на mtime файла настроек — то есть на файле, которого может не быть.
+    # Зависимость от того, чего может не быть, здесь означала бы «не
+    # настроено никогда».
     if [[ ! -f "$last_config_time" ]]; then
         return 0
     fi
@@ -359,12 +325,13 @@ should_reconfigure() {
         fi
     fi
 
-    # И ЕСЛИ НОВЕЕ НАШ СОБСТВЕННЫЙ config.yaml.
+    # И ЕСЛИ НОВЕЕ НАШ СОБСТВЕННЫЙ ФАЙЛ НАСТРОЕК.
     #
     # Он источник настроек расширения — порт, адрес, пароль, — а
-    # проверялся только `user-data` от cloud-init. Правка config.yaml
+    # проверялся только `user-data` от cloud-init. Правка файла
     # не считалась изменением вовсе, и служба выходила с «No
     # configuration changes needed», оставив прежний конфиг.
+    # `bisquite-conf set` пишет атомарно (mv), mtime меняется всегда.
     #
     # Замер 2026-09-06 на Jetson Nano: манифест записи менял адрес
     # на 0.0.0.0 через firstboot, служба запускалась следом и молча
@@ -398,6 +365,7 @@ main() {
     setup_certificates
     create_config
     create_user_service
+    bash "$SCRIPT_DIR/teleport-app.sh" || log_warn "объявление для Teleport не обновлено"
 
     # Сохраняем время последней конфигурации
     local current_time

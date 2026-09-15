@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Apply hook of the sensing-camera domain: re-apply the camera profile and the
+# clocks. Non-blocking: `bisquite-conf set` may run inside cloud-final.
+set -uo pipefail
+systemctl --no-block restart 'bisquite-sensing-camera@*.service' bisquite-sensing-clock.service
+>&2 echo "sensing-camera: перезапуск профиля камер и частот поставлен в очередь"

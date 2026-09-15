@@ -1,0 +1,8 @@
+# Ручки камер Sensing GMSL2 — /etc/bisquite/sensing-camera/config. Читает
+# bisquite-sensing-camera-ctl в юнитах bisquite-sensing-camera@videoN и
+# bisquite-sensing-clock. Режим линка (SENSING_GMSLMODE) — не здесь: это
+# параметр модуля в /etc/modprobe.d, он меняется сборкой и перезагрузкой.
+#
+# ключ                     тип                                              умолчание                                      описание
+SENSING_CAMERA_CONTROLS    re:^[a-z_]+=[0-9a-fx]+(,[a-z_]+=[0-9a-fx]+)*$    sensor_mode=1,trig_mode=0,trig_pin=0x00020007  профиль камеры: контролы v4l2 имя=число через запятую; умолчание — пункт 3 меню вендора (SG2-AR0233-5200-G-Hxxx)
+SENSING_BOOST_CLOCK        bool                                             1                                              1 — частоты VI/ISP/NVCSI/EMC на максимум

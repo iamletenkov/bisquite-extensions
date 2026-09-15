@@ -1,0 +1,21 @@
+# Настройки киоска Salamek — /etc/bisquite/chromium-kiosk/config. configure.sh
+# собирает из них /etc/chromium-kiosk/config.yml (формат пакета) на каждой
+# загрузке и хуком применения; прочие ключи пакета — постоянные, в configure.sh.
+#
+# ключ                                     тип                                                                   умолчание                                            описание
+CHROMIUM_KIOSK_HOME_PAGE                   str                                                                   https://github.com/iamletenkov/bisquite              стартовая страница — сюда вписывают свой адрес
+CHROMIUM_KIOSK_WINDOW_MODE                 enum:hidden,automaticvisibility,windowed,minimized,maximized,fullscreen  fullscreen                                        режим окна
+CHROMIUM_KIOSK_TOUCHSCREEN                 enum:true,false                                                       true                                                 поддержка тач-ввода
+CHROMIUM_KIOSK_IDLE_TIME                   re:^[0-9]+$                                                           0                                                    секунды простоя до возврата на стартовую страницу; 0 — выключено
+CHROMIUM_KIOSK_WHITE_LIST_ENABLED          enum:true,false                                                       false                                                белый список адресов
+CHROMIUM_KIOSK_WHITE_LIST_URLS             list:str                                                              —                                                    адреса белого списка через запятую, glob (*, google.*/news)
+CHROMIUM_KIOSK_WHITE_LIST_IFRAME_ENABLED   enum:true,false                                                       true                                                 разрешить iframe
+CHROMIUM_KIOSK_NAV_BAR_ENABLED             enum:true,false                                                       false                                                панель навигации
+CHROMIUM_KIOSK_NAV_BAR_BUTTONS             list:enum:home,reload,back,forward?                                   home,reload,back,forward                             кнопки панели по порядку
+CHROMIUM_KIOSK_VIRTUAL_KEYBOARD_ENABLED    enum:true,false                                                       true                                                 экранная клавиатура
+CHROMIUM_KIOSK_DISPLAY_ROTATION            enum:normal,left,right,inverted                                       —                                                    поворот экрана и тача вместе; пусто — normal, если не заданы два ключа ниже
+CHROMIUM_KIOSK_SCREEN_ROTATION             enum:normal,left,right,inverted                                       —                                                    поворот только экрана (при пустом DISPLAY_ROTATION)
+CHROMIUM_KIOSK_TOUCHSCREEN_ROTATION        enum:normal,left,right,inverted                                       —                                                    поворот только тача (при пустом DISPLAY_ROTATION)
+CHROMIUM_KIOSK_EXTRA_ARGUMENTS             str?                                                                  "--disable-pinch --overscroll-history-navigation=0"  флаги браузера строкой
+CHROMIUM_KIOSK_ALLOWED_FEATURES            list:enum:desktop-audio-video-capture,desktop-video-capture,geolocation,invalid-certificate,media-audio-capture,media-audio-video-capture,media-video-capture,mouse-lock,notifications  —  разрешения браузера через запятую; пусто — ни одного
+CHROMIUM_KIOSK_CURSOR_ENABLED              enum:true,false                                                       false                                                показывать курсор

@@ -33,6 +33,12 @@ check_prereqs(){
     log_error "get_cloud_user.sh not found or not executable at $SCRIPT_DIR/lib/get_cloud_user.sh"
     exit 1
   fi
+  if [[ ! -f "$SCRIPT_DIR/lib/bisquite-conf" ]]; then
+    log_error "lib/bisquite-conf not found at $SCRIPT_DIR/lib/bisquite-conf"
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  source "$SCRIPT_DIR/lib/bisquite-conf"
 }
 
 resolve_user(){
@@ -73,11 +79,11 @@ resolve_user(){
 # рабочий стол — ровно противоположное задуманному.
 hand_over_passfile(){
   local cloud_user="$1"
-  local env_file=/etc/bisquite/x11vnc/config
   local passfile
 
-  [[ -f "$env_file" ]] || return 0
-  passfile="$(sed -n 's/^X11VNC_PASSFILE=//p' "$env_file" | tail -n 1)"
+  # Через библиотеку, а не sed: файл разбирается по правилам EnvironmentFile,
+  # то есть так же, как его прочтёт юнит (кавычки, последнее присваивание).
+  passfile="$(conf_get x11vnc X11VNC_PASSFILE)" || exit 1
   [[ -n "$passfile" && -f "$passfile" ]] || return 0
 
   if chown "$cloud_user" "$passfile" && chmod 0600 "$passfile"; then
@@ -128,11 +134,9 @@ configure_x11vnc_service(){
   hand_over_passfile "$cloud_user"
   disable_stale_instances "$cloud_user"
 
-  # Порт, дисплей, пароль и адрес прослушивания сюда больше не читаются:
-  # раньше их доставали из config.yaml и НИГДЕ не использовали — юнит
-  # хардкодил свои значения. Теперь они приходят из VMFILE переменными
-  # окружения, install.sh кладёт их в /etc/bisquite/x11vnc/config,
-  # а юнит читает оттуда.
+  # Порт, дисплей и адрес прослушивания сюда не читаются: юнит берёт их из
+  # /etc/bisquite/x11vnc/config сам (EnvironmentFile). Правка на работающей
+  # машине — `bisquite-conf set x11vnc …`, её хук перезапускает экземпляр.
   systemctl enable "x11vnc@${cloud_user}.service" || true
   # Без `|| true`: отказ обязан быть виден. Раньше обе команды глушились,
   # и немой цикл рестарта из-за ненайденного authority выглядел как успех.
