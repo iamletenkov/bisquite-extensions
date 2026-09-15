@@ -1,5 +1,5 @@
 name: selkies
-version: 4.0.1
+version: 4.0.2
 layout: 2
 # 4.0.0: настройки — домен selkies библиотеки bisquite-conf (схема knobs,
 #        SELKIES_* — шаблоном): установка не переписывает файл; BISQUITE_SELKIES_*

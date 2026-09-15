@@ -84,7 +84,12 @@ else
     fetched=0
     for URL in "${URLS[@]}"; do
         log_info "скачиваю $URL"
-        if curl -fL --retry 5 --retry-delay 5 -o "$WORK/selkies.AppImage" "$URL"; then
+        # --speed-limit/--speed-time turn a stalled transfer into a retry: over
+        # the board's Wi-Fi the appliance download froze at 76 of 535 MB and
+        # curl waited an hour with no timeout (AGX Orin, 2026-09-15).
+        if curl -fL --retry 5 --retry-delay 5 \
+                --connect-timeout 30 --speed-limit 10240 --speed-time 60 \
+                -o "$WORK/selkies.AppImage" "$URL"; then
             fetched=1; break
         fi
     done
