@@ -58,7 +58,8 @@ EXTENSION x11vnc
 ├── install.sh                  # фаза build: ставит софт, включает сервис донастройки
 ├── configure.sh                # фаза firstboot: донастройка под конкретную машину
 ├── configure-<имя>.service     # systemd-oneshot, гоняет configure.sh на загрузке
-├── config.yaml                 # опционально: умолчания сборки; на устройстве — /etc/bisquite/<имя>/
+├── knobs                       # опционально: схема настроек домена (/etc/bisquite/<домен>/config)
+├── knobs.apply, knobs.secret   # опционально: хуки применения и секретов
 └── README.md
 ```
 
@@ -767,7 +768,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `container-runtime` | `docker` | Docker CE из apt-репозитория Docker |
 | `kiosk-browser` | `kiosk`, `chromium-kiosk` | обе реализации автостартом забирают экран |
 | `remote-desktop` | `x11vnc`, `vino-vnc` | `x11vnc@.service` на `rfbport` из `X11VNC_PORT`; у `vino-vnc` — `gsettings` `org.gnome.Vino` и автозапуск XDG (умолчание у обоих 5900) |
-| `web-ide` | `code-server` | code-server на порту из `CODE_SERVER_PORT`, иначе из `config.yaml` |
+| `web-ide` | `code-server` | code-server на порту `CODE_SERVER_PORT` домена `code-server` (умолчание 9001) |
 | `gpu-driver-nvidia` | `nvidia` | проприетарный драйвер + blacklist nouveau |
 | `nocloud-cidata-seed` | `nocloud-cidata` | `/etc/cloud/cloud.cfg.d/zz-bisquite-nocloud.cfg` с `fs_label: cidata` |
 | `network-manager` | `network-manager` | пакеты `network-manager` и `wpasupplicant`, включённый `NetworkManager.service` |
@@ -841,7 +842,7 @@ apt-репозиторий, — на том основании, что стар�
 
 | Что | Где |
 |---|---|
-| настройки расширений (`config`, `config.yaml`, `apps.d`) | `/etc/bisquite/<имя>/` |
+| настройки расширений (`config`, `apps.d`) | `/etc/bisquite/<домен>/` |
 | код и данные расширения: `run-*.sh`, `configure.sh`, картинки | `/opt/bisquite/<имя>/` |
 | общий код источника (`get_cloud_user.sh`, `bisquite-desktop`) | `/opt/bisquite/lib/<sha256>/`; расширение видит его как `/opt/bisquite/<имя>/lib` |
 | состояние | `/var/lib/bisquite/<имя>/` |
@@ -855,7 +856,7 @@ apt-репозиторий, — на том основании, что стар�
 | Было | Стало |
 |---|---|
 | `/opt/vmsetup/<имя>/` | `/opt/bisquite/<имя>/` |
-| `/opt/vmsetup/{code-server,kiosk,chromium-kiosk}/config.yaml` | `/etc/bisquite/<имя>/config.yaml` |
+| `/opt/vmsetup/{code-server,kiosk,chromium-kiosk}/config.yaml` | `/etc/bisquite/<имя>/config` (`KEY=VALUE`; до библиотеки настроек — `config.yaml`) |
 | копии `get_cloud_user.sh`, `bisquite-desktop` в каталогах расширений | `lib/` источника, ссылка `/opt/bisquite/<имя>/lib` |
 | `/usr/local/lib/bisquite-desktop/get_cloud_user.sh` | не нужен: `bisquite-desktop` — ссылка в `lib/` |
 | `/var/lib/bisquite-teleport/` | `/var/lib/bisquite/teleport/` |
@@ -1032,8 +1033,9 @@ FAIL: extensions/debian/x11vnc: `requires: nonexistent-capability` — эту с
 ## Как добавить расширение
 
 1. Создай `extensions/<группа>/<имя>/` с `install.sh` — идемпотентным,
-   запускаемым от root внутри гостя, читающим параметры из окружения или
-   `config.yaml`.
+   запускаемым от root внутри гостя, читающим параметры из окружения.
+   Настройки, которые меняют на устройстве, объяви схемой `knobs`, а файл
+   заводи вызовом `conf_init` (см. «Библиотека настроек `bisquite-conf`»).
 2. Нужна донастройка на устройстве — добавь `configure.sh` и
    `configure-<имя>.service`, а `install.sh` пусть кладёт юнит в
    `/etc/systemd/system/` и делает `systemctl enable`. Учитывай, что путь
@@ -1062,29 +1064,17 @@ FAIL: extensions/debian/x11vnc: `requires: nonexistent-capability` — эту с
   в VMFILE. В один граф зависимостей эти два способа не попадают, поэтому
   топологическая сортировка тут не поможет. Закрывается только приведением
   примеров к единообразию, то есть правками в основном репозитории.
-- **Требования к базовому образу манифестом не выражаются.** Семи
-  расширениям нужны `cloud-init` и `yq` в госте — их ставит базовый VMFILE,
-  а не расширение. Поля для этого в наборе нет и придумывать его в обход
-  спеки не стали; проверить, что база их даёт, сегодня нечем.
+- **Требования к базовому образу манифестом не выражаются.** Расширениям,
+  которые узнают пользователя cloud-init через `lib/get_cloud_user.sh`, нужны
+  в госте `cloud-init` и `yq` (без них — запасной путь по первой учётке
+  с uid ≥ 1000), и ставит их базовый VMFILE, а не расширение. Поля для
+  этого в наборе нет и придумывать его в обход спеки не стали; проверить,
+  что база их даёт, сегодня нечем.
 - **Графа зависимостей никто не исполняет.** Резолвер и отказ по архитектуре
   появились, а топологической сортировки и отказа по конфликту нет:
   `provides`/`requires`/`conflicts` bisquite только печатает. Порядок слоёв
   по-прежнему держится вниманием автора VMFILE — поменяй местами `gnome`
   и `x11vnc`, и сборка пройдёт зелёной.
-- **Проверка `yq` у четырёх расширений переживила свою причину.**
-  `configure.sh` у `gnome`, `lxde`, `xfce4` и `x11vnc` делает `exit 1`, если
-  `yq` не найден (`check_prereqs`), — при том что ни одно из четырёх не
-  вызывает `yq` само: он нужен только внутри `get_cloud_user.sh`, а там
-  с 2026-09-04 есть запасной путь `fallback_user()`, которому `yq`
-  не требуется. То есть проверка перекрывает дорогу, которая работала бы.
-
-  `kiosk` и `code-server` `yq` больше не нужен вовсе: с библиотекой настроек
-  их файлы — `KEY=VALUE`.
-
-  Снятие проверки у четырёх — правка поведения, поэтому отдельной задачей;
-  пока обязательность `EXTENSION yq` выше по VMFILE остаётся настоящей для
-  них. Объявить `yq` в `requires` вместо снятия проверки не помогло бы:
-  `requires` bisquite не проверяет, а только печатает.
 - **`arch` у `chromium-kiosk` объявлен, но не проверен.** Пакет тянется из
   стороннего репозитория `repository.salamek.cz` (suite `all`); что там есть
   под arm64, не замерялось. На сборках bisquite подтверждён только amd64.

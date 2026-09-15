@@ -106,7 +106,7 @@ conflicts: []
 
 | Что | Где |
 |---|---|
-| настройки расширений (`config`, `config.yaml`, `apps.d`) | `/etc/bisquite/<имя>/` |
+| настройки расширений (`config`, `apps.d`) | `/etc/bisquite/<домен>/` |
 | код и данные расширения: `run-*.sh`, `configure.sh`, картинки | `/opt/bisquite/<имя>/` |
 | общий код источника (`get_cloud_user.sh`, `bisquite-desktop`) | `/opt/bisquite/lib/<sha256>/`; расширение видит его как `/opt/bisquite/<имя>/lib` |
 | состояние | `/var/lib/bisquite/<имя>/` |
