@@ -197,6 +197,7 @@ mtime меняется всегда). Замер 2026-09-06 на Jetson Nano —
 /etc/bisquite/teleport/apps.d/code-server.conf
 NAME=code-server
 URI=https://127.0.0.1:<PORT>
+ICON=laptop
 ```
 
 Порт — `CODE_SERVER_PORT` из действующих настроек, то есть после параметров VMFILE и `bisquite-conf set`; схема `https`, потому что

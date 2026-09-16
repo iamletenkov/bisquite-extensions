@@ -495,6 +495,7 @@ check_not "BISQUITE_SELKIES_* вне схемы — отказ" lib conf_validat
 eq "config 0600 (пароли basic auth)" 600 "$(stat -c %a "$(cfg selkies)")"
 check "teleport-app.sh" bash "$STAGED/teleport-app.sh" 2>/dev/null
 eq "объявление с портом из настроек" "URI=http://127.0.0.1:8090" "$(grep URI "$ROOT/etc/bisquite/teleport/apps.d/selkies.conf")"
+eq "объявление selkies несёт иконку" "ICON=desktop" "$(grep ICON "$ROOT/etc/bisquite/teleport/apps.d/selkies.conf")"
 
 echo "== домен teleport: bisquite-teleport через библиотеку =="
 new_root; stage teleport-agent
@@ -515,6 +516,45 @@ lib conf_set teleport --allow-ro TELEPORT_PROXY=teleport.example.org TELEPORT_NO
 check "render" tp render
 check "teleport.yaml собран" grep -q 'proxy_server: "teleport.example.org:443"' "$ROOT/etc/teleport.yaml"
 check "метка env в teleport.yaml" grep -q '"env": "prod"' "$ROOT/etc/teleport.yaml"
+
+# Иконки приложений: ICON= в объявлении расширения и ручка оператора.
+# Объявление кладём сами — так же, как его положил бы teleport-app.sh.
+app_decl(){
+    local n="$1" f; shift
+    f="$ROOT/etc/bisquite/teleport/apps.d/$n.conf"
+    mkdir -p "$(dirname "$f")"
+    printf '%s\n' "NAME=$n" "$@" > "$f"
+    chmod 0644 "$f"
+}
+# Блок приложения <имя> из teleport.yaml: от его строки name: до следующего
+# приложения или следующей секции.
+app_block(){
+    awk -v n="    - name: \"$1-robot-1\"" \
+        '$0==n{f=1;next} f&&(/^    - name:/||/^[a-z_]+:/){exit} f' "$ROOT/etc/teleport.yaml"
+}
+app_decl code-server URI=https://127.0.0.1:9002 ICON=mcpVscode
+app_decl selkies URI=http://127.0.0.1:8082
+check "render с объявлениями" tp render
+check "ICON из объявления — метка иконки приложения" \
+    grep -q '"teleport.icon": "mcpVscode"' <<< "$(app_block code-server)"
+check_not "без ICON метки иконки нет вовсе — угадывает Teleport" \
+    grep -q teleport.icon <<< "$(app_block selkies)"
+check "ручка иконок оператора принята" tp set TELEPORT_APPS_ICONS=code-server=docker 2>/dev/null
+check "render после ручки" tp render
+check "ручка оператора побеждает ICON объявления" \
+    grep -q '"teleport.icon": "docker"' <<< "$(app_block code-server)"
+check "ручка задаёт иконку приложению оператора" \
+    tp set TELEPORT_APPS=portainer=9000 TELEPORT_APPS_ICONS=portainer=docker 2>/dev/null
+check "render с приложением оператора" tp render
+check "иконка приложения оператора" \
+    grep -q '"teleport.icon": "docker"' <<< "$(app_block portainer)"
+app_decl btop URI=http://127.0.0.1:9999 'ICON=ev"il'
+msg="$(tp render 2>&1)"
+check "битое значение ICON названо в предупреждении" grep -q "ICON='ev" <<< "$msg"
+check_not "битое значение ICON пропускает объявление целиком" \
+    grep -q '"btop-robot-1"' "$ROOT/etc/teleport.yaml"
+check_not "set TELEPORT_LABELS=teleport.icon=… — отказ, ключ зарезервирован" \
+    tp set TELEPORT_LABELS=teleport.icon=docker 2>/dev/null
 printf 'TELEPORT_ENV="a\\"b"\n' >> "$(cfg teleport)"
 check_not "render отказывает на правке руками с кавычкой" tp render 2>/dev/null
 eq "права config teleport 0600" 600 "$(stat -c %a "$(cfg teleport)")"
@@ -556,6 +596,7 @@ check_not "config.yaml code-server удалён" test -e "$ROOT/etc/bisquite/cod
 check_not "версия сборки не попала в файл устройства" grep -q CODE_SERVER_VERSION "$(cfg code-server)"
 check "teleport-app.sh code-server" bash "$STAGED/teleport-app.sh" 2>/dev/null
 eq "объявление code-server с портом" "URI=https://127.0.0.1:9003" "$(grep URI "$ROOT/etc/bisquite/teleport/apps.d/code-server.conf")"
+eq "объявление code-server несёт иконку" "ICON=laptop" "$(grep ICON "$ROOT/etc/bisquite/teleport/apps.d/code-server.conf")"
 
 echo "== домен kiosk: YAML -> KEY=VALUE =="
 new_root; stage kiosk

@@ -4,6 +4,8 @@
 # the app is decided by the operator's env label, not here. Harmless without
 # teleport-agent. Called by install.sh, configure.sh (every boot) and the
 # apply hook, so a changed port reaches the declaration either way.
+# ICON=desktop: a monitor with app tiles — what selkies is. Nothing in the
+# proxy's built-in set says "selkies", and the name matches no icon at all.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=/dev/null
@@ -19,7 +21,7 @@ case "$SELKIES_ADDR" in
     127.0.0.1|localhost|0.0.0.0|"127.0.0.1,::1"|"")
         install -d -m 0755 "$(dirname "$decl")"
         install -m 0644 /dev/null "$decl"
-        printf 'NAME=selkies\nURI=%s://127.0.0.1:%s\n' "$scheme" "$SELKIES_PORT" > "$decl"
+        printf 'NAME=selkies\nURI=%s://127.0.0.1:%s\nICON=desktop\n' "$scheme" "$SELKIES_PORT" > "$decl"
         >&2 echo "selkies: объявлен для Teleport: apps.d/selkies.conf (${scheme}://127.0.0.1:${SELKIES_PORT})"
         ;;
     *) rm -f "$decl" ;;

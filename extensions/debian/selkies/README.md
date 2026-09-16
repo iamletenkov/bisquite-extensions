@@ -187,7 +187,9 @@ firstboot-commands:
 С 2.1.0 `install.sh` кладёт объявление для расширения `teleport-agent` —
 `/etc/bisquite/teleport/apps.d/selkies.conf` с `NAME=selkies` и
 `URI=<http|https>://127.0.0.1:<SELKIES_PORT>` (схема — по
-`SELKIES_ENABLE_HTTPS`). С ним Selkies публикуется как
+`SELKIES_ENABLE_HTTPS`). С 4.0.3 там же `ICON=desktop` — иконка в веб-морде
+прокси; она требует `teleport-agent` 2.2.0 и новее, более старый агент
+объявление с третьим ключом пропустит целиком. С ним Selkies публикуется как
 `https://selkies.<нода>.<хост прокси>`; кому видно — метка `env` ноды и
 `tpApps: selkies` пользователя. Не публиковать —
 `bisquite-teleport set TELEPORT_APPS_DISABLE=selkies`.

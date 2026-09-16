@@ -1,6 +1,8 @@
 name: code-server
-version: 3.0.0
+version: 3.0.1
 layout: 2
+# 3.0.1: объявление для Teleport несёт ICON=laptop (нужен teleport-agent 2.2.0+;
+#        более старый агент объявление с третьим ключом пропустит целиком).
 # 3.0.0: /etc/bisquite/code-server/config.yaml -> config (KEY=VALUE, домен
 #        code-server библиотеки bisquite-conf); прежний файл переносится и
 #        удаляется при установке; config.yaml в каталоге расширения удалён;

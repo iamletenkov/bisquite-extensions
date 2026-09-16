@@ -1,6 +1,8 @@
 name: selkies
-version: 4.0.2
+version: 4.0.3
 layout: 2
+# 4.0.3: объявление для Teleport несёт ICON=desktop (нужен teleport-agent 2.2.0+;
+#        более старый агент объявление с третьим ключом пропустит целиком).
 # 4.0.0: настройки — домен selkies библиотеки bisquite-conf (схема knobs,
 #        SELKIES_* — шаблоном): установка не переписывает файл; BISQUITE_SELKIES_*
 #        вне схемы больше не принимаются.
