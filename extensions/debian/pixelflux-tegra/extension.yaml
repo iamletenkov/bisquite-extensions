@@ -1,0 +1,23 @@
+name: pixelflux-tegra
+version: 1.0.0
+layout: 2
+family: deb
+# Только arm64: бэкенд кодирует через вендорскую libnvv4l2.so, которая есть
+# только в L4T. install.sh вдобавок отказывает на образе без
+# /etc/nv_tegra_release и на AppImage с питоном не cp312.
+arch: [arm64]
+# build     — install.sh подменяет pixelflux внутри AppImage расширения selkies
+#             официальным колесом апстрима и приводит питон и клиент Selkies
+#             2.0.0rc0 к новому формату кадра;
+# firstboot — configure.sh проверяет на живом железе, что бэкенд виден
+#             (в appliance сборки устройств кодера нет).
+phase: [build, firstboot]
+# Возможности не объявляет: рабочий стол даёт selkies, а это его ускоритель.
+# hw-video-codec тоже не наше — им владеет l4t-gstreamer, и два владельца
+# одной возможности сделали бы её бессмысленной.
+provides: []
+# Ставится ПОСЛЕ selkies: подменяет модуль внутри поставленного им AppImage.
+# Порядок строк в VMFILE bisquite не сортирует, поэтому реальная преграда —
+# проверка /opt/selkies/current в начале install.sh.
+requires: [web-remote-desktop]
+conflicts: []

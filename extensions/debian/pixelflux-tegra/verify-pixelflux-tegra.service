@@ -1,0 +1,19 @@
+[Unit]
+Description=Verify hardware H.264 encoding for Selkies on Jetson
+DefaultDependencies=no
+# После сессии, потому что проверяются те же устройства и библиотеки, с
+# которыми работает Selkies; но НЕ Requires — отказ проверки не должен гасить
+# рабочий стол, он должен быть громко виден в журнале.
+After=graphical.target display-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/bisquite/pixelflux-tegra/configure.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=verify-pixelflux-tegra
+TimeoutStartSec=120
+
+[Install]
+WantedBy=graphical.target
