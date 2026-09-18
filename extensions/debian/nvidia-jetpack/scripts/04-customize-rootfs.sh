@@ -32,6 +32,9 @@ CAMERA_DST="$ROOTFS/opt/sensing"
 # не работает — sensor_probe detect error на всех восьми портах). Разойдутся
 # умолчания — 02 скачает один пакет, а на плату уедет другой.
 CAMERA_PKG_REL="${CAMERA_PKG_REL:-Jetson AGX Orin Devkit/SG8A-AGON-G2Y-A1/JetPack6.2/SG8A_AGON_G2Y_A1_AGX_Orin_GMSL2x8_JP6.2_L4TR36.4.3}"
+# Метка версии L4T в именах пакетов Sensing — ею сужается список кандидатов,
+# когда точный путь не задан. Платозависима вместе с версией BSP.
+L4T_TAG="${L4T_TAG:-L4TR36.4.3}"
 
 # Пакеты для работы с камерами: v4l-utils даёт v4l2-ctl (перечислить сенсоры,
 # выставить формат), gstreamer — конвейер для проверки картинки, v4l2loopback
@@ -465,18 +468,18 @@ else
         # увезти неработающий YUV.
         L4T_MATCH=()
         for d in "${FOUND[@]}"; do
-            case "$d" in *L4TR36.4.3*) L4T_MATCH+=("$d") ;; esac
+            case "$d" in *"$L4T_TAG"*) L4T_MATCH+=("$d") ;; esac
         done
         if [ "${#L4T_MATCH[@]}" -eq 1 ]; then
             CAMERA_PKG="${L4T_MATCH[0]}"
-            echo "кандидатов несколько, единственный под L4T 36.4.3: ${CAMERA_PKG#"$CAMERA_SRC"/}"
+            echo "кандидатов несколько, единственный под $L4T_TAG: ${CAMERA_PKG#"$CAMERA_SRC"/}"
         elif [ "${#L4T_MATCH[@]}" -gt 1 ]; then
-            echo "ПРЕДУПРЕЖДЕНИЕ: под L4T 36.4.3 подходит несколько пакетов —"
+            echo "ПРЕДУПРЕЖДЕНИЕ: под $L4T_TAG подходит несколько пакетов —"
             echo "  они отличаются набором камер, и выбрать за оператора нельзя:"
             printf '    %s\n' "${L4T_MATCH[@]#"$CAMERA_SRC"/}"
             echo "  Укажи нужный явно: CAMERA_PKG_REL='...' $0 -u ... -p ..."
         else
-            echo "ПРЕДУПРЕЖДЕНИЕ: кандидатов несколько, ни один не про L4T 36.4.3:"
+            echo "ПРЕДУПРЕЖДЕНИЕ: кандидатов несколько, ни один не про $L4T_TAG:"
             printf '    %s\n' "${FOUND[@]#"$CAMERA_SRC"/}"
             echo "  Укажи нужный явно: CAMERA_PKG_REL='...' $0 -u ... -p ..."
         fi

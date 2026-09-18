@@ -45,6 +45,15 @@ APP_SIZE="${APP_SIZE:-40GiB}"
 MIN_FREE_GIB="${MIN_FREE_GIB:-40}"
 
 BOARD_TARGET="${BOARD_TARGET:-jetson-agx-orin-devkit}"
+# РАЗМЕТКА И QSPI — ПЛАТОЗАВИСИМЫ. Умолчания под AGX Orin (t234); профиль
+# другой платы подменяет их своими (у Xavier — flash_l4t_t194_nvme.xml).
+#
+# QSPI_CFG раскрывается через `-`, а не `:-`, потому что ПУСТАЯ строка здесь
+# осмысленна: у AGX Xavier QSPI нет вовсе, загрузчик лежит в eMMC модуля, и
+# ключ -p из команды должен исчезнуть целиком, а не получить оринский конфиг.
+FLASH_XML="${FLASH_XML:-tools/kernel_flash/flash_l4t_t234_nvme.xml}"
+QSPI_CFG="${QSPI_CFG-bootloader/generic/cfg/flash_t234_qspi.xml}"
+
 
 step() { echo; echo "=== $* ==="; }
 
@@ -212,12 +221,16 @@ echo "убрано; TMPDIR = [${TMPDIR:-}] (обязано быть пусто)"
 step "7. Генерация образов (--no-flash), 15-40 минут"
 echo "APP_SIZE = $APP_SIZE ; цель = $BOARD_TARGET ; лог = $LOG"
 cd "$LFT" || exit 1
+# Пустой массив под `set -u` раскрывается только в форме ${a[@]+"${a[@]}"};
+# простое "${a[@]}" на пустом массиве роняет старый bash.
+QSPI_ARG=()
+[ -n "$QSPI_CFG" ] && QSPI_ARG=(-p "-c $QSPI_CFG")
 set -x
 ./tools/kernel_flash/l4t_initrd_flash.sh \
     --no-flash \
     --external-device nvme0n1p1 \
-    -c tools/kernel_flash/flash_l4t_t234_nvme.xml \
-    -p "-c bootloader/generic/cfg/flash_t234_qspi.xml" \
+    -c "$FLASH_XML" \
+    ${QSPI_ARG[@]+"${QSPI_ARG[@]}"} \
     -S "$APP_SIZE" \
     --showlogs --network usb0 \
     "$BOARD_TARGET" external 2>&1 | tee "$LOG"

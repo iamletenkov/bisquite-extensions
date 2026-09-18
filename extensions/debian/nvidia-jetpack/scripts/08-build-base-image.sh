@@ -53,7 +53,10 @@ BOARD_REVISION="${BOARD_REVISION:-default}"
 # Откуда взять значение для другого модуля: его печатает любой прогон
 # flash.sh с подключённой платой (шаг 05) строкой
 #   Board ID(3701) version(500) sku(0000) revision(J.0)
-BOARD_SKU="${BOARD_SKU:-0000}"
+# Раскрытие через `-`: ПУСТОЙ SKU — осмысленное значение профиля, «мы его
+# ещё не знаем». Подставлять на него оринский 0000 нельзя — получился бы
+# образ под чужой модуль, и узналось бы это на плате. Отказ ниже.
+BOARD_SKU="${BOARD_SKU-0000}"
 # У creator'а есть только SD и USB; ветки под NVMe нет вовсе. Выбор влияет на
 # то, какое имя устройства он впишет в root= (USB -> /dev/sda1), а мы это
 # значение всё равно заменяем на PARTUUID — см. шаг 4 ниже.
@@ -63,6 +66,16 @@ OUT_QCOW2="${OUT_QCOW2:-$WORK/jetson-orin-bsp.qcow2}"
 MIN_FREE_GIB="${MIN_FREE_GIB:-30}"
 
 CREATOR="$LFT/tools/jetson-disk-image-creator.sh"
+
+if [ -z "$BOARD_SKU" ]; then
+    echo "ОТКАЗ: BOARD_SKU пуст — профиль платы не знает SKU модуля."
+    echo "Без него flash.sh откажет с 'Unrecognized module SKU', а угаданный"
+    echo "даёт образ под чужой модуль. Значение печатает прогон flash.sh"
+    echo "с платой в recovery (шаг 05), строкой вида:"
+    echo "    Board ID(2888) version(400) sku(0001) revision(D.0)"
+    echo "Подай его: BOARD_SKU=0001 $0"
+    exit 1
+fi
 
 step() { echo; echo "=== $* ==="; }
 fail() { echo; echo "ОТКАЗ: $*"; exit 1; }

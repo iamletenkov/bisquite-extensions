@@ -59,11 +59,20 @@ DEST="$WORK/camera-drivers"
 # оператор, а не правка скрипта. Общее имя переменной держит шаги
 # согласованными: 02 качает, 04 кладёт в rootfs, и если умолчания разойдутся,
 # на плату уедет не тот пакет, который проверяли.
-CAMERA_PKG_REL="${CAMERA_PKG_REL:-Jetson AGX Orin Devkit/SG8A-AGON-G2Y-A1/JetPack6.2/SG8A_AGON_G2Y_A1_AGX_Orin_GMSL2x8_JP6.2_L4TR36.4.3}"
+CAMERA_PKG_REL="${CAMERA_PKG_REL-Jetson AGX Orin Devkit/SG8A-AGON-G2Y-A1/JetPack6.2/SG8A_AGON_G2Y_A1_AGX_Orin_GMSL2x8_JP6.2_L4TR36.4.3}"
 # Каталог версии JetPack — нужен только для диагностики, когда пакета нет.
 JETPACK_DIR="$(dirname "$CAMERA_PKG_REL")"
 
 step() { echo; echo "=== $* ==="; }
+
+# ПЛАТА БЕЗ КАМЕР — НЕ ОТКАЗ. Профиль, который не объявляет CAMERA_PKG_REL,
+# говорит «этому железу драйверов Sensing не положено»; шаг завершается
+# успешно, чтобы оркестратор 09 не спотыкался на нём. Отказывать здесь
+# значило бы требовать камеры от всякой платы.
+if [ -z "$CAMERA_PKG_REL" ]; then
+    echo "профиль пакета камер не объявляет (CAMERA_PKG_REL пуст) — шаг пропущен"
+    exit 0
+fi
 
 command -v git >/dev/null 2>&1 || { echo "ОСТАНОВ: нет git"; exit 1; }
 

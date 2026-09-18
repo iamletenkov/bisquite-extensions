@@ -146,6 +146,11 @@ ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TEST=="power/control", 
 с внятным сообщением. Станция без скриптов прошить ничего не может, и узнать
 об этом на живой машине хуже, чем на сборке.
 
+`scripts/boards/*.env` едут рядом, в `/opt/nvidia-jetpack/boards/`, правами
+`0644`. Их отсутствие — **предупреждение, а не отказ**, и разница здесь
+содержательная: без скриптов станция не умеет ничего, а без профилей она
+умеет ровно одну плату — ту, чьи значения зашиты в скрипты умолчаниями.
+
 ## Чего расширение НЕ делает
 
 - **Ничего не запускает автоматически.** Ни таймеров, ни юнитов, ни
@@ -169,16 +174,37 @@ ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TEST=="power/control", 
 
 | Скрипт | Что делает |
 |---|---|
-| `01-fetch-l4t.sh` | Качает BSP, sample rootfs и оба оверлея; сверяет SHA1 с эталонами |
-| `02-fetch-camera-drivers.sh` | Драйверы Sensing `SG8A-AGON-G2Y-A1` под JetPack 6.2 |
+| `01-fetch-l4t.sh` | Качает BSP, sample rootfs и оверлеи профиля; сверяет SHA1 с эталонами |
+| `02-fetch-camera-drivers.sh` | Драйверы Sensing `SG8A-AGON-G2Y-A1`; при пустом `CAMERA_PKG_REL` — пропуск |
 | `03-prepare-bsp.sh` | Распаковка, `apply_binaries.sh`, подмена `libnvisppg.so` **после** него |
 | `04-customize-rootfs.sh` | Пользователь без `oem-config`, пакеты и драйверы камер внутрь rootfs (через `qemu-aarch64-static`) |
 | `05-generate-images.sh` | `l4t_initrd_flash.sh --no-flash`; плата должна быть в recovery |
 | `06-flash.sh` | `--flash-only`; предполётно проверяет ufw, место и режим APX |
 | `07-flash-rootfs-ssh.sh` | Обход: rootfs в APP SSH-потоком, минуя NFS |
+| `08-build-base-image.sh` | Образ диска (`.img` + `.qcow2`) для тиражирования на флот; плата не нужна |
+| `09-build-jetson-base.sh` | Оркестратор `01`→`02`→`03`→`04 -U`→`08` плюс `bs image import` |
+| `10-flash-internal.sh` | Выборочно: только QSPI либо QSPI + внутренняя eMMC |
 | `90-install-sdkmanager.sh` | SDK Manager по редирект-ссылке NVIDIA |
 
 Порядок запуска и что делать при обрыве — в `/opt/nvidia-jetpack/README.md`.
+
+### Плата задаётся профилем, а не правкой
+
+Скрипты платонезависимы: версия L4T со ссылками и суммами, XML разметки,
+конфиг QSPI, пакет камер, цель `flash.sh` и SKU модуля читаются из окружения.
+Согласованный набор на плату лежит в `boards/`:
+
+| Профиль | Плата | L4T |
+|---|---|---|
+| `orin-agx.env` | AGX Orin Developer Kit | 36.4.3 (JetPack 6.2) |
+| `xavier-agx.env` | AGX Xavier Developer Kit | 35.6.5 (JetPack 5.1.x), **не прогнан на железе** |
+
+```bash
+set -a; . /opt/nvidia-jetpack/boards/xavier-agx.env; set +a
+sudo -E /opt/nvidia-jetpack/09-build-jetson-base.sh -t jetson-xavier-bsp:35.6.5
+```
+
+`sudo -E` обязателен — иначе sudo вычистит окружение и соберётся Orin.
 
 ## Подключение в VMFILE
 
@@ -201,9 +227,10 @@ nvidia-jetpack` параметров не принимает, и задават�
 
 Настраивается всё **на станции**, переменными окружения самих скриптов:
 `WORK` (рабочий каталог, умолчание `/srv/jetson`), `APP_SIZE`,
-`MIN_FREE_GIB`, `BOARD_TARGET`, `CAMERA_SRC`, `CAMERA_PKG_REL`. Полная
-таблица с умолчаниями — в `/opt/nvidia-jetpack/README.md` (он же
-`scripts/README.md` в этом дереве). Такой порядок выбран потому, что все эти
+`MIN_FREE_GIB`, `BOARD_TARGET`, `CAMERA_SRC`, `CAMERA_PKG_REL` и профильные
+`BSP_URL`/`FLASH_XML`/`BOARD_SKU`/… Полная таблица с умолчаниями — в
+`/opt/nvidia-jetpack/README.md` (он же `scripts/README.md` в этом дереве);
+готовые наборы на плату — в `boards/`. Такой порядок выбран потому, что все эти
 значения зависят от носителя и от конкретной платы, а не от образа: зашитые
 в образ, они потребовали бы пересборки ради `-S`.
 

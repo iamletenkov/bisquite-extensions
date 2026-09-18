@@ -1,8 +1,11 @@
 #!/bin/bash
-# Шаг 1: скачивание L4T 36.4.3 (JetPack 6.2) — BSP, sample rootfs и два оверлея.
+# Шаг 1: скачивание L4T — BSP, sample rootfs и оверлеи. Умолчания — AGX Orin
+# (JetPack 6.2, L4T 36.4.3); другая плата задаётся ПРОФИЛЕМ, а не правкой.
 #
 #     bash /opt/nvidia-jetpack/01-fetch-l4t.sh
 #     WORK=/mnt/big/jetson bash /opt/nvidia-jetpack/01-fetch-l4t.sh
+#     set -a; . /opt/nvidia-jetpack/boards/xavier-agx.env; set +a
+#     bash /opt/nvidia-jetpack/01-fetch-l4t.sh
 #
 # Качается ~2.4 GB. Скрипт идемпотентен: целые файлы повторно не качаются,
 # оборванные — докачиваются.
@@ -25,19 +28,32 @@ step() { echo; echo "=== $* ==="; }
 # Поиск по имени в файле сумм поэтому не находит ничего, и «сумма не нашлась»
 # читается как «сверять нечего». Сверяем по зашитым ниже эталонам; сам
 # release_sha_hashes.txt качаем справочно, для глаз оператора.
-BSP_URL=https://developer.nvidia.com/downloads/embedded/l4t/r36_release_v4.3/release/Jetson_Linux_r36.4.3_aarch64.tbz2
-RFS_URL=https://developer.nvidia.com/downloads/embedded/l4t/r36_release_v4.3/release/Tegra_Linux_Sample-Root-Filesystem_r36.4.3_aarch64.tbz2
-OV_QSPI_URL=https://developer.nvidia.com/downloads/embedded/L4T/overlay_mb1bct_36.x.tbz2
-OV_CAM_URL=https://developer.nvidia.com/downloads/embedded/L4T/r36_Release_v4.3/overlay_camera_36.4.3.tbz2
-SHA_URL=https://developer.nvidia.com/downloads/embedded/l4t/r36_release_v4.3/release/release_sha_hashes.txt
+BSP_URL="${BSP_URL:-https://developer.nvidia.com/downloads/embedded/l4t/r36_release_v4.3/release/Jetson_Linux_r36.4.3_aarch64.tbz2}"
+RFS_URL="${RFS_URL:-https://developer.nvidia.com/downloads/embedded/l4t/r36_release_v4.3/release/Tegra_Linux_Sample-Root-Filesystem_r36.4.3_aarch64.tbz2}"
+SHA_URL="${SHA_URL:-https://developer.nvidia.com/downloads/embedded/l4t/r36_release_v4.3/release/release_sha_hashes.txt}"
 
-BSP_SHA1=3eb3c5a19a417313383c3bce297e07274a237e36   # ~683 MB
-RFS_SHA1=0bdb4e655d48bdf7e7bd98d3b7b69480576bfd7e   # ~1.7 GB
+BSP_SHA1="${BSP_SHA1:-3eb3c5a19a417313383c3bce297e07274a237e36}"   # ~683 MB
+RFS_SHA1="${RFS_SHA1:-0bdb4e655d48bdf7e7bd98d3b7b69480576bfd7e}"   # ~1.7 GB
+
+# ОВЕРЛЕИ НЕОБЯЗАТЕЛЬНЫ, и пустая ссылка здесь — осмысленное значение:
+# «этой плате оверлей не положен». У AGX Xavier нет ни QSPI (загрузчик
+# лежит в eMMC модуля), ни оверлея камер JP6 — профиль обнуляет обе строки.
+#
+# РАСКРЫТИЕ ЧЕРЕЗ `-`, А НЕ `:-`, И ЭТО СУЩЕСТВЕННО: `${VAR:-умолчание}`
+# подставляет умолчание и на ПУСТОЕ значение, то есть профиль, обнуливший
+# ссылку, получил бы обратно оринский оверлей и скачал его молча.
+OV_QSPI_URL="${OV_QSPI_URL-https://developer.nvidia.com/downloads/embedded/L4T/overlay_mb1bct_36.x.tbz2}"
+OV_CAM_URL="${OV_CAM_URL-https://developer.nvidia.com/downloads/embedded/L4T/r36_Release_v4.3/overlay_camera_36.4.3.tbz2}"
+
+# Что искать в оверлее QSPI, чтобы убедиться: скачан тот файл и тот модуль.
+QSPI_OVERLAY_DTS="${QSPI_OVERLAY_DTS:-tegra234-mb1-bct-device-p3701-0000.dts}"
+# Чем грепать справочный release_sha_hashes.txt на шаге 4.
+SHA_GREP="${SHA_GREP:-Jetson_Linux_R?36\.4\.3|Sample-Root-Filesystem_R?36\.4\.3}"
 
 BSP_FILE=$(basename "$BSP_URL")
 RFS_FILE=$(basename "$RFS_URL")
-OV_QSPI_FILE=$(basename "$OV_QSPI_URL")
-OV_CAM_FILE=$(basename "$OV_CAM_URL")
+OV_QSPI_FILE=${OV_QSPI_URL:+$(basename "$OV_QSPI_URL")}
+OV_CAM_FILE=${OV_CAM_URL:+$(basename "$OV_CAM_URL")}
 SHA_FILE=$(basename "$SHA_URL")
 
 # ------------------------------------------------------------- подготовка
@@ -62,7 +78,7 @@ df -h "$WORK" | tail -1
 # Поэтому: всегда wget -c (докачка хвоста), потом сверка. Для файлов без
 # зашитого эталона -c тоже полезен — wget сверяет размер с сервером и
 # на целом файле честно говорит «nothing to do».
-step "1. Скачивание в $DL (~2.4 GB суммарно)"
+step "1. Скачивание в $DL (полный набор AGX Orin — ~2.4 GB)"
 cd "$DL"
 
 fetch() {
@@ -80,8 +96,16 @@ fetch() {
 
 fetch "$BSP_URL"     "$BSP_SHA1"
 fetch "$RFS_URL"     "$RFS_SHA1"
-fetch "$OV_QSPI_URL"
-fetch "$OV_CAM_URL"
+if [ -n "$OV_QSPI_URL" ]; then
+    fetch "$OV_QSPI_URL"
+else
+    echo "оверлей QSPI                                               профиль его не объявляет — пропуск"
+fi
+if [ -n "$OV_CAM_URL" ]; then
+    fetch "$OV_CAM_URL"
+else
+    echo "оверлей камер                                              профиль его не объявляет — пропуск"
+fi
 fetch "$SHA_URL"
 
 # ---------------------------------------------------------------- сверка
@@ -121,6 +145,11 @@ fi
 # оверлея на другую ревизию — состав у них разный.
 step "3. Состав оверлеев"
 
+if [ -z "$OV_QSPI_URL" ] && [ -z "$OV_CAM_URL" ]; then
+    echo "профиль оверлеев не объявляет — проверять нечего"
+fi
+
+if [ -n "$OV_QSPI_URL" ]; then
 echo "--- $OV_QSPI_FILE"
 if ! qspi_list=$(tar tf "$OV_QSPI_FILE" 2>&1); then
     echo "$qspi_list"
@@ -128,17 +157,21 @@ if ! qspi_list=$(tar tf "$OV_QSPI_FILE" 2>&1); then
     exit 1
 fi
 printf '%s\n' "$qspi_list"
-# Наш модуль — p3701-0000 (AGX Orin Developer Kit, 32 GB). Оверлей чинит
-# тайминги mb1; без этого dts прошивка QSPI бессмысленна.
-if printf '%s\n' "$qspi_list" | grep -q 'tegra234-mb1-bct-device-p3701-0000\.dts'; then
-    echo "OK: tegra234-mb1-bct-device-p3701-0000.dts на месте"
+# Умолчание — модуль p3701-0000 (AGX Orin Developer Kit, 32 GB). Оверлей чинит
+# тайминги mb1; без этого dts прошивка QSPI бессмысленна. Имя ищется профилем
+# ($QSPI_OVERLAY_DTS): у другого модуля dts называется иначе, и найденный
+# «хоть какой-нибудь» означал бы оверлей от чужого железа.
+if printf '%s\n' "$qspi_list" | grep -qF "$QSPI_OVERLAY_DTS"; then
+    echo "OK: $QSPI_OVERLAY_DTS на месте"
 else
-    echo "ОСТАНОВ: в оверлее нет tegra234-mb1-bct-device-p3701-0000.dts."
+    echo "ОСТАНОВ: в оверлее нет $QSPI_OVERLAY_DTS."
     echo "Либо скачался не тот файл, либо NVIDIA переложила состав оверлея."
     exit 1
 fi
-
 echo
+fi
+
+if [ -n "$OV_CAM_URL" ]; then
 echo "--- $OV_CAM_FILE"
 if ! cam_list=$(tar tf "$OV_CAM_FILE" 2>&1); then
     echo "$cam_list"
@@ -157,11 +190,12 @@ else
     echo "ОСТАНОВ: ждали ровно один libnvisppg.so, нашли $cam_count."
     exit 1
 fi
+fi
 
 step "4. Справочно: суммы от NVIDIA"
 # Имена внутри — с заглавной R, наши файлы на диске — с маленькой.
 # Сверять по нему нечего, смотрим глазами.
-grep -iE 'Jetson_Linux_R?36\.4\.3|Sample-Root-Filesystem_R?36\.4\.3' "$SHA_FILE" || true
+grep -iE "$SHA_GREP" "$SHA_FILE" || true
 
 step "ГОТОВО"
 ls -lh "$DL"

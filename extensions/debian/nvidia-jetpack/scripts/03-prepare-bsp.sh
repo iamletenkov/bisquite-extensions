@@ -19,13 +19,23 @@ WORK="${WORK:-/srv/jetson}"
 DL="$WORK/downloads"
 LFT="$WORK/Linux_for_Tegra"
 
-BSP_FILE=Jetson_Linux_r36.4.3_aarch64.tbz2
-RFS_FILE=Tegra_Linux_Sample-Root-Filesystem_r36.4.3_aarch64.tbz2
-OV_QSPI_FILE=overlay_mb1bct_36.x.tbz2
-OV_CAM_FILE=overlay_camera_36.4.3.tbz2
+# Умолчания — AGX Orin (L4T 36.4.3). Другая плата подаётся профилем из
+# boards/, теми же именами переменных, что и на шаге 01: имена файлов здесь
+# обязаны совпасть с тем, что шаг 01 положил в $DL.
+#
+# Пустое имя оверлея — осмысленное значение: «этой плате оверлей не положен»
+# (у AGX Xavier нет ни QSPI, ни оверлея камер JP6). Поэтому раскрытие через
+# `-`, а не `:-`: последнее вернуло бы оринское умолчание на пустую строку.
+BSP_FILE="${BSP_FILE:-Jetson_Linux_r36.4.3_aarch64.tbz2}"
+RFS_FILE="${RFS_FILE:-Tegra_Linux_Sample-Root-Filesystem_r36.4.3_aarch64.tbz2}"
+OV_QSPI_FILE="${OV_QSPI_FILE-overlay_mb1bct_36.x.tbz2}"
+OV_CAM_FILE="${OV_CAM_FILE-overlay_camera_36.4.3.tbz2}"
 
-BSP_SHA1=3eb3c5a19a417313383c3bce297e07274a237e36
-RFS_SHA1=0bdb4e655d48bdf7e7bd98d3b7b69480576bfd7e
+BSP_SHA1="${BSP_SHA1:-3eb3c5a19a417313383c3bce297e07274a237e36}"
+RFS_SHA1="${RFS_SHA1:-0bdb4e655d48bdf7e7bd98d3b7b69480576bfd7e}"
+
+# Что обязано появиться после наложения оверлея QSPI — имя dts модуля.
+QSPI_OVERLAY_DTS="${QSPI_OVERLAY_DTS:-tegra234-mb1-bct-device-p3701-0000.dts}"
 
 # Ожидаемые MD5 библиотеки ISP. Совпали — значит подменяем именно то и
 # именно на то; разошлись — оверлей или BSP другой ревизии, и молча
@@ -142,18 +152,25 @@ fi
 [ -x "$LFT/apply_binaries.sh" ] || { echo "ОСТАНОВ: нет $LFT/apply_binaries.sh"; exit 1; }
 
 # --------------------------------------------------------- 2. оверлей QSPI
-step "2. Оверлей QSPI (фикс таймингов mb1, обязателен)"
+step "2. Оверлей QSPI (фикс таймингов mb1)"
 # Распаковывается в тот же родительский каталог, что и BSP: внутри архива
 # путь начинается с ./Linux_for_Tegra/..., то есть он ложится поверх дерева
 # сам. Операция чисто файловая, повторный прогон безвреден.
-tar -xpf "$DL/$OV_QSPI_FILE" -C "$WORK"
-QSPI_DTS="$LFT/bootloader/generic/BCT/tegra234-mb1-bct-device-p3701-0000.dts"
-[ -f "$QSPI_DTS" ] || {
-    echo "ОСТАНОВ: после оверлея нет $QSPI_DTS"
-    echo "Состав оверлея изменился — проверь его руками (tar tf)."
-    exit 1
-}
-ls -l "$QSPI_DTS"
+#
+# Плате без QSPI (AGX Xavier — загрузчик у него в eMMC модуля) оверлея
+# не положено вовсе, и профиль обнуляет имя файла. Это пропуск, а не отказ.
+if [ -z "$OV_QSPI_FILE" ]; then
+    echo "профиль оверлея QSPI не объявляет — пропуск"
+else
+    tar -xpf "$DL/$OV_QSPI_FILE" -C "$WORK"
+    QSPI_DTS="$LFT/bootloader/generic/BCT/$QSPI_OVERLAY_DTS"
+    [ -f "$QSPI_DTS" ] || {
+        echo "ОСТАНОВ: после оверлея нет $QSPI_DTS"
+        echo "Состав оверлея изменился — проверь его руками (tar tf)."
+        exit 1
+    }
+    ls -l "$QSPI_DTS"
+fi
 
 # ------------------------------------------------------------ 3. rootfs
 step "3. Распаковка sample rootfs (~1.8 GB, 5-10 минут)"
@@ -193,6 +210,13 @@ step "7. Подмена libnvisppg.so из оверлея камер"
 #
 # Сам оверлей ничего не устанавливает: библиотека лежит в КОРНЕ
 # Linux_for_Tegra внутри архива, а не в rootfs, и копируется руками.
+if [ -z "$OV_CAM_FILE" ]; then
+    echo "профиль оверлея камер не объявляет — пропуск"
+    SKIP_CAM_OVERLAY=1
+else
+    SKIP_CAM_OVERLAY=0
+fi
+if [ "$SKIP_CAM_OVERLAY" = 0 ]; then
 TMPOV=$(mktemp -d "$WORK/.overlay-camera.XXXXXX")
 trap 'rm -rf "$TMPOV"' EXIT
 tar -xpf "$DL/$OV_CAM_FILE" -C "$TMPOV"
@@ -218,6 +242,7 @@ fi
 
 cp -f "$SRC" "$DST"
 echo "после копии: $(md5sum "$DST" | cut -d' ' -f1)"
+fi
 
 # ------------------------------------------------------------- 8. метка
 step "8. Метка готовности дерева"

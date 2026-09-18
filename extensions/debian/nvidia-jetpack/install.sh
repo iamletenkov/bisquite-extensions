@@ -232,6 +232,31 @@ install_station_scripts() {
     else
         log_warn "No $source_dir/README.md — flashing order will be undocumented on the station"
     fi
+
+    # Профили плат. Без них станция умеет ровно одну плату — ту, чьи значения
+    # зашиты в скрипты умолчаниями, — а отсутствие профиля не отказ: скрипты
+    # работают и без него, просто собирают AGX Orin.
+    local boards_dir="$source_dir/boards"
+    if [[ -d "$boards_dir" ]]; then
+        local profiles=()
+        while IFS= read -r -d '' profile; do
+            profiles+=("$profile")
+        done < <(find "$boards_dir" -maxdepth 1 -type f -name '*.env' -print0)
+
+        if (( ${#profiles[@]} == 0 )); then
+            log_warn "No *.env in $boards_dir — station will only know its built-in defaults"
+        else
+            log_info "Installing ${#profiles[@]} board profiles into $TARGET_DIR/boards"
+            mkdir -p "$TARGET_DIR/boards"
+            local profile
+            for profile in "${profiles[@]}"; do
+                install -m 0644 "$profile" "$TARGET_DIR/boards/$(basename "$profile")"
+                log_info "  boards/$(basename "$profile")"
+            done
+        fi
+    else
+        log_warn "No $boards_dir — station will only know its built-in defaults"
+    fi
 }
 
 main() {
