@@ -1,0 +1,21 @@
+name: pixelflux-v4l2m2m
+version: 0.1.0
+layout: 2
+# 0.1.0: ждёт мерджа selkies-project/pixelflux#35 — колесо с бэкендом
+#        v4l2m2m апстрим ещё не публикует, и install.sh отказывается ставить
+#        заглушку вместо закрепления.
+family: deb
+# Бэкенд generic и по архитектуре не гейтится, но колесо закрепляется под
+# конкретную пару arch+ABI. Сегодня закрепление будет arm64: платы с M2M
+# в нашем парке — Raspberry Pi 3/4 и CM4. Для amd64 нужен свой файл и свой
+# sha256, а не «то же самое».
+arch: [arm64]
+# build     — подменить pixelflux внутри AppImage и применить правки rc0;
+# firstboot — проверить на живом устройстве, что сессия поднялась НА УЗЛЕ,
+#             а не свалилась в софт.
+phase: [build, firstboot]
+provides: [hardware-video-encoding]
+# Расширение подменяет модуль внутри AppImage, который ставит `selkies`:
+# поставленное раньше будет затёрто.
+requires: [web-remote-desktop]
+conflicts: [pixelflux-tegra]

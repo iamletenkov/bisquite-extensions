@@ -14,7 +14,8 @@
 # окружение там ни к чему. Плюс подмена чужого артефакта должна быть видна
 # строкой в VMFILE, а не спрятана в общем расширении.
 #
-# ЧТО ЗДЕСЬ ВРЕМЕННОЕ. rc0-compat.py — отделяемая половина: он нужен только
+# ЧТО ЗДЕСЬ ВРЕМЕННОЕ. lib/rc0-compat.py — отделяемая половина, общая с
+# расширением pixelflux-v4l2m2m: он нужен только
 # потому, что последний релиз Selkies старше pixelflux (ишью апстрима #395).
 # Подкладка libxcb (ишью #396) нужна при любой версии, пока AppImage несёт
 # свою libxcb: без неё сессия умирает через несколько секунд после старта
@@ -56,8 +57,8 @@ case "$(dpkg --print-architecture)" in
     *) log_error "архитектура $(dpkg --print-architecture): бэкенд Tegra существует только на arm64"; exit 1 ;;
 esac
 
-for f in rc0-compat.py gbm_shim.c configure.sh verify-pixelflux-tegra.service \
-         lib/get_cloud_user.sh; do
+for f in gbm_shim.c configure.sh verify-pixelflux-tegra.service \
+         lib/rc0-compat.py lib/get_cloud_user.sh; do
     [[ -f "$SCRIPT_DIR/$f" ]] || { log_error "рядом нет $f — расширение доставлено не целиком"; exit 1; }
 done
 
@@ -122,7 +123,7 @@ log_info "ставлю колесо питоном AppImage"
 
 # --- совместимость Selkies 2.0.0rc0 с новым pixelflux -------------------------
 
-"$SELKIES_PY" "$SCRIPT_DIR/rc0-compat.py" --site "$SITE" \
+"$SELKIES_PY" "$SCRIPT_DIR/lib/rc0-compat.py" --site "$SITE" \
     || { log_error "правки совместимости не легли — см. отказы выше"; exit 1; }
 
 # --- шим gbm (только focal) ---------------------------------------------------
@@ -184,7 +185,7 @@ if ! grep -qa "vendor V4L2 encoder" "$MODULE_SO"; then
     log_error "в модуле нет бэкенда Tegra — колесо собрано без него"
     exit 1
 fi
-"$SELKIES_PY" "$SCRIPT_DIR/rc0-compat.py" --site "$SITE" --check >/dev/null \
+"$SELKIES_PY" "$SCRIPT_DIR/lib/rc0-compat.py" --site "$SITE" --check >/dev/null \
     || { log_error "перепроверка правок не прошла"; exit 1; }
 
 # --- первая загрузка ----------------------------------------------------------
