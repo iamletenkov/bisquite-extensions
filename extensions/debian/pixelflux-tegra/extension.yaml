@@ -20,4 +20,7 @@ provides: []
 # Порядок строк в VMFILE bisquite не сортирует, поэтому реальная преграда —
 # проверка /opt/selkies/current в начале install.sh.
 requires: [web-remote-desktop]
-conflicts: []
+# Оба подменяют pixelflux внутри одного AppImage: поставленный вторым
+# затирает первый, и какой бэкенд окажется в сессии, зависело бы от порядка
+# строк в VMFILE. Объявление симметрично тому, что стоит в pixelflux-v4l2m2m.
+conflicts: [pixelflux-v4l2m2m]
