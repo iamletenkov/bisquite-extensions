@@ -30,7 +30,7 @@ load_profile() {
     # Fields only some profiles declare. A value left by an earlier
     # load_profile in the same shell would otherwise leak into this pair
     # (nano@32.7.4 then agx-orin: a vendor image for Orin).
-    unset BOOTLOADER_TOOL ROOTFS_SOURCE ROOTFS_L4T \
+    unset RCM_USB_ID BOOTLOADER_TOOL ROOTFS_SOURCE ROOTFS_L4T \
           VENDOR_IMG_URL VENDOR_IMG_SIZE VENDOR_IMG_SHA256 VENDOR_IMG_MD5 VENDOR_IMG_DATE
     set -a
     # shellcheck source=/dev/null

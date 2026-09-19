@@ -35,6 +35,9 @@ echo "== профили: Nano и источник системы =="
 check "nano@32.7.4 грузится, BOARDID=3448"           lp nano 32.7.4 '[ "$BOARDID" = 3448 ]'
 check "nano: FAB/SKU/BOARDREV из EEPROM"              lp nano 32.7.4 '[ "$FAB $BOARD_SKU $BOARDREV" = "400 0000 F.0" ]'
 check "nano: цель jetson-nano-qspi, nvmassflashgen"   lp nano 32.7.4 '[ "$BOARD_TARGET" = jetson-nano-qspi ] && [ "$BOOTLOADER_TOOL" = nvmassflashgen ]'
+check "USB-ID в recovery: nano 7f21"                  lp nano 32.7.4 '[ "$RCM_USB_ID" = 7f21 ]'
+check "USB-ID в recovery: xavier 7019"                lp agx-xavier 35.6.5 '[ "$RCM_USB_ID" = 7019 ]'
+check "USB-ID в recovery: orin 7023"                  lp agx-orin 36.4.3 '[ "$RCM_USB_ID" = 7023 ]'
 check "nano: разметка QSPI, FLASH_XML пуст"           lp nano 32.7.4 '[ "$QSPI_CFG" = bootloader/t210ref/cfg/flash_l4t_t210_max-spi_p3448.xml ] && [ -z "$FLASH_XML" ]'
 check "32.7.4: сверенный SHA1, хост 18.04, без -d"    lp nano 32.7.4 '[ "$BSP_SHA1" = 66ba218a9a60373dbbf00e5724fb66e40d1f527c ] && [ "$FLASH_HOSTS" = 18.04 ] && [ "$CREATOR_HAS_DEV_FLAG" = no ]'
 check "nano@32.7.4: система — образ вендора R32.6.1"  lp nano 32.7.4 '[ "$ROOTFS_SOURCE" = vendor-image ] && [ "$ROOTFS_L4T" = 32.6.1 ] && [ "$L4T" = 32.7.4 ]'
@@ -169,6 +172,22 @@ mk14n BBB; refuses "nano: подменённый cboot.bin — отказ" r14n
            refuses "…после отказа распакованное убрано" test -e "$ft/nout/.flash"
 mk14n AAA extra
            refuses "nano: файл, которого нет в манифесте, — отказ" r14n
+# The real (non-DRY_RUN) path up to nvmflash.sh: root via the id stub,
+# lsusb scripted per call (LSUSB_1, LSUSB_2), the answer on stdin.
+lb="$(mktemp -d)"
+printf '#!/bin/bash\ncase "${1:-}" in -u) echo 0 ;; -un) echo root ;; *) exec /usr/bin/id "$@" ;; esac\n' > "$lb/id"
+printf '#!/bin/bash\nn=$(( $(cat "$LSUSB_CNT" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$LSUSB_CNT"\nv="LSUSB_$n"; printf "%%b" "${!v:-${LSUSB_1:-}}"\n' > "$lb/lsusb"
+chmod +x "$lb/id" "$lb/lsusb"
+NANO='Bus 001 Device 009: ID 0955:7f21 NVIDIA Corp. APX\n'
+XAV='Bus 001 Device 010: ID 0955:7019 NVIDIA Corp. APX\n'
+f14n() { rm -f "$lb/cnt"; printf '%s\n' "$1" | env PATH="$lb:$PATH" LSUSB_CNT="$lb/cnt" "${P14N[@]}" RCM_USB_ID=7f21 FLASH_HOSTS=18.04 \
+           OUT_DIR="$ft/nout" LSUSB_1="$2" LSUSB_2="${3:-$2}" bash "$S/14-flash-bootloader.sh"; }
+mk14n AAA
+check   "nano в recovery одна, «да» — дошло до nvmflash.sh" f14n да "$NANO"
+refuses "в recovery Xavier вместо Nano — отказ"      f14n да "$XAV"
+refuses "Nano и Xavier в recovery разом — отказ"     f14n да "$NANO$XAV"
+refuses "вторая плата подключена во время вопроса — отказ после «да»" f14n да "$NANO" "$NANO$XAV"
+refuses "ответ не «да» — отмена"                     f14n нет "$NANO"
 
 echo "== образ вендора: vendor-image.sh =="
 vi="$(mktemp -d)"; mkdir -p "$vi/bin" "$vi/out"
@@ -301,6 +320,14 @@ rm -rf "$pt/w/Linux_for_Tegra/rootfs/etc"; : > "$pt/w/Linux_for_Tegra/rootfs/etc
 check   "повторный прогон по готовому дереву"          r03
 check   "…файл rootfs/etc от flash.sh стал каталогом"  test -d "$pt/w/Linux_for_Tegra/rootfs/etc"
 refuses "SHA1 тарболла не сошлась — отказ"            r03 BSP_SHA1=0000000000000000000000000000000000000000
+# A tree unpacked by hand (no marker) must not be trusted: 03 unpacks again.
+rm -f "$pt/w/Linux_for_Tegra/.bsp-sha1"; echo tampered > "$pt/w/Linux_for_Tegra/flash.sh"
+check   "дерево без метки распаковки — распаковано заново" r03
+check   "…подменённый файл вернулся из тарболла"      grep -qx '#!/bin/sh' "$pt/w/Linux_for_Tegra/flash.sh"
+check   "…метка несёт SHA1 тарболла"                  grep -qx "$(sha1sum "$pt/w/downloads/Jetson-210_Linux_R32.7.4_aarch64.tbz2" | cut -d' ' -f1)" "$pt/w/Linux_for_Tegra/.bsp-sha1"
+echo keep > "$pt/w/Linux_for_Tegra/sentinel"
+check   "метка совпала — распаковка пропущена"       r03
+check   "…дерево не тронуто"                          test -e "$pt/w/Linux_for_Tegra/sentinel"
 
 echo "== шаг 11: пакет Nano (nvmassflashgen) =="
 check   "nano: offline nvmassflashgen, цель QSPI"   bash -c "$(declare -f c11); S='$S'; c11 nano 32.7.4 | grep -q 'FUSELEVEL=fuselevel_production ./nvmassflashgen.sh jetson-nano-qspi mmcblk0p1'"

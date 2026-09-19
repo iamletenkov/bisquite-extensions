@@ -73,11 +73,17 @@ if [ "${ROOTFS_SOURCE:-nvidia-bsp}" = vendor-image ]; then
         echo "    rm $DL/$BSP_FILE && bash 01-fetch-l4t.sh"
         exit 1
     fi
-    if [ -d "$LFT/bootloader" ]; then
-        echo "Linux_for_Tegra уже распакован — пропускаю"
+    # Skip only on the marker a completed unpack of THIS tarball writes. A tree
+    # without it — unpacked by hand or cut short — is not trusted: the
+    # manifest would otherwise claim bsp_sha1 for files nobody checked
+    # against the tarball. Unpacking again over it restores every file.
+    if [ -d "$LFT/bootloader" ] && [ "$(cat "$LFT/.bsp-sha1" 2>/dev/null)" = "$BSP_SHA1" ]; then
+        echo "Linux_for_Tegra распакован из $BSP_FILE (метка .bsp-sha1) — пропускаю"
     else
         mkdir -p "$WORK"
-        tar -xpf "$DL/$BSP_FILE" -C "$WORK"
+        rm -f -- "$LFT/.bsp-sha1"
+        tar -xpf "$DL/$BSP_FILE" -C "$WORK" || { echo "ОСТАНОВ: $BSP_FILE не распаковался"; exit 1; }
+        echo "$BSP_SHA1" > "$LFT/.bsp-sha1"
     fi
     [ -x "$LFT/flash.sh" ] || { echo "ОСТАНОВ: нет $LFT/flash.sh"; exit 1; }
     # flash.sh copies nv_boot_control.conf to "${rootfs_dir}/etc"

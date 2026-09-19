@@ -107,10 +107,20 @@ case " ${FLASH_HOSTS:-} " in
     *" $host "*) ;;
     *) echo "ВНИМАНИЕ: хост Ubuntu $host, NVIDIA для L4T $L4T называет: ${FLASH_HOSTS:-?}" ;;
 esac
-# For Nano this check carries double weight: nvmflash.sh flashes EVERY board
-# in recovery at once.
-n="$(lsusb | grep -c 'ID 0955:')"
-[ "$n" -eq 1 ] || fail "в recovery ждали ровно одну плату NVIDIA (0955:), видно $n"
+# Exactly one NVIDIA device, and it must be THIS board in recovery: any other
+# 0955: device would be a different SoC or a second board. For Nano the check
+# carries double weight: nvmflash.sh flashes EVERY board in recovery at once.
+# Checked again after «да» — a board plugged in while the question waits
+# would otherwise be flashed too.
+one_board() {
+    local usb all mine
+    usb="$(lsusb)"
+    all="$(grep -c 'ID 0955:' <<<"$usb")"
+    mine="$(grep -c "ID 0955:${RCM_USB_ID:?профиль без RCM_USB_ID} " <<<"$usb")"
+    [ "$all" -eq 1 ] && [ "$mine" -eq 1 ] \
+        || fail "в recovery ждали ровно одну плату 0955:$RCM_USB_ID ($JETSON), видно NVIDIA: $all, из них $JETSON: $mine"
+}
+one_board
 
 cat <<WARN
 
@@ -123,6 +133,7 @@ WARN
 printf 'Введи "да" для запуска: '
 read -r answer
 [ "$answer" = "да" ] || { echo "Отменено — на плату ничего не записано."; exit 1; }
+one_board
 
 unset TMPDIR
 export USER="${USER:-root}"
