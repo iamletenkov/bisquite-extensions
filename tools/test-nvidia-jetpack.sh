@@ -87,5 +87,22 @@ mk14 BBB; refuses "подменённый файл загрузчика — от
 mk14 AAA; echo tamper >> "$ft/out/bootloader.tar.gz"
           refuses "испорченный архив — отказ"         r14
 
+echo "== шаг 15: проверка по BSP =="
+vt="$(mktemp -d)"
+mkbsp() {  # $1=yes — положить .conf платы
+  rm -rf "$vt/L"; mkdir -p "$vt/L/Linux_for_Tegra/tools/kernel_flash"
+  printf '\t\tjetson-agx-xavier-devkit)\n\t\t\tboardid="2888"\n\t\t-d | --device)\n' \
+      > "$vt/L/Linux_for_Tegra/tools/jetson-disk-image-creator.sh"
+  touch "$vt/L/Linux_for_Tegra/tools/kernel_flash/flash_l4t_t194_nvme.xml"
+  [ "$1" = yes ] && touch "$vt/L/Linux_for_Tegra/jetson-agx-xavier-devkit.conf"
+  tar -cjf "$vt/bsp.tbz2" -C "$vt/L" Linux_for_Tegra
+}
+r15() { ( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && unset WORK && \
+          BSP_URL="file://$vt/bsp.tbz2" VERIFY_DIR="$vt/v" bash "$S/15-verify-pair.sh" ); }
+mkbsp yes; check   "ветка, конфиг и XML на месте — проверено" r15
+           check   "отпечаток записан"  grep -q '^verdict=проверено' "$vt/v/agx-xavier@35.6.5.txt"
+mkbsp no;  refuses "ветка в creator есть, конфига нет — не собирается" r15
+           check   "это видно в отпечатке" grep -q '^conf=нет' "$vt/v/agx-xavier@35.6.5.txt"
+
 echo "проверок: $total, не прошло: $fails"
 [ "$fails" -eq 0 ]
