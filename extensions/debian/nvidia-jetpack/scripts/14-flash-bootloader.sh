@@ -7,8 +7,12 @@
 # НЕОБРАТИМО. Прежде чем трогать плату, пакет сверяется трижды: пара,
 # сумма архива, суммы файлов загрузчика. Любое расхождение — отказ.
 #
-# ⚠️ Заливка пакетом НЕ ПРОВЕРЕНА на железе (спека): команда --flash-only
-# взята из README_initrd_flash.txt, Workflow 7. Первый прогон — с монитором
+# The flashing tool comes from the board (BOOTLOADER_TOOL): initrd-flash on
+# AGX (l4t_initrd_flash.sh --flash-only, README_initrd_flash.txt, Workflow 7),
+# nvmassflashgen on Nano (the package's own nvmflash.sh, README_Massflash.txt).
+# All checks before flashing are shared.
+#
+# ⚠️ Заливка пакетом НЕ ПРОВЕРЕНА на железе (спека). Первый прогон — с монитором
 # и консолью на плате.
 set -uo pipefail
 
@@ -22,6 +26,16 @@ export MANIFEST_PY
 
 [ -s "$PKG" ] || fail "нет $PKG — сначала make build"
 [ -s "$MAN" ] || fail "нет $MAN — сначала make build"
+
+# Where the bootloader files sit inside the package, and whether files the
+# manifest does not list are tolerated. The Nano package is flat and hashed
+# whole (minus the build and flash logs), so an unlisted file there is a
+# substitution, not clutter.
+case "${BOOTLOADER_TOOL:-}" in
+    initrd-flash)   hash_rel=tools/kernel_flash/images/internal; hash_mode=listed ;;
+    nvmassflashgen) hash_rel=.; hash_mode=strict ;;
+    *) fail "BOOTLOADER_TOOL=${BOOTLOADER_TOOL:-<пусто>}, ждали initrd-flash или nvmassflashgen" ;;
+esac
 
 # Пара сверяется ПОЛНОСТЬЮ — всеми полями, которые manifest.py записал в
 # "pair", а не только (jetson, l4t). Offline-пакет EEPROM платы не читает:
@@ -59,8 +73,11 @@ mkdir -p "$FLASH_DIR"
 trap 'rm -rf -- "$FLASH_DIR"' EXIT
 tar -xzf "$PKG" -C "$FLASH_DIR" || fail "архив не распаковался"
 MFI="$FLASH_DIR/mfi_$BOARD_TARGET"
-[ -d "$MFI/tools/kernel_flash/images/internal" ] || fail "в архиве нет mfi_$BOARD_TARGET — пакет от другой платы?"
-python3 - "$MAN" "$MFI/tools/kernel_flash/images/internal" <<'PY' || exit 1
+[ -d "$MFI/$hash_rel" ] || fail "в архиве нет mfi_$BOARD_TARGET/$hash_rel — пакет от другой платы?"
+if [ "$BOOTLOADER_TOOL" = nvmassflashgen ] && [ ! -x "$MFI/nvmflash.sh" ]; then
+    fail "в архиве нет исполняемого mfi_$BOARD_TARGET/nvmflash.sh"
+fi
+python3 - "$MAN" "$MFI/$hash_rel" "$hash_mode" <<'PY' || exit 1
 import hashlib, json, sys
 from pathlib import Path
 want = json.load(open(sys.argv[1]))["bootloader_files"]
@@ -69,6 +86,13 @@ bad = [n for n, d in want.items()
        if not (root / n).is_file() or hashlib.sha256((root / n).read_bytes()).hexdigest() != d]
 if bad:
     sys.exit("ОТКАЗ: файлы загрузчика не совпали с манифестом: " + ", ".join(bad))
+if sys.argv[3] == "strict":
+    # The same two exclusions as step 11: the build log and the flash logs.
+    have = {"./" + p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
+    extra = sorted(n for n in have - set(want)
+                   if n != "./mfi.log" and not n.startswith("./mfilogs/"))
+    if extra:
+        sys.exit("ОТКАЗ: в пакете файлы, которых нет в манифесте: " + ", ".join(extra))
 print(f"файлы загрузчика: {len(want)} сошлись")
 PY
 
@@ -83,6 +107,8 @@ case " ${FLASH_HOSTS:-} " in
     *" $host "*) ;;
     *) echo "ВНИМАНИЕ: хост Ubuntu $host, NVIDIA для L4T $L4T называет: ${FLASH_HOSTS:-?}" ;;
 esac
+# For Nano this check carries double weight: nvmflash.sh flashes EVERY board
+# in recovery at once.
 n="$(lsusb | grep -c 'ID 0955:')"
 [ "$n" -eq 1 ] || fail "в recovery ждали ровно одну плату NVIDIA (0955:), видно $n"
 
@@ -91,20 +117,33 @@ cat <<WARN
 Будет прошит ЗАГРУЗЧИК платы $JETSON пакетом L4T $L4T.
 Плата по манифесту пакета: $board_line
 $( [ "$BOOTLOADER_PACKAGE" = full ] && echo "Пакет полный: во внутреннюю eMMC запишется и rootfs (войти в неё нечем — учётки нет)." )
+$( [ "$BOOTLOADER_TOOL" = nvmassflashgen ] && echo "nvmflash.sh шьёт ВСЕ платы в recovery разом — поэтому проверено, что она одна. Слотов A/B нет: прерванная заливка QSPI лечится только повторной заливкой в recovery." )
 НЕОБРАТИМО. Во время заливки нельзя: выдёргивать кабель, снимать питание, жать Ctrl+C.
 WARN
 printf 'Введи "да" для запуска: '
 read -r answer
 [ "$answer" = "да" ] || { echo "Отменено — на плату ничего не записано."; exit 1; }
 
-MODE=()
-[ "$BOOTLOADER_PACKAGE" = qspi-only ] && MODE=(--qspi-only)
 unset TMPDIR
 export USER="${USER:-root}"
 # После заливки дерево остаётся: заливка пакетом на железе не проверена,
-# и журналы l4t_initrd_flash внутри него — единственные улики при сбое.
+# и журналы внутри него — единственные улики при сбое.
 trap - EXIT
 cd "$MFI" || exit 1
-./tools/kernel_flash/l4t_initrd_flash.sh --flash-only --massflash 1 --network usb0 \
-    ${MODE[@]+"${MODE[@]}"} 2>&1 | tee "$OUT_DIR/flash-bootloader.log"
-exit "${PIPESTATUS[0]}"
+case "$BOOTLOADER_TOOL" in
+    initrd-flash)
+        MODE=()
+        [ "$BOOTLOADER_PACKAGE" = qspi-only ] && MODE=(--qspi-only)
+        ./tools/kernel_flash/l4t_initrd_flash.sh --flash-only --massflash 1 --network usb0 \
+            ${MODE[@]+"${MODE[@]}"} 2>&1 | tee "$OUT_DIR/flash-bootloader.log"
+        rc="${PIPESTATUS[0]}" ;;
+    nvmassflashgen)
+        # nvmflash.sh: 0 is success, 7 is "WITH FAILURES"; per-board logs go to
+        # mfilogs/. A timestamped copy keeps the logs of earlier runs.
+        ./nvmflash.sh 2>&1 | tee "$OUT_DIR/flash-bootloader.log"
+        rc="${PIPESTATUS[0]}"
+        if [ -d mfilogs ]; then
+            cp -a mfilogs "$OUT_DIR/mfilogs-$(date +%Y%m%dT%H%M%S)"
+        fi ;;
+esac
+exit "$rc"

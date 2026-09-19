@@ -112,7 +112,8 @@ mk14() {  # $1 — содержимое a.bin в архиве; манифест 
 }
 # Профиль, под который собран тестовый пакет; r14 принимает поправки поверх.
 P14=(JETSON=agx-xavier L4T=35.6.5 SOC=t194 BOARD_TARGET=x BOARDID=1 FAB=1 BOARD_SKU=1 BOARDREV=1
-     BOOTLOADER_PACKAGE=full BSP_FILE=b BSP_SHA1=c ROOTFS_SOURCE=nvidia-bsp ROOTFS_L4T=35.6.5)
+     BOOTLOADER_PACKAGE=full BSP_FILE=b BSP_SHA1=c ROOTFS_SOURCE=nvidia-bsp ROOTFS_L4T=35.6.5
+     BOOTLOADER_TOOL=initrd-flash)
 r14() { env "${P14[@]}" FLASH_HOSTS=22.04 OUT_DIR="$ft/out" DRY_RUN=1 "$@" bash "$S/14-flash-bootloader.sh"; }
 mk14 AAA; check   "целый пакет проходит сверку"       r14
           refuses "после DRY_RUN распакованное убрано" test -e "$ft/out/.flash"
@@ -131,6 +132,36 @@ mk14 AAA; echo tamper >> "$ft/out/bootloader.tar.gz"
 mk14 AAA; python3 -c "import json,sys;p=sys.argv[1];m=json.load(open(p));m.pop('rootfs');json.dump(m,open(p,'w'))" "$ft/out/manifest.json"
           check   "манифест старого образца действительно без rootfs" python3 -c "import json;assert 'rootfs' not in json.load(open('$ft/out/manifest.json'))"
           check   "пакет AGX, собранный до rootfs, проходит сверку" r14
+
+echo "== шаг 14: пакет Nano =="
+P14N=(JETSON=nano L4T=32.7.4 SOC=t210 BOARD_TARGET=jetson-nano-qspi BOARDID=3448 FAB=400 BOARD_SKU=0000 BOARDREV=F.0
+      BOOTLOADER_PACKAGE=qspi-only BOOTLOADER_TOOL=nvmassflashgen BSP_FILE=b BSP_SHA1=c
+      ROOTFS_SOURCE=vendor-image ROOTFS_L4T=32.6.1
+      VENDOR_IMG_SHA256=2e74215dd7d36bcbe91175c2e69399492c5b493bcfecdd0a7300c6dfa3d45fd8)
+mk14n() {  # $1 — cboot.bin in the archive (the manifest is always from "AAA"); $2=extra — an unlisted file
+  local d="$ft/nsrc/mfi_jetson-nano-qspi"
+  rm -rf "$ft/nsrc" "$ft/nout"; mkdir -p "$d" "$ft/nout"
+  printf '#!/bin/sh\n' > "$d/nvmflash.sh"; chmod 755 "$d/nvmflash.sh"
+  echo AAA > "$d/cboot.bin"; echo log1 > "$d/mfi.log"
+  ( cd "$d" && find . -type f ! -path ./mfi.log ! -path './mfilogs/*' -print0 | sort -z | xargs -0 sha256sum ) > "$ft/nout/bootloader-files.sha256"
+  echo "$1" > "$d/cboot.bin"; echo log2 > "$d/mfi.log"
+  [ "${2:-}" = extra ] && echo evil > "$d/evil.sh"
+  tar -czf "$ft/nout/bootloader.tar.gz" -C "$ft/nsrc" mfi_jetson-nano-qspi
+  echo q > "$ft/nout/system.qcow2"
+  ( export "${P14N[@]}"
+    python3 "$S/manifest.py" outer --bootloader-files "$ft/nout/bootloader-files.sha256" --out "$ft/nout/manifest.json" \
+      --artifact "$ft/nout/system.qcow2" --artifact "$ft/nout/bootloader.tar.gz" )
+}
+r14n() { env "${P14N[@]}" FLASH_HOSTS=18.04 OUT_DIR="$ft/nout" DRY_RUN=1 "$@" bash "$S/14-flash-bootloader.sh"; }
+mk14n AAA; check   "nano: целый пакет проходит сверку (журнал сборки не сверяется)" r14n
+           check   "…сверены оба файла пакета"        bash -c "$(declare -f r14n); $(declare -p P14N); S='$S' ft='$ft'; out=\"\$(r14n 2>&1)\"; grep -q 'файлы загрузчика: 2 сошлись' <<<\"\$out\""
+           refuses "…после DRY_RUN распакованное убрано" test -e "$ft/nout/.flash"
+           refuses "nano-пакет под профилем initrd-flash — отказ" r14n BOOTLOADER_TOOL=initrd-flash
+           refuses "пустой BOOTLOADER_TOOL — отказ"   r14n BOOTLOADER_TOOL=
+mk14n BBB; refuses "nano: подменённый cboot.bin — отказ" r14n
+           refuses "…после отказа распакованное убрано" test -e "$ft/nout/.flash"
+mk14n AAA extra
+           refuses "nano: файл, которого нет в манифесте, — отказ" r14n
 
 echo "== шаг 07: rootfs по ssh =="
 st="$(mktemp -d)"; mkdir -p "$st/bin" "$st/w/Linux_for_Tegra/tools/kernel_flash/images/external"
