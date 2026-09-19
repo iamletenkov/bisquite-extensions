@@ -2,6 +2,9 @@
 # Разворачивает rootfs в APP-раздел платы ПО SSH, минуя NFS.
 #
 #     sudo /opt/nvidia-jetpack/07-flash-rootfs-ssh.sh
+#     DRY_RUN=1 ./07-flash-rootfs-ssh.sh   # только план: пара, образ, раздел
+#
+# НЕОБРАТИМО для APP-раздела платы: перед форматированием спрашивает «да».
 #
 # Зачем этот шаг вообще существует.
 #
@@ -52,12 +55,33 @@ SSHOPT="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTi
 
 step() { echo; echo "=== $* ==="; }
 
-[ "$(id -u)" -eq 0 ] || { echo "Нужен root"; exit 1; }
 [ -s "$IMG" ] || {
     echo "ОСТАНОВ: нет $IMG"
     echo "  Образ создаёт l4t_initrd_flash.sh на этапе подготовки; проверь \$WORK (сейчас $WORK)."
     exit 1
 }
+
+# Что именно будет залито. rootfs берётся из дерева пары, названной в make, и
+# с тем, что прошил шаг 06, ничем не сверяется — поэтому пара и путь образа
+# показываются человеку до «да».
+plan() {
+    cat <<PLAN
+Пара:   ${JETSON:-?}@${L4T:-?}
+Дерево: $WORK/Linux_for_Tegra
+Образ:  $IMG ($(stat -c%s "$IMG") байт)
+Раздел: $APP на плате $BOARD — будет ОТФОРМАТИРОВАН (mke2fs -F) и залит заново.
+PLAN
+}
+
+# DRY_RUN — только показать план: ни root, ни USB-сеть, ни ssh не нужны,
+# на плату и в сеть хоста ничего не пишется.
+if [ "${DRY_RUN:-0}" = 1 ]; then
+    plan
+    echo "DRY_RUN: на плату ничего не записано"
+    exit 0
+fi
+
+[ "$(id -u)" -eq 0 ] || { echo "Нужен root"; exit 1; }
 
 step "1. Плата в initrd flashing mode?"
 if lsusb | grep -q '0955:7035'; then
@@ -111,6 +135,13 @@ sshb() { sshpass -p root ssh $SSHOPT "root@$BOARD" "$1"; }
 
 step "3. Связь с платой"
 sshb 'echo OK; uname -r' | sed 's/^/  /' || { echo "ОСТАНОВ: плата не отвечает"; exit 1; }
+
+step "ПОДТВЕРЖДЕНИЕ"
+plan
+echo "НЕОБРАТИМО: прежнее содержимое $APP пропадёт."
+printf 'Введи "да" для запуска: '
+read -r answer
+[ "$answer" = "да" ] || { echo "Отменено — на плату ничего не записано."; exit 1; }
 
 step "4. Освобождаю APP от прошлых попыток"
 # Оборванная заливка оставляет раздел смонтированным; форматировать его

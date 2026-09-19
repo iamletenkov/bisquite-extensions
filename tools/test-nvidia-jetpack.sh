@@ -97,6 +97,20 @@ mk14 BBB; refuses "подменённый файл загрузчика — от
 mk14 AAA; echo tamper >> "$ft/out/bootloader.tar.gz"
           refuses "испорченный архив — отказ"         r14
 
+echo "== шаг 07: rootfs по ssh =="
+st="$(mktemp -d)"; mkdir -p "$st/bin" "$st/w/Linux_for_Tegra/tools/kernel_flash/images/external"
+echo img > "$st/w/Linux_for_Tegra/tools/kernel_flash/images/external/system.img"
+# Всё, чем 07 трогает плату и сеть, подменено: вызов оставляет след в журнале.
+for c in sshpass ssh lsusb ip; do
+  printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n' "$c" "$st" > "$st/bin/$c"; chmod +x "$st/bin/$c"
+done
+r07() { env PATH="$st/bin:$PATH" WORK="$st/w" JETSON=agx-orin L4T=36.4.3 "$@" bash "$S/07-flash-rootfs-ssh.sh" </dev/null; }
+check   "DRY_RUN: выход 0"                         r07 DRY_RUN=1
+check   "DRY_RUN: план называет пару и образ"      bash -c "$(declare -f r07); S='$S' st='$st'; out=\"\$(r07 DRY_RUN=1)\"; grep -q 'agx-orin@36.4.3' <<<\"\$out\" && grep -q 'images/external/system.img' <<<\"\$out\""
+check   "DRY_RUN: ни ssh, ни lsusb, ни ip — до mke2fs не дошёл" test ! -e "$st/calls"
+check   "DRY_RUN: не спрашивает «да»"              bash -c "$(declare -f r07); S='$S' st='$st'; out=\"\$(r07 DRY_RUN=1)\"; ! grep -q 'Введи' <<<\"\$out\""
+refuses "без образа — отказ и под DRY_RUN"         r07 DRY_RUN=1 WORK="$st/nope"
+
 echo "== шаг 15: проверка по BSP =="
 vt="$(mktemp -d)"
 # Раскладка как у NVIDIA: .conf платы и XML разметки — симлинки на соседние
