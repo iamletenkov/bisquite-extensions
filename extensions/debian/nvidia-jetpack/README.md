@@ -165,9 +165,9 @@ ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TEST=="power/control", 
 - **Не ставит SDK Manager по умолчанию** — он отдельным
   `90-install-sdkmanager.sh`, потому что под капотом зовёт тот же
   `l4t_initrd_flash.sh` с тем же NFS и главной проблемы не решает.
-- **Не настраивает камеры на плате.** Окружение для них вносится
-  в `Linux_for_Tegra/rootfs/` до генерации `system.img`
-  (`04-customize-rootfs.sh`), а не ставится на плате руками.
+- **Не ставит камеры вовсе.** Базовый образ — только «плата × релиз»:
+  пакет Sensing, `/opt/sensing` и подмену `libnvisppg.so` несёт слой
+  bisquite, расширение `sensing-gmsl2-camera` (решение владельца 2026-09-18).
 - **Не трогает ufw, место на диске и режим APX** — это предполётные проверки
   внутри `06-flash.sh`, там, где они что-то значат.
 
@@ -177,15 +177,14 @@ ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TEST=="power/control", 
 
 | Скрипт | Что делает |
 |---|---|
-| `01-fetch-l4t.sh` | Качает BSP, sample rootfs (кроме пар с `ROOTFS_SOURCE=vendor-image`) и оверлеи профиля; сверяет SHA1 с эталонами |
-| `02-fetch-camera-drivers.sh` | Драйверы Sensing `SG8A-AGON-G2Y-A1`; при пустом `CAMERA_PKG_REL` — пропуск |
-| `03-prepare-bsp.sh` | Распаковка, `apply_binaries.sh`, подмена `libnvisppg.so` **после** него; при `vendor-image` — только дерево BSP, без `apply_binaries` |
-| `04-customize-rootfs.sh` | Пользователь без `oem-config`, пакеты и драйверы камер внутрь rootfs (через `qemu-aarch64-static`) |
+| `01-fetch-l4t.sh` | Качает BSP, sample rootfs (кроме пар с `ROOTFS_SOURCE=vendor-image`) и оверлей QSPI профиля; сверяет SHA1 с эталонами |
+| `03-prepare-bsp.sh` | Распаковка, оверлей QSPI, `apply_binaries.sh`; при `vendor-image` — только дерево BSP, без `apply_binaries` |
+| `04-customize-rootfs.sh` | Пользователь без `oem-config`, узел `/dev/null` и `<SOC>` в источнике apt NVIDIA внутри rootfs |
 | `05-generate-images.sh` | `l4t_initrd_flash.sh --no-flash`; плата должна быть в recovery |
 | `06-flash.sh` | `--flash-only`; предполётно проверяет ufw, место и режим APX |
 | `07-flash-rootfs-ssh.sh` | Обход: rootfs в APP SSH-потоком, минуя NFS |
 | `08-build-base-image.sh` | Образ диска (`.img` + `.qcow2`) для тиражирования на флот; плата не нужна |
-| `09-build-jetson-base.sh` | Оркестратор `01`→`02`→`03`→`04 -U`→`11`→манифест→`08`→манифест; у `vendor-image` — `01`→`03`→`11`→образ вендора→qcow2→манифесты; в bisquite ничего не регистрирует |
+| `09-build-jetson-base.sh` | Оркестратор `01`→`03`→`04 -U`→`11`→манифест→`08`→манифест; у `vendor-image` — `01`→`03`→`11`→образ вендора→qcow2→манифесты; в bisquite ничего не регистрирует |
 | `10-flash-internal.sh` | Выборочно: только QSPI либо QSPI + внутренняя eMMC |
 | `11-package-bootloader.sh` | Пакет прошивки загрузчика, плата не нужна: `l4t_initrd_flash.sh --massflash` у AGX, `nvmassflashgen.sh` у Nano |
 | `14-flash-bootloader.sh` | Прошивка загрузчика готовым пакетом; плата в recovery; **необратимо**; у Nano — `nvmflash.sh` из самого пакета |
@@ -200,14 +199,14 @@ ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TEST=="power/control", 
 ### Плата и релиз задаются профилем, а не правкой
 
 Скрипты платонезависимы: версия L4T со ссылками и суммами, XML разметки,
-конфиг QSPI, пакет камер, цель `flash.sh` и SKU модуля читаются из окружения.
+конфиг QSPI, цель `flash.sh` и SKU модуля читаются из окружения.
 Согласованный набор на пару собирает `load_profile` из трёх осей:
 
 | Каталог | Что несёт |
 |---|---|
 | `boards/<плата>.env` | железо: SoC, `BOARDID`/`FAB`/`BOARD_SKU`/`BOARDREV`, `ROOTFS_DEV`, `BOOTLOADER_PACKAGE`, `BOOTLOADER_TOOL` (`initrd-flash` у AGX, `nvmassflashgen` у Nano) |
 | `releases/<релиз>.env` | версия L4T со ссылками и суммами, совместимые SoC (`SOCS`), официальные хосты прошивки |
-| `pairs/<плата>@<релиз>.env` | точечное исключение на конкретную пару: свой оверлей или пакет камер, у смешанной пары — источник системы (`ROOTFS_SOURCE`, `ROOTFS_L4T`, `VENDOR_IMG_*`) |
+| `pairs/<плата>@<релиз>.env` | точечное исключение на конкретную пару: свой оверлей QSPI, у смешанной пары — источник системы (`ROOTFS_SOURCE`, `ROOTFS_L4T`, `VENDOR_IMG_*`) |
 
 ```bash
 . /opt/nvidia-jetpack/profile.sh && load_profile agx-xavier 35.6.5
@@ -241,8 +240,8 @@ nvidia-jetpack` параметров не принимает, и задават�
 
 Настраивается всё **на станции**, переменными окружения самих скриптов:
 `WORK` (рабочий каталог, умолчание `/srv/jetson` без профиля, иначе
-`/srv/l4t/<пара>`), `APP_SIZE`, `MIN_FREE_GIB`, `BOARD_TARGET`, `CAMERA_SRC`,
-`CAMERA_PKG_REL` и профильные `BSP_URL`/`FLASH_XML`/`BOARD_SKU`/… Полная
+`/srv/l4t/<пара>`), `APP_SIZE`, `MIN_FREE_GIB`, `BOARD_TARGET` и профильные
+`BSP_URL`/`FLASH_XML`/`BOARD_SKU`/… Полная
 таблица с умолчаниями — в `/opt/nvidia-jetpack/README.md` (он же
 `scripts/README.md` в этом дереве); согласованные наборы на пару плата×релиз —
 в `boards/`, `releases/`, `pairs/`, собирает их `load_profile` из `profile.sh`.
@@ -289,8 +288,6 @@ cat /sys/bus/usb/devices/*/power/control        # должно быть on
   сеанс и мигрирует между шинами; проброс пришлось бы делать для обеих, и
   обрыв пришёлся бы на начало записи. Станция — физическая машина, и это
   единственный проверенный вариант.
-- **Ветки драйверов под JetPack 6.2.1 (L4T 36.4.4) и 7.2.1** в репозитории
-  Sensing есть; переход на них — отдельная задача, здесь пин на 6.2.
 
 ## Лицензия
 

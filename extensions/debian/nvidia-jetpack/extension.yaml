@@ -1,5 +1,9 @@
 name: nvidia-jetpack
-version: 1.4.0
+version: 2.0.0
+# 2.0.0: камеры ушли из базового образа в расширение sensing-gmsl2-camera
+#        (решение владельца 2026-09-18): удалён шаг 02, секция камер шага 04,
+#        подмена libnvisppg.so шага 03, оверлей камер шага 01; из профилей —
+#        OV_CAM_URL, OV_CAM_FILE, CAMERA_PKG_REL, L4T_TAG; CAMERA_SRC не читается.
 # 1.4.0: Nano — смешанная пара nano@32.7.4 (загрузчик R32.7.4, система —
 #        образ Q-engineering R32.6.1): профили nano и 32.7.4, поле
 #        BOOTLOADER_TOOL (nvmassflashgen.sh у t210), ROOTFS_SOURCE=vendor-image
