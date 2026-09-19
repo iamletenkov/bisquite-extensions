@@ -59,5 +59,11 @@ check   "xavier: измеренные значения"     bash -c "$(declare -
 check   "offline massflash, internal"     bash -c "$(declare -f c11); S='$S'; c11 agx-orin 36.4.3 | grep -q -- '--no-flash --massflash 1 --network usb0.*jetson-agx-orin-devkit internal'"
 refuses "пустой BOARDREV — отказ"         bash -c ". '$S/profile.sh' && load_profile agx-orin 36.4.3 && BOARDREV= DRY_RUN=1 bash '$S/11-package-bootloader.sh'"
 
+echo "== шаг 09: порядок =="
+p09() { ( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && DRY_RUN=1 bash "$S/09-build-jetson-base.sh" ); }
+check   "пакет загрузчика до образа"   bash -c "$(declare -f p09); S='$S'; p09 | tr '\n' ' ' | grep -q '11-package-bootloader.sh manifest:internal 08-build-base-image.sh manifest:outer'"
+refuses "импорта в bisquite нет"        bash -c "$(declare -f p09); S='$S'; p09 | grep -q 'import'"
+refuses "без профиля — отказ"           bash -c "unset WORK; DRY_RUN=1 bash '$S/09-build-jetson-base.sh'"
+
 echo "проверок: $total, не прошло: $fails"
 [ "$fails" -eq 0 ]
