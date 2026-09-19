@@ -146,6 +146,61 @@ check   "DRY_RUN: ни ssh, ни lsusb, ни ip — до mke2fs не дошёл"
 check   "DRY_RUN: не спрашивает «да»"              bash -c "$(declare -f r07); S='$S' st='$st'; out=\"\$(r07 DRY_RUN=1)\"; ! grep -q 'Введи' <<<\"\$out\""
 refuses "без образа — отказ и под DRY_RUN"         r07 DRY_RUN=1 WORK="$st/nope"
 
+echo "== шаг 01: образ вендора — без sample rootfs =="
+ot="$(mktemp -d)"; mkdir -p "$ot/bin" "$ot/src"
+cat > "$ot/bin/wget" <<'EOF'
+#!/bin/bash
+# Stub for `wget -c -q --show-progress -O <name> <url>` with file:// URLs.
+out=""; url=""
+while [ $# -gt 0 ]; do
+    case "$1" in -O) out="$2"; shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac
+done
+echo "$url" >> "$WGET_LOG"
+cp -- "${url#file://}" "$out"
+EOF
+chmod +x "$ot/bin/wget"
+echo bsp > "$ot/src/Jetson-210_Linux_R32.7.4_aarch64.tbz2"
+echo sums > "$ot/src/release_sha_hashes.txt"
+r01() { ( . "$S/profile.sh" && load_profile nano 32.7.4 && \
+          env PATH="$ot/bin:$PATH" WGET_LOG="$ot/wget.log" WORK="$ot/w" \
+              BSP_URL="file://$ot/src/Jetson-210_Linux_R32.7.4_aarch64.tbz2" \
+              BSP_SHA1="$(sha1sum "$ot/src/Jetson-210_Linux_R32.7.4_aarch64.tbz2" | cut -d' ' -f1)" \
+              RFS_URL="file://$ot/src/rfs.tbz2" SHA_URL="file://$ot/src/release_sha_hashes.txt" "$@" \
+              bash "$S/01-fetch-l4t.sh" ); }
+check   "vendor-image: 01 проходит без sample rootfs"  r01
+check   "…BSP скачан"                                  test -f "$ot/w/downloads/Jetson-210_Linux_R32.7.4_aarch64.tbz2"
+refuses "…а sample rootfs не запрашивался"             grep -q rfs.tbz2 "$ot/wget.log"
+refuses "nvidia-bsp: без sample rootfs — отказ"        r01 ROOTFS_SOURCE=nvidia-bsp
+
+echo "== шаг 03: образ вендора — только дерево BSP =="
+# Root stub shared by the steps that check `id -u` (03, 11).
+rb="$(mktemp -d)"
+cat > "$rb/id" <<'EOF'
+#!/bin/bash
+# Stub: root for the scripts' `id -u` barriers; anything else goes to the real id.
+case "${1:-}" in -u) echo 0 ;; -un) echo root ;; *) exec /usr/bin/id "$@" ;; esac
+EOF
+chmod +x "$rb/id"
+pt="$(mktemp -d)"; mkdir -p "$pt/L/Linux_for_Tegra/bootloader" "$pt/L/Linux_for_Tegra/rootfs" "$pt/w/downloads"
+printf '#!/bin/sh\n' > "$pt/L/Linux_for_Tegra/flash.sh"
+printf '#!/bin/sh\ntouch "%s/applied"\n' "$pt" > "$pt/L/Linux_for_Tegra/apply_binaries.sh"
+chmod +x "$pt/L/Linux_for_Tegra/flash.sh" "$pt/L/Linux_for_Tegra/apply_binaries.sh"
+echo readme > "$pt/L/Linux_for_Tegra/rootfs/README.txt"
+tar -cjf "$pt/w/downloads/Jetson-210_Linux_R32.7.4_aarch64.tbz2" -C "$pt/L" Linux_for_Tegra
+r03() { ( . "$S/profile.sh" && load_profile nano 32.7.4 && \
+          env PATH="$rb:$PATH" WORK="$pt/w" \
+              BSP_SHA1="$(sha1sum "$pt/w/downloads/Jetson-210_Linux_R32.7.4_aarch64.tbz2" | cut -d' ' -f1)" "$@" \
+              bash "$S/03-prepare-bsp.sh" ); }
+check   "vendor-image: 03 разворачивает BSP"           r03
+check   "…дерево на месте"                             test -x "$pt/w/Linux_for_Tegra/flash.sh"
+check   "…rootfs/etc — каталог"                        test -d "$pt/w/Linux_for_Tegra/rootfs/etc"
+refuses "…apply_binaries не запускался"               test -e "$pt/applied"
+refuses "…метки .applied-binaries нет"                test -e "$pt/w/Linux_for_Tegra/rootfs/.applied-binaries"
+rm -rf "$pt/w/Linux_for_Tegra/rootfs/etc"; : > "$pt/w/Linux_for_Tegra/rootfs/etc"
+check   "повторный прогон по готовому дереву"          r03
+check   "…файл rootfs/etc от flash.sh стал каталогом"  test -d "$pt/w/Linux_for_Tegra/rootfs/etc"
+refuses "SHA1 тарболла не сошлась — отказ"            r03 BSP_SHA1=0000000000000000000000000000000000000000
+
 echo "== шаг 15: проверка по BSP =="
 vt="$(mktemp -d)"
 # Раскладка как у NVIDIA: .conf платы и XML разметки — симлинки на соседние

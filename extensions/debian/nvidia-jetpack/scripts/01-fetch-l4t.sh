@@ -50,6 +50,11 @@ QSPI_OVERLAY_DTS="${QSPI_OVERLAY_DTS:-tegra234-mb1-bct-device-p3701-0000.dts}"
 # Чем грепать справочный release_sha_hashes.txt на шаге 4.
 SHA_GREP="${SHA_GREP:-Jetson_Linux_R?36\.4\.3|Sample-Root-Filesystem_R?36\.4\.3}"
 
+# Where the pair's system comes from. vendor-image: a ready vendor image
+# (Nano: Q-engineering) — NVIDIA's sample rootfs is not needed, the BSP is
+# kept for the bootloader only (spec 2026-09-19-jetson-nano-mixed-pair.md).
+ROOTFS_SOURCE="${ROOTFS_SOURCE:-nvidia-bsp}"
+
 BSP_FILE=$(basename "$BSP_URL")
 RFS_FILE=$(basename "$RFS_URL")
 OV_QSPI_FILE=${OV_QSPI_URL:+$(basename "$OV_QSPI_URL")}
@@ -95,7 +100,11 @@ fetch() {
 }
 
 fetch "$BSP_URL"     "$BSP_SHA1"
-fetch "$RFS_URL"     "$RFS_SHA1"
+if [ "$ROOTFS_SOURCE" = vendor-image ]; then
+    echo "sample rootfs                                              система — образ вендора, пропуск"
+else
+    fetch "$RFS_URL"     "$RFS_SHA1"
+fi
 if [ -n "$OV_QSPI_URL" ]; then
     fetch "$OV_QSPI_URL"
 else
@@ -126,7 +135,7 @@ check_sha() {
     fi
 }
 check_sha "$BSP_FILE" "$BSP_SHA1"
-check_sha "$RFS_FILE" "$RFS_SHA1"
+[ "$ROOTFS_SOURCE" = vendor-image ] || check_sha "$RFS_FILE" "$RFS_SHA1"
 
 if [ "$fail" -ne 0 ]; then
     echo

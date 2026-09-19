@@ -58,6 +58,37 @@ export USER="${USER:-$(id -un)}"
 
 [ "$(id -u)" -eq 0 ] || { echo "ОСТАНОВ: нужен root (sudo bash $0)"; exit 1; }
 
+# ------------------------------------------- vendor image: BSP tree only
+# ROOTFS_SOURCE=vendor-image: the system is a ready vendor image (Nano:
+# Q-engineering), and the tree is needed only to package the bootloader.
+# No sample rootfs, no apply_binaries, no binfmt: an empty rootfs/ with
+# rootfs/etc is enough for nvmassflashgen.sh (built on the station
+# 2026-09-19). Spec 2026-09-19-jetson-nano-mixed-pair.md.
+if [ "${ROOTFS_SOURCE:-nvidia-bsp}" = vendor-image ]; then
+    step "vendor-image: только дерево BSP — без sample rootfs и apply_binaries"
+    [ -f "$DL/$BSP_FILE" ] || { echo "ОСТАНОВ: нет $DL/$BSP_FILE — сначала 01-fetch-l4t.sh"; exit 1; }
+    got=$(sha1sum "$DL/$BSP_FILE" | cut -d' ' -f1)
+    if [ "$got" != "$BSP_SHA1" ]; then
+        echo "ОСТАНОВ: SHA1 $BSP_FILE = $got, ждали $BSP_SHA1"
+        echo "    rm $DL/$BSP_FILE && bash 01-fetch-l4t.sh"
+        exit 1
+    fi
+    if [ -d "$LFT/bootloader" ]; then
+        echo "Linux_for_Tegra уже распакован — пропускаю"
+    else
+        mkdir -p "$WORK"
+        tar -xpf "$DL/$BSP_FILE" -C "$WORK"
+    fi
+    [ -x "$LFT/flash.sh" ] || { echo "ОСТАНОВ: нет $LFT/flash.sh"; exit 1; }
+    # flash.sh copies nv_boot_control.conf to "${rootfs_dir}/etc"
+    # (flash.sh:2701-2702); with an empty rootfs/ that makes a FILE named etc.
+    [ -d "$LFT/rootfs/etc" ] || rm -f -- "$LFT/rootfs/etc"
+    mkdir -p "$LFT/rootfs/etc"
+    step "ГОТОВО"
+    echo "Дальше — 11-package-bootloader.sh (пакет загрузчика)."
+    exit 0
+fi
+
 # --------------------------------------------------- 0. барьеры до работы
 step "0. Проверки перед долгими операциями"
 
