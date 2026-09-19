@@ -9,10 +9,34 @@
 #
 # Тарболл не кладётся на диск: нужные файлы вынимаются из потока. Если он уже
 # скачан шагом 01 ($WORK/downloads) — берётся оттуда, без второй закачки.
+#
+# The evidence depends on the bootloader tool (BOOTLOADER_TOOL):
+#   initrd-flash    creator branch, board .conf, layout XML (FLASH_XML);
+#   nvmassflashgen  nvmassflashgen.sh, board .conf, QSPI layout (QSPI_CFG),
+#                   and the target must address QSPI only. The creator takes
+#                   no part: the system half is a vendor image.
+# For ROOTFS_SOURCE=vendor-image the vendor image's sha256 is checked too,
+# streamed; a mismatch means no verdict, like a network failure.
 set -uo pipefail
 
-: "${JETSON:?профиль не загружен}" "${L4T:?}" "${BOARD_TARGET:?}" "${FLASH_XML:?}" "${BSP_URL:?}"
+: "${JETSON:?профиль не загружен}" "${L4T:?}" "${BOARD_TARGET:?}" "${BSP_URL:?}"
 VERIFY_DIR="${VERIFY_DIR:-./verified}"
+
+case "${BOOTLOADER_TOOL:-}" in
+    initrd-flash)
+        : "${FLASH_XML:?в профиле пуст FLASH_XML}"
+        layout_xml="$FLASH_XML"
+        sentinel="Linux_for_Tegra/tools/jetson-disk-image-creator.sh" ;;
+    nvmassflashgen)
+        : "${QSPI_CFG:?в профиле пуст QSPI_CFG}"
+        layout_xml="$QSPI_CFG"
+        sentinel="Linux_for_Tegra/nvmassflashgen.sh" ;;
+    *)
+        echo "ОТКАЗ: BOOTLOADER_TOOL=${BOOTLOADER_TOOL:-<пусто>}, ждали initrd-flash или nvmassflashgen —"
+        echo "       вердикта нет, отпечаток не записан"
+        exit 2 ;;
+esac
+
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 
@@ -21,9 +45,9 @@ trap 'rm -rf -- "$tmp"' EXIT
 # flash_l4t_t194_nvme.xml -> flash_l4t_nvme.xml). Вынутая по имени одна ссылка
 # осталась бы битой и дала ложное «нет» на каждой паре, поэтому берутся все
 # соседи того же каталога — без подкаталогов (--no-wildcards-match-slash).
-xml_dir="$(dirname "$FLASH_XML")"
+xml_dir="$(dirname "$layout_xml")"
 members=(
-    "Linux_for_Tegra/tools/jetson-disk-image-creator.sh"
+    "$sentinel"
     "Linux_for_Tegra/*.conf"
     "Linux_for_Tegra/$xml_dir/*.xml"
 )
@@ -33,7 +57,7 @@ local_bsp="${WORK:-/nonexistent}/downloads/${BSP_FILE:-none}"
 # байтам, которые реально прочитаны (файл или поток), и сверяется с ней.
 # Без эталона вердикт не к чему привязать.
 [ -n "${BSP_SHA1:-}" ] || { echo "ОТКАЗ: в профиле пуст BSP_SHA1 — вердикта нет, отпечаток не записан"; exit 2; }
-# Отсутствующий в архиве член (кроме creator'а, см. ниже) — это и есть ответ
+# Отсутствующий в архиве член (кроме признака, см. ниже) — это и есть ответ
 # «нет», поэтому код tar сам по себе не проверяется; проверяются файлы ниже.
 curl_status=0
 if [ -s "$local_bsp" ]; then
@@ -59,48 +83,113 @@ if [ "$curl_status" -eq 0 ] && [ "$got_sha1" != "$BSP_SHA1" ]; then
 fi
 
 L="$tmp/Linux_for_Tegra"
-creator="$L/tools/jetson-disk-image-creator.sh"
 # Сбой загрузки — это не вердикт «не собирается», а невозможность его
-# вынести. jetson-disk-image-creator.sh есть в КАЖДОМ BSP NVIDIA, поэтому его
-# отсутствие после распаковки значит «архив не дошёл» (сеть, HTTP-ошибка,
-# обрыв потока), а не «пара не собирается». Отпечаток — доказательство, и
-# записывать его по недоказанному нельзя: «не удалось проверить» ≠ «доказано,
-# что не собирается» — временный сбой сети иначе навсегда пометил бы
+# вынести. The sentinel (jetson-disk-image-creator.sh for initrd-flash,
+# nvmassflashgen.sh for R32 t210) is in EVERY BSP of its kind, so its absence
+# after extraction means «архив не дошёл» (сеть, HTTP-ошибка, обрыв потока),
+# а не «пара не собирается». Отпечаток — доказательство, и записывать его по
+# недоказанному нельзя: временный сбой сети иначе навсегда пометил бы
 # собираемую пару как несобираемую.
-if [ "$curl_status" -ne 0 ] || [ ! -f "$creator" ]; then
+if [ "$curl_status" -ne 0 ] || [ ! -f "$tmp/$sentinel" ]; then
     reason="curl вернул $curl_status"
-    [ "$curl_status" -eq 0 ] && reason="jetson-disk-image-creator.sh не извлёкся из архива"
+    [ "$curl_status" -eq 0 ] && reason="$(basename "$sentinel") не извлёкся из архива"
     echo "ОТКАЗ: BSP не получен ($reason) — вердикта нет, отпечаток не записан"
     exit 2
 fi
 
-v_branch=нет; grep -qE "^[[:space:]]*${BOARD_TARGET}\)" "$creator" 2>/dev/null && v_branch=ok
-v_conf=нет;   [ -f "$L/$BOARD_TARGET.conf" ] && v_conf=ok
-v_xml=нет;    [ -f "$L/$FLASH_XML" ] && v_xml=ok
-v_dev=нет;    grep -qE -- '-d \| --device' "$creator" 2>/dev/null && v_dev=да
-
-verdict=не-собирается
-if [ "$v_branch" = ok ] && [ "$v_conf" = ok ] && [ "$v_xml" = ok ]; then
-    verdict=проверено
+# The vendor image: its sum is checked before anything is written. A cached
+# download counts only when complete; otherwise the image is streamed — 8.7 GB
+# never touch the disk. pipefail makes a curl failure the status of the
+# whole substitution.
+vendor_sha=""
+if [ "${ROOTFS_SOURCE:-nvidia-bsp}" = vendor-image ]; then
+    : "${VENDOR_IMG_URL:?в профиле пуст VENDOR_IMG_URL}" "${VENDOR_IMG_SHA256:?в профиле пуст VENDOR_IMG_SHA256}"
+    local_img="${WORK:-/nonexistent}/downloads/$(basename "$VENDOR_IMG_URL")"
+    img_status=0
+    if [ -f "$local_img" ] && [ "$(stat -c %s "$local_img")" = "${VENDOR_IMG_SIZE:-}" ]; then
+        img_src="$local_img"
+        vendor_sha="$(sha256sum "$local_img" | cut -d' ' -f1)"
+    else
+        img_src="$VENDOR_IMG_URL"
+        vendor_sha="$(curl -fsSL --max-time 7200 "$VENDOR_IMG_URL" | sha256sum | cut -d' ' -f1)" || img_status=$?
+    fi
+    if [ "$img_status" -ne 0 ]; then
+        echo "ОТКАЗ: образ вендора не получен ($img_src, код $img_status) — вердикта нет, отпечаток не записан"
+        exit 2
+    fi
+    if [ "$vendor_sha" != "$VENDOR_IMG_SHA256" ]; then
+        echo "ОТКАЗ: sha256 образа вендора ($img_src) = $vendor_sha, в профиле $VENDOR_IMG_SHA256 —"
+        echo "       образ перезалит или подменён; вердикта нет, отпечаток не записан"
+        exit 2
+    fi
 fi
 
 mkdir -p "$VERIFY_DIR"
 out="$VERIFY_DIR/$JETSON@$L4T.txt"
-{
-    echo "pair=$JETSON@$L4T"
-    echo "date=$(date -I)"
-    echo "bsp=$(basename "$BSP_URL")"
-    echo "bsp_sha1=$got_sha1"
-    echo "creator_branch=$v_branch"
-    echo "conf=$v_conf"
-    echo "flash_xml=$v_xml"
-    echo "creator_dev_flag=$v_dev"
-    echo "verdict=$verdict"
-} > "$out"
+case "$BOOTLOADER_TOOL" in
+    initrd-flash)
+        creator="$L/tools/jetson-disk-image-creator.sh"
+        v_branch=нет; grep -qE "^[[:space:]]*${BOARD_TARGET}\)" "$creator" 2>/dev/null && v_branch=ok
+        v_conf=нет;   [ -f "$L/$BOARD_TARGET.conf" ] && v_conf=ok
+        v_xml=нет;    [ -f "$L/$FLASH_XML" ] && v_xml=ok
+        v_dev=нет;    grep -qE -- '-d \| --device' "$creator" 2>/dev/null && v_dev=да
+        verdict=не-собирается
+        if [ "$v_branch" = ok ] && [ "$v_conf" = ok ] && [ "$v_xml" = ok ]; then
+            verdict=проверено
+        fi
+        {
+            echo "pair=$JETSON@$L4T"
+            echo "date=$(date -I)"
+            echo "bsp=$(basename "$BSP_URL")"
+            echo "bsp_sha1=$got_sha1"
+            echo "creator_branch=$v_branch"
+            echo "conf=$v_conf"
+            echo "flash_xml=$v_xml"
+            echo "creator_dev_flag=$v_dev"
+            if [ -n "$vendor_sha" ]; then
+                echo "rootfs_source=vendor-image"
+                echo "vendor_img_sha256=$vendor_sha"
+            fi
+            echo "verdict=$verdict"
+        } > "$out" ;;
+    nvmassflashgen)
+        v_conf=нет; [ -f "$L/$BOARD_TARGET.conf" ] && v_conf=ok
+        v_xml=нет;  [ -f "$L/$QSPI_CFG" ] && v_xml=ok
+        # The package must address QSPI only: NO_ROOTFS=1 in the board .conf
+        # and no sdcard device in the layout. jetson-nano-qspi-sd and
+        # jetson-nano-devkit fail here.
+        v_qspi_only=нет
+        if [ "$v_conf" = ok ] && [ "$v_xml" = ok ] \
+           && grep -qE '^[[:space:]]*NO_ROOTFS=1' "$L/$BOARD_TARGET.conf" \
+           && ! grep -q 'type="sdcard"' "$L/$QSPI_CFG"; then
+            v_qspi_only=ok
+        fi
+        verdict=не-собирается
+        if [ "$v_conf" = ok ] && [ "$v_xml" = ok ] && [ "$v_qspi_only" = ok ]; then
+            verdict=проверено
+        fi
+        {
+            echo "pair=$JETSON@$L4T"
+            echo "date=$(date -I)"
+            echo "bsp=$(basename "$BSP_URL")"
+            echo "bsp_sha1=$got_sha1"
+            echo "bootloader_tool=nvmassflashgen"
+            echo "conf=$v_conf"
+            echo "qspi_xml=$v_xml"
+            echo "qspi_only=$v_qspi_only"
+            if [ -n "$vendor_sha" ]; then
+                echo "rootfs_source=vendor-image"
+                echo "vendor_img_sha256=$vendor_sha"
+            fi
+            echo "verdict=$verdict"
+        } > "$out" ;;
+esac
 cat "$out"
 
-declared="${CREATOR_HAS_DEV_FLAG:-yes}"
-if { [ "$v_dev" = да ] && [ "$declared" != yes ]; } || { [ "$v_dev" = нет ] && [ "$declared" = yes ]; }; then
-    echo "ВНИМАНИЕ: CREATOR_HAS_DEV_FLAG=$declared в профиле релиза, а у creator'а флаг -d: $v_dev"
+if [ "$BOOTLOADER_TOOL" = initrd-flash ]; then
+    declared="${CREATOR_HAS_DEV_FLAG:-yes}"
+    if { [ "$v_dev" = да ] && [ "$declared" != yes ]; } || { [ "$v_dev" = нет ] && [ "$declared" = yes ]; }; then
+        echo "ВНИМАНИЕ: CREATOR_HAS_DEV_FLAG=$declared в профиле релиза, а у creator'а флаг -d: $v_dev"
+    fi
 fi
 [ "$verdict" = проверено ]

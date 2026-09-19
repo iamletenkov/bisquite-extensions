@@ -392,6 +392,41 @@ cp "$vt/v/agx-xavier@35.6.5.txt" "$vt/before.txt"
 check   "обрезанный локальный тарболл — код 2"         code15 2 WORK="$vt/w" BSP_URL=file:///nonexistent.tbz2
 check   "отпечаток после обрезанного тарболла не тронут" cmp -s "$vt/before.txt" "$vt/v/agx-xavier@35.6.5.txt"
 check   "тот же большой архив потоком — SHA1 сошлась"  code15 0
+# Nano: nvmassflashgen.sh, the board .conf (a symlink to a neighbour, like at
+# NVIDIA) and the QSPI layout. $1=qspi — QSPI-only target; sd — the layout
+# of jetson-nano-qspi-sd: no NO_ROOTFS=1 and an sdcard device.
+mkbspn() {
+  local L="$vt/N/Linux_for_Tegra"
+  rm -rf "$vt/N"; mkdir -p "$L/bootloader/t210ref/cfg"
+  printf '#!/bin/bash\n' > "$L/nvmassflashgen.sh"
+  printf 'source "${LDK_DIR}/p3448-0000.conf.common";\nEMMC_CFG=flash_l4t_t210_max-spi_p3448.xml;\n' > "$L/p3449-0000+p3448-0000-qspi.conf"
+  printf '<device type="spi" instance="0">\n</device>\n' > "$L/bootloader/t210ref/cfg/flash_l4t_t210_max-spi_p3448.xml"
+  if [ "$1" = qspi ]; then
+    echo 'NO_ROOTFS=1;' >> "$L/p3449-0000+p3448-0000-qspi.conf"
+  else
+    printf '<device type="sdcard" instance="0">\n</device>\n' >> "$L/bootloader/t210ref/cfg/flash_l4t_t210_max-spi_p3448.xml"
+  fi
+  ln -s p3449-0000+p3448-0000-qspi.conf "$L/jetson-nano-qspi.conf"
+  tar -cjf "$vt/nbsp.tbz2" -C "$vt/N" Linux_for_Tegra
+}
+head -c 4096 /dev/urandom > "$vt/vimg.xz"
+r15n() { ( . "$S/profile.sh" && load_profile nano 32.7.4 && unset WORK && \
+           env BSP_URL="file://$vt/nbsp.tbz2" BSP_SHA1="$(sha1of "$vt/nbsp.tbz2")" \
+               VENDOR_IMG_URL="file://$vt/vimg.xz" VENDOR_IMG_SHA256="$(sha256sum "$vt/vimg.xz" | cut -d' ' -f1)" \
+               VERIFY_DIR="$vt/v" "$@" bash "$S/15-verify-pair.sh" ); }
+code15n() { local want="$1"; shift; r15n "$@" >/dev/null 2>&1; [ "$?" -eq "$want" ]; }
+mkbspn qspi; check   "nano: генератор, конфиг, разметка QSPI — проверено" r15n
+             check   "…отпечаток называет инструмент и QSPI-only" bash -c "grep -qx 'bootloader_tool=nvmassflashgen' '$vt/v/nano@32.7.4.txt' && grep -qx 'qspi_only=ok' '$vt/v/nano@32.7.4.txt'"
+             check   "…в отпечатке — sha256 образа вендора" grep -qx "vendor_img_sha256=$(sha256sum "$vt/vimg.xz" | cut -d' ' -f1)" "$vt/v/nano@32.7.4.txt"
+             check   "nvidia-bsp: образ вендора не нужен"   code15n 0 ROOTFS_SOURCE=nvidia-bsp VENDOR_IMG_URL=file:///nonexistent.xz
+             refuses "…и в отпечатке его нет"               grep -q vendor_img_sha256 "$vt/v/nano@32.7.4.txt"
+mkbspn sd;   refuses "nano: разметка с SD-картой — не собирается" r15n
+             check   "…видно в отпечатке"                   grep -qx 'qspi_only=нет' "$vt/v/nano@32.7.4.txt"
+mkbspn qspi; r15n >/dev/null 2>&1; cp "$vt/v/nano@32.7.4.txt" "$vt/nbefore.txt"
+             check   "sha256 образа вендора не сошлась — код 2" code15n 2 VENDOR_IMG_SHA256=0000000000000000000000000000000000000000000000000000000000000000
+             check   "образ вендора недоступен — код 2"      code15n 2 VENDOR_IMG_URL="file://$vt/none.xz"
+             check   "…отпечаток после обоих отказов не тронут" cmp -s "$vt/nbefore.txt" "$vt/v/nano@32.7.4.txt"
+             check   "неизвестный BOOTLOADER_TOOL — код 2"    code15n 2 BOOTLOADER_TOOL=flash-sh
 
 echo "== шаг 16: матрица =="
 mx="$(mktemp -d)"; mkdir -p "$mx/v"
@@ -402,6 +437,8 @@ check   "orin@36.4.3 — прогнано (из status.tsv)" bash -c "$(declare 
 check   "orin@39.2 — проверено (из отпечатка)"   bash -c "$(declare -f m16); mx='$mx'; S='$S'; m16 | grep -E '^agx-orin +39\.2 +проверено'"
 check   "xavier@35.6.5 — объявлено"              bash -c "$(declare -f m16); mx='$mx'; S='$S'; m16 | grep -E '^agx-xavier +35\.6\.5 +объявлено'"
 refuses "xavier@36.4.3 в матрице отсутствует"    bash -c "$(declare -f m16); mx='$mx'; S='$S'; m16 | grep -E '^agx-xavier +36\.4\.3'"
+check   "nano@32.7.4 — объявлено"                  bash -c "$(declare -f m16); mx='$mx'; S='$S'; m16 | grep -E '^nano +32\.7\.4 +объявлено +18\.04'"
+refuses "nano@35.6.5 в матрице отсутствует"         bash -c "$(declare -f m16); mx='$mx'; S='$S'; m16 | grep -E '^nano +35\.6\.5'"
 
 echo "проверок: $total, не прошло: $fails"
 [ "$fails" -eq 0 ]
