@@ -61,7 +61,9 @@ vendor_to_qcow2() {
     xzf="$(_vi_xz)"; raw="$(_vi_raw)"; tmp="$(_vi_tmp)"
     [ -s "$xzf" ] || { echo "ОТКАЗ: нет $xzf — сначала vendor_fetch"; return 1; }
     need="$(xz --robot -l "$xzf" | awk -F'\t' '$1 == "totals" { print $5 }')"
-    [ -n "$need" ] || { echo "ОТКАЗ: xz не прочитал индекс $xzf"; return 1; }
+    # A non-number here would make `[ -lt ]` fail as a test error, and the
+    # space check would be silently skipped — refuse instead.
+    [[ $need =~ ^[0-9]+$ ]] || { echo "ОТКАЗ: xz не прочитал индекс $xzf (получено: '$need')"; return 1; }
     avail="$(_vi_avail "$WORK")"
     if [ "${avail:-0}" -lt "$need" ]; then
         echo "ОТКАЗ: несжатый образ — $need байт (индекс xz), свободно в $WORK ${avail:-?}"

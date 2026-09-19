@@ -215,6 +215,12 @@ prev=""
 for a in "$@"; do [ "$prev" = upload ] && cp -- "$a" "$VI_LOG/uploaded.json"; prev="$a"; done
 exit "${GF_RC:-0}"
 EOF
+cat > "$vi/bin/xz" <<'EOF'
+#!/bin/bash
+# Stub: XZ_GARBAGE=1 makes the index listing unreadable; otherwise real xz.
+if [ "${XZ_GARBAGE:-0}" = 1 ] && [ "${1:-}" = --robot ]; then printf 'totals\t1\t1\t1\tN/A\n'; exit 0; fi
+exec /usr/bin/xz "$@"
+EOF
 chmod +x "$vi/bin/"*
 # rvi <function> [VAR=value …] — the nano profile pointed at the test image.
 rvi() { local fn="$1"; shift
@@ -234,6 +240,8 @@ refuses "…и ничего не скачано"                         test -e
 check   "fetch: скачал после отказа"                    rvi vendor_fetch
 refuses "qcow2: места под несжатый образ нет — отказ"  rvi vendor_to_qcow2 FAKE_AVAIL=1048576
 refuses "…raw не остался"                              test -e "$vi/w/vendor-image.raw"
+check   "qcow2: индекс xz не число — отказ по индексу, а не пропуск проверки" bash -c "$(declare -f rvi); S='$S' vi='$vi'; out=\"\$(rvi vendor_to_qcow2 XZ_GARBAGE=1 2>&1)\"; [ \$? -ne 0 ] && grep -q 'xz не прочитал индекс' <<<\"\$out\""
+check   "qcow2: df не число — отказ по месту"          bash -c "$(declare -f rvi); S='$S' vi='$vi'; out=\"\$(rvi vendor_to_qcow2 FAKE_AVAIL=abc 2>&1)\"; [ \$? -ne 0 ] && grep -q 'свободно' <<<\"\$out\""
 refuses "qcow2: qemu-img упал — отказ"                 rvi vendor_to_qcow2 QEMU_FAIL=1
 refuses "…raw убран ловушкой"                          test -e "$vi/w/vendor-image.raw"
 refuses "…недописанный qcow2.tmp убран"                test -e "$vi/out/system.qcow2.tmp"
