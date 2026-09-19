@@ -4,7 +4,7 @@
 #
 #     bash /opt/nvidia-jetpack/01-fetch-l4t.sh
 #     WORK=/mnt/big/jetson bash /opt/nvidia-jetpack/01-fetch-l4t.sh
-#     set -a; . /opt/nvidia-jetpack/boards/xavier-agx.env; set +a
+#     . /opt/nvidia-jetpack/profile.sh && load_profile agx-xavier 35.6.5
 #     bash /opt/nvidia-jetpack/01-fetch-l4t.sh
 #
 # Качается ~2.4 GB. Скрипт идемпотентен: целые файлы повторно не качаются,

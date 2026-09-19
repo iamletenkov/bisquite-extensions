@@ -208,10 +208,10 @@ install_station_scripts() {
     local scripts=()
     while IFS= read -r -d '' script; do
         scripts+=("$script")
-    done < <(find "$source_dir" -maxdepth 1 -type f -name '*.sh' -print0)
+    done < <(find "$source_dir" -maxdepth 1 -type f \( -name '*.sh' -o -name '*.py' \) -print0)
 
     if (( ${#scripts[@]} == 0 )); then
-        log_error "No *.sh files in $source_dir — nothing to install"
+        log_error "No *.sh or *.py files in $source_dir — nothing to install"
         exit 1
     fi
 
@@ -233,30 +233,20 @@ install_station_scripts() {
         log_warn "No $source_dir/README.md — flashing order will be undocumented on the station"
     fi
 
-    # Профили плат. Без них станция умеет ровно одну плату — ту, чьи значения
-    # зашиты в скрипты умолчаниями, — а отсутствие профиля не отказ: скрипты
-    # работают и без него, просто собирают AGX Orin.
-    local boards_dir="$source_dir/boards"
-    if [[ -d "$boards_dir" ]]; then
-        local profiles=()
+    # Профили — три оси, а не одна: плата (boards/), релиз L4T (releases/)
+    # и точечное исключение на пару плата×релиз (pairs/). Отсутствие оси не
+    # отказ: profile.sh откажет громко в момент load_profile, если чего-то
+    # не хватит, а полное отсутствие профилей — это станция без объявленных
+    # плат, собирающая только AGX Orin на встроенных умолчаниях скриптов.
+    local axis profile
+    for axis in boards releases pairs; do
+        [[ -d "$source_dir/$axis" ]] || { log_warn "No $source_dir/$axis — станция не знает эту ось"; continue; }
+        mkdir -p "$TARGET_DIR/$axis"
         while IFS= read -r -d '' profile; do
-            profiles+=("$profile")
-        done < <(find "$boards_dir" -maxdepth 1 -type f -name '*.env' -print0)
-
-        if (( ${#profiles[@]} == 0 )); then
-            log_warn "No *.env in $boards_dir — station will only know its built-in defaults"
-        else
-            log_info "Installing ${#profiles[@]} board profiles into $TARGET_DIR/boards"
-            mkdir -p "$TARGET_DIR/boards"
-            local profile
-            for profile in "${profiles[@]}"; do
-                install -m 0644 "$profile" "$TARGET_DIR/boards/$(basename "$profile")"
-                log_info "  boards/$(basename "$profile")"
-            done
-        fi
-    else
-        log_warn "No $boards_dir — station will only know its built-in defaults"
-    fi
+            install -m 0644 "$profile" "$TARGET_DIR/$axis/$(basename "$profile")"
+            log_info "  $axis/$(basename "$profile")"
+        done < <(find "$source_dir/$axis" -maxdepth 1 -type f -name '*.env' -print0)
+    done
 }
 
 main() {

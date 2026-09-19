@@ -74,6 +74,7 @@ mk14() {  # $1 — содержимое a.bin в архиве; манифест 
   echo "$1" > "$ft/src/mfi_x/tools/kernel_flash/images/internal/a.bin"
   tar -czf "$ft/out/bootloader.tar.gz" -C "$ft/src" mfi_x
   echo q > "$ft/out/system.qcow2"
+  # shellcheck disable=SC2034  # переменные экспортируются для дочернего сценария через set -a
   ( set -a; JETSON=agx-xavier L4T=35.6.5 SOC=t194 BOARD_TARGET=x BOARDID=1 FAB=1 BOARD_SKU=1 BOARDREV=1 \
     BOOTLOADER_PACKAGE=full BSP_FILE=b BSP_SHA1=c; set +a
     python3 "$S/manifest.py" outer --bootloader-files "$ft/out/bootloader-files.sha256" --out "$ft/out/manifest.json" \
