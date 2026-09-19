@@ -1,14 +1,17 @@
 name: sensing-gmsl2-camera
-version: 3.0.0
+version: 4.0.0
+# 4.0.0: libnvisppg.so из оверлея камер NVIDIA 36.4.3 — скачивание со сверкой
+#        закреплённой sha256 и подмена через dpkg-divert (раньше это делала
+#        станция прошивки); отказ на любом L4T, кроме 36.4.3.
 layout: 2
 # 3.0.0: ручки — домен sensing-camera библиотеки bisquite-conf (схема knobs):
 #        bisquite-sensing-camera-ctl не исполняет файл (`.`) и ставится ссылкой.
 # 2.0.0: файл ручек переехал в /etc/bisquite/sensing-camera/config (был
 #        /etc/default/bisquite-sensing-camera; прежний не читается, установка удаляет).
 family: deb
-# Только Jetson AGX Orin с адаптером SG8A-AGON-G2Y-A1 — драйверы и DTB
-# специфичны железу, install.sh отказывает на любом другом /etc/nv_tegra_release
-# (или его отсутствии) до сети и до копирования файлов.
+# Только Jetson AGX Orin с адаптером SG8A-AGON-G2Y-A1 на L4T 36.4.3 — драйверы,
+# DTB и библиотека ISP специфичны железу и релизу; install.sh отказывает на
+# другой плате, другом релизе или без /etc/nv_tegra_release до сети.
 arch: [arm64]
 # Только build: замена ядра, .ko и DTB-оверлея — не персональные шаги,
 # они не зависят от того, кто станет пользователем на устройстве.

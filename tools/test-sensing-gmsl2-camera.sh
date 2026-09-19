@@ -76,8 +76,22 @@ mkroot "$T/i5"; rm "$T/i5/usr/lib/aarch64-linux-gnu/tegra"; mkdir -p "$T/i5/usr/
 printf 'stock-lib\n' > "$T/i5/usr/lib/aarch64-linux-gnu/tegra/libnvisppg.so"
 refuses "tegra/ — не ссылка на nvidia/ — отказ" nv "$T/i5" nvisppg_install "$T/f1/libnvisppg.so" "$STOCK" "$LIBSUM"
 
+echo "== install.sh: закрепления и порядок =="
+I="$X/install.sh"
+check   "закреплена ссылка на оверлей 36.4.3"   grep -qF 'https://developer.nvidia.com/downloads/embedded/L4T/r36_Release_v4.3/overlay_camera_36.4.3.tbz2' "$I"
+check   "закреплена sha256 архива"              grep -qx 'NVISPPG_TBZ2_SHA256=acacdf47862b1212fb5ddff2046d49397f9f86757951b15ccde4af5e74f49f3f' "$I"
+check   "закреплена sha256 библиотеки оверлея"  grep -qx 'NVISPPG_OVERLAY_SHA256=3970c9cc85f86b978fdca1d20f2798c022f6852d26cfe03ae5bceec6ae0666ca' "$I"
+check   "закреплена sha256 штатной 36.4.3"      grep -qx 'NVISPPG_STOCK_SHA256=7e7c7500fae24da5bbb09dbed8d4235346c5110ab19b78e5daccbd8d078d5a2c' "$I"
+check   "закреплён релиз L4T 36.4.3"            grep -qx 'NVISPPG_L4T=36.4.3' "$I"
+check   "барьер L4T зовётся с закреплённым"     grep -qE '^nvisppg_gate "\$NVISPPG_L4T" ' "$I"
+line() { grep -nE "$1" "$I" | head -1 | cut -d: -f1; }
+check   "барьер L4T — до любой сети"            test "$(line '^nvisppg_gate ')" -lt "$(line '^(nvisppg_fetch|git clone)')"
+check   "подмена — после скачивания"            test "$(line '^nvisppg_fetch ')" -lt "$(line '^nvisppg_install ')"
+check   "nvisppg.sh в списке обязательных"      grep -qE '^for f in .*nvisppg\.sh' "$I"
+refuses "ни одной ссылки на удалённый шаг 02"   grep -rq '02-fetch-camera-drivers' "$X"
+
 if command -v shellcheck >/dev/null 2>&1; then
-    check "shellcheck -S warning" shellcheck -S warning -x "$X/nvisppg.sh" "$0"
+    check "shellcheck -S warning" shellcheck -S warning -x "$X/install.sh" "$X/nvisppg.sh" "$X/bisquite-sensing-camera-ctl" "$X/knobs.apply" "$0"
 else
     echo "  SKIP shellcheck: нет в PATH"
 fi

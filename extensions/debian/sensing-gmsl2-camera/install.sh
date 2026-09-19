@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Драйверы Sensing GMSL2 для Jetson AGX Orin + адаптер SG8A-AGON-G2Y-A1:
-# замена ядра, модули, DTB-оверлей, загрузочная запись с оверлеем.
+# библиотека ISP из оверлея камер NVIDIA, замена ядра, модули, DTB-оверлей,
+# загрузочная запись с оверлеем.
 #
 # ПОЧЕМУ ЭТО СЛОЙ, А НЕ ЧАСТЬ БАЗОВОГО ОБРАЗА. Камеры — не свойство платы
 # Jetson вообще, а свойство КОНКРЕТНОГО адаптера на КОНКРЕТНЫХ роботах.
@@ -10,8 +11,13 @@
 # ЧТО ДЕЛАЕТ. Копирует файлы и правит extlinux.conf — то, что раньше
 # делалось руками по ssh на уже прошитой плате (2026-09-11), — и кладёт
 # неинтерактивную замену quick_bring_up.sh: режим линка, профиль камеры
-# и частоты SoC применяются сами на каждой загрузке (шаг 7). Сам
+# и частоты SoC применяются сами на каждой загрузке (шаг 8). Сам
 # quick_bring_up.sh по-прежнему не вызывается: он спрашивает с tty.
+#
+# С 4.0.0 ЗДЕСЬ ЖЕ libnvisppg.so. Раньше её подменяла станция прошивки при
+# подготовке дерева BSP; решение владельца 2026-09-18 убрало из базового
+# образа всё, что про камеры. Поэтому расширение закреплено на L4T 36.4.3
+# и отказывает на любом другом (шаг 1), до сети.
 #
 # ПОЧЕМУ НЕ 5.15.148-tegra ИЗ uname -r ХОСТА. Внутри virt-customize
 # гость не загружен — это chroot поверх файловой системы образа, а не
@@ -30,10 +36,19 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} sensing-gmsl2-camera: $*"; }
 KERNEL_VERSION="5.15.148-tegra"
 BOARD_DTB="tegra234-p3737-0000+p3701-0000-nv.dtb"
 REPO_URL="https://github.com/SENSING-Technology/nvidia-jetson-camera-drivers"
-# Тот же пакет, что и в CAMERA_PKG_REL станции прошивки (nvidia-jetpack/
-# scripts/02-fetch-camera-drivers.sh) — _YUV_ на этой камере не работает,
-# см. README и коммит 8f3212a истории расширений.
+# Пакет _GMSL2x8_, а не _YUV_: с _YUV_ эта камера не работает — разбор
+# в README («Почему пакет GMSL2x8») и коммит 8f3212a истории расширений.
 PKG_REL="${SENSING_CAMERA_PKG_REL:-Jetson AGX Orin Devkit/SG8A-AGON-G2Y-A1/JetPack6.2/SG8A_AGON_G2Y_A1_AGX_Orin_GMSL2x8_JP6.2_L4TR36.4.3}"
+
+# Оверлей камер NVIDIA для L4T 36.4.3: единственная библиотека ISP
+# libnvisppg.so (замер 2026-09-19: 280128 байт, внутри libnvisppg.so и
+# EULA-public.txt). Суммы не параметры: чужой архив — отказ, а не выбор.
+# Штатная — из nvidia-l4t-camera 36.4.3-20250107174145 BSP.
+NVISPPG_L4T=36.4.3
+NVISPPG_URL=https://developer.nvidia.com/downloads/embedded/L4T/r36_Release_v4.3/overlay_camera_36.4.3.tbz2
+NVISPPG_TBZ2_SHA256=acacdf47862b1212fb5ddff2046d49397f9f86757951b15ccde4af5e74f49f3f
+NVISPPG_OVERLAY_SHA256=3970c9cc85f86b978fdca1d20f2798c022f6852d26cfe03ae5bceec6ae0666ca
+NVISPPG_STOCK_SHA256=7e7c7500fae24da5bbb09dbed8d4235346c5110ab19b78e5daccbd8d078d5a2c
 
 # Режим линка на каждом из 8 портов, через запятую: 0=GMSL1, 1=GMSL2 6 Гбит/с,
 # 2=GMSL2 3 Гбит/с. Умолчание 1 — то же, что предлагает вендорский
@@ -48,11 +63,13 @@ if [[ ! "$SENSING_GMSLMODE" =~ ^[012](,[012]){7}$ ]]; then
     exit 1
 fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-for f in knobs knobs.apply bisquite-sensing-camera-ctl lib/bisquite-conf; do
+for f in knobs knobs.apply bisquite-sensing-camera-ctl nvisppg.sh lib/bisquite-conf; do
     [[ -f "$SCRIPT_DIR/$f" ]] || { log_error "рядом нет $f"; exit 1; }
 done
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/lib/bisquite-conf"
+# shellcheck source=nvisppg.sh
+source "$SCRIPT_DIR/nvisppg.sh"
 
 # --- 1. Опознать плату ------------------------------------------------------
 #
@@ -71,6 +88,9 @@ if [[ ! -f "/boot/dtb/kernel_${BOARD_DTB}" ]]; then
     exit 1
 fi
 log_info "плата: $(head -n1 /etc/nv_tegra_release)"
+# Релиз — тоже до сети: ядро, модули, оверлей камер и библиотека ISP
+# собраны под один L4T, и на соседнем (36.4.4) это другой набор.
+nvisppg_gate "$NVISPPG_L4T" || exit 1
 
 # Ручки камер — до сети: опечатка в SENSING_CAMERA_CONTROLS роняет сборку за
 # секунду, а не после клона. Файл создаётся один раз и не переписывается;
@@ -79,10 +99,22 @@ log_info "плата: $(head -n1 /etc/nv_tegra_release)"
 conf_init sensing-camera "$SCRIPT_DIR/knobs" --env || { log_error "/etc/bisquite/sensing-camera/config не записан"; exit 1; }
 conf_load sensing-camera
 
-# --- 2. Скачать пакет драйверов ---------------------------------------------
+# --- 2. Библиотека ISP из оверлея камер NVIDIA ------------------------------
+#
+# Штатная libnvisppg.so из nvidia-l4t-camera с этими камерами не работает;
+# NVIDIA выпускает замену отдельным «оверлеем камер» на каждый релиз.
+# Скачать, сверить с закреплённой суммой, подменить через dpkg-divert —
+# разбор в nvisppg.sh. Порядок с ядром и модулями неважен: файлы разные.
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
+command -v curl >/dev/null 2>&1 || { log_error "нет curl — поставь его слоем раньше (INSTALL curl)"; exit 1; }
+log_info "оверлей камер NVIDIA $NVISPPG_L4T"
+mkdir -p "$WORKDIR/nvisppg"
+nvisppg_fetch "$NVISPPG_URL" "$NVISPPG_TBZ2_SHA256" "$NVISPPG_OVERLAY_SHA256" "$WORKDIR/nvisppg" || exit 1
+nvisppg_install "$WORKDIR/nvisppg/libnvisppg.so" "$NVISPPG_STOCK_SHA256" "$NVISPPG_OVERLAY_SHA256" || exit 1
+
+# --- 3. Скачать пакет драйверов ---------------------------------------------
 # НЕ --depth 1 обычный clone: он тянет ВСЕ платы и версии JetPack целиком
 # (замер 2026-09-12 — репозиторий больше 380 МБ), а нужна ровно одна папка
 # ниже. Внутри virt-customize это клонируется НА ДИСК СОБИРАЕМОГО ОБРАЗА
@@ -92,10 +124,7 @@ trap 'rm -rf "$WORKDIR"' EXIT
 # на 8-гигабайтном APP с ~180 МБ свободного места.
 #
 # Частичный клон (--filter=blob:none, без чекаута) + sparse-checkout
-# в режиме cone — тот же приём, каким чинили этот класс проблемы уже
-# в проекте (nvidia-jetpack/scripts/02-fetch-camera-drivers.sh: «внутрь
-# образа едет только одна папка»), только здесь дерево ещё и физически
-# теснее.
+# в режиме cone: внутрь образа едет только одна папка пакета.
 log_info "клонирую $REPO_URL (частично: только $PKG_REL)"
 git clone --no-checkout --depth 1 --filter=blob:none "$REPO_URL" "$WORKDIR/repo"
 git -C "$WORKDIR/repo" sparse-checkout init --cone
@@ -115,7 +144,7 @@ if [[ ! -f "$PKG/install.sh" ]]; then
 fi
 log_info "пакет: ${PKG_REL##*/}"
 
-# --- 3. Ядро и модули --------------------------------------------------------
+# --- 4. Ядро и модули --------------------------------------------------------
 #
 # Бэкап штатного ядра — cp -n, идемпотентно: повторный прогон расширения
 # (или добавление второго Sensing-слоя по ошибке) не затрёт уже сохранённый
@@ -186,7 +215,7 @@ installed_ko=("$MODDIR_I2C"/*.ko "$MODDIR_PWM"/*.ko)
 shopt -u nullglob
 log_info "модули: ${#installed_ko[@]} файлов, depmod прошёл"
 
-# --- 4. DTB-оверлей -----------------------------------------------------------
+# --- 5. DTB-оверлей -----------------------------------------------------------
 shopt -s nullglob
 overlays=("$PKG"/dtb/SGX_YUV_GMSL2/tegra234-camera*.dtbo)
 shopt -u nullglob
@@ -198,14 +227,14 @@ cp -f "${overlays[@]}" /boot/
 OVERLAY_NAME="$(basename "${overlays[0]}")"
 log_info "оверлей камер: $OVERLAY_NAME"
 
-# --- 5. Пакет драйверов целиком в /opt/sensing ------------------------------
+# --- 6. Пакет драйверов целиком в /opt/sensing ------------------------------
 # Для ручного quick_bring_up.sh на устройстве — см. README расширения.
 rm -rf /opt/sensing
 mkdir -p /opt/sensing
 cp -a "$PKG/." /opt/sensing/
 find /opt/sensing -name '*.sh' -exec chmod +x {} +
 
-# --- 6. extlinux.conf: новая запись с оверлеем, старая остаётся резервной --
+# --- 7. extlinux.conf: новая запись с оверлеем, старая остаётся резервной --
 #
 # Через python3, а не sed/awk построчно: запись root= из уже существующего
 # APPEND нужно ПЕРЕИСПОЛЬЗОВАТЬ дословно (PARTUUID сгенерирован при сборке
@@ -266,7 +295,7 @@ if ! grep -q "^LABEL backup" "$EXTLINUX"; then
     exit 1
 fi
 
-# --- 7. Запуск камер на каждой загрузке ---------------------------------------
+# --- 8. Запуск камер на каждой загрузке ---------------------------------------
 #
 # БЕЗ ЭТОГО ШАГА КАДРОВ НЕТ НИ НА ОДНОМ ПОРТУ, хотя всё выглядит исправным.
 #
@@ -332,5 +361,5 @@ ln -sf /etc/systemd/system/bisquite-sensing-clock.service \
     /etc/systemd/system/multi-user.target.wants/bisquite-sensing-clock.service
 log_info "профиль камер: $SENSING_CAMERA_CONTROLS; частоты на максимум: $SENSING_BOOST_CLOCK"
 
-log_info "готово: ядро заменено, модули на месте, extlinux → JetsonIO"
+log_info "готово: libnvisppg.so из оверлея, ядро заменено, модули на месте, extlinux → JetsonIO"
 log_info "откат при проблемах — выбрать пункт backup в загрузочном меню"
