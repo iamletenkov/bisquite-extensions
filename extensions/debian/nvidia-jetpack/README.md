@@ -177,22 +177,23 @@ ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TEST=="power/control", 
 
 | Скрипт | Что делает |
 |---|---|
-| `01-fetch-l4t.sh` | Качает BSP, sample rootfs и оверлеи профиля; сверяет SHA1 с эталонами |
+| `01-fetch-l4t.sh` | Качает BSP, sample rootfs (кроме пар с `ROOTFS_SOURCE=vendor-image`) и оверлеи профиля; сверяет SHA1 с эталонами |
 | `02-fetch-camera-drivers.sh` | Драйверы Sensing `SG8A-AGON-G2Y-A1`; при пустом `CAMERA_PKG_REL` — пропуск |
-| `03-prepare-bsp.sh` | Распаковка, `apply_binaries.sh`, подмена `libnvisppg.so` **после** него |
+| `03-prepare-bsp.sh` | Распаковка, `apply_binaries.sh`, подмена `libnvisppg.so` **после** него; при `vendor-image` — только дерево BSP, без `apply_binaries` |
 | `04-customize-rootfs.sh` | Пользователь без `oem-config`, пакеты и драйверы камер внутрь rootfs (через `qemu-aarch64-static`) |
 | `05-generate-images.sh` | `l4t_initrd_flash.sh --no-flash`; плата должна быть в recovery |
 | `06-flash.sh` | `--flash-only`; предполётно проверяет ufw, место и режим APX |
 | `07-flash-rootfs-ssh.sh` | Обход: rootfs в APP SSH-потоком, минуя NFS |
 | `08-build-base-image.sh` | Образ диска (`.img` + `.qcow2`) для тиражирования на флот; плата не нужна |
-| `09-build-jetson-base.sh` | Оркестратор `01`→`02`→`03`→`04 -U`→`11`→манифест→`08`→манифест; в bisquite ничего не регистрирует |
+| `09-build-jetson-base.sh` | Оркестратор `01`→`02`→`03`→`04 -U`→`11`→манифест→`08`→манифест; у `vendor-image` — `01`→`03`→`11`→образ вендора→qcow2→манифесты; в bisquite ничего не регистрирует |
 | `10-flash-internal.sh` | Выборочно: только QSPI либо QSPI + внутренняя eMMC |
-| `11-package-bootloader.sh` | Пакет прошивки загрузчика — offline massflash NVIDIA, плата не нужна |
-| `14-flash-bootloader.sh` | Прошивка загрузчика готовым пакетом; плата в recovery; **необратимо** |
-| `15-verify-pair.sh` | Доказывает по самому BSP, что пара плата×релиз вообще собирается |
+| `11-package-bootloader.sh` | Пакет прошивки загрузчика, плата не нужна: `l4t_initrd_flash.sh --massflash` у AGX, `nvmassflashgen.sh` у Nano |
+| `14-flash-bootloader.sh` | Прошивка загрузчика готовым пакетом; плата в recovery; **необратимо**; у Nano — `nvmflash.sh` из самого пакета |
+| `15-verify-pair.sh` | Доказывает по самому BSP, что пара плата×релиз вообще собирается; у Nano — ещё sha256 образа вендора |
 | `16-matrix.sh` | Таблица «плата × релиз × статус» из профилей и записей |
 | `90-install-sdkmanager.sh` | SDK Manager по редирект-ссылке NVIDIA |
 | `manifest.py` | Пишет внутренний (в rootfs) и внешний (рядом с артефактами) манифесты пары |
+| `vendor-image.sh` | Подключается шагом `09`: образ вендора в кеш со сверкой sha256, разреженный raw, qcow2, внутренний манифест |
 
 Порядок запуска и что делать при обрыве — в `/opt/nvidia-jetpack/README.md`.
 
@@ -204,9 +205,9 @@ ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0955", TEST=="power/control", 
 
 | Каталог | Что несёт |
 |---|---|
-| `boards/<плата>.env` | железо: SoC, `BOARDID`/`FAB`/`BOARD_SKU`/`BOARDREV`, `ROOTFS_DEV`, `BOOTLOADER_PACKAGE` |
+| `boards/<плата>.env` | железо: SoC, `BOARDID`/`FAB`/`BOARD_SKU`/`BOARDREV`, `ROOTFS_DEV`, `BOOTLOADER_PACKAGE`, `BOOTLOADER_TOOL` (`initrd-flash` у AGX, `nvmassflashgen` у Nano) |
 | `releases/<релиз>.env` | версия L4T со ссылками и суммами, совместимые SoC (`SOCS`), официальные хосты прошивки |
-| `pairs/<плата>@<релиз>.env` | точечное исключение на конкретную пару (не у каждого релиза платы есть свой оверлей или пакет камер) |
+| `pairs/<плата>@<релиз>.env` | точечное исключение на конкретную пару: свой оверлей или пакет камер, у смешанной пары — источник системы (`ROOTFS_SOURCE`, `ROOTFS_L4T`, `VENDOR_IMG_*`) |
 
 ```bash
 . /opt/nvidia-jetpack/profile.sh && load_profile agx-xavier 35.6.5

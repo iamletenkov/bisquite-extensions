@@ -30,7 +30,7 @@ sudo -E /opt/nvidia-jetpack/09-build-jetson-base.sh
 
 | Каталог | Что несёт | Пример |
 |---|---|---|
-| `boards/<плата>.env` | железо: SoC, `BOARDID`/`FAB`/`BOARD_SKU`/`BOARDREV`, `ROOTFS_DEV`, `BOOTLOADER_PACKAGE` | `boards/agx-xavier.env` |
+| `boards/<плата>.env` | железо: SoC, `BOARDID`/`FAB`/`BOARD_SKU`/`BOARDREV`, `ROOTFS_DEV`, `BOOTLOADER_PACKAGE`, `BOOTLOADER_TOOL` (`initrd-flash` у AGX, `nvmassflashgen` у Nano) | `boards/agx-xavier.env` |
 | `releases/<релиз>.env` | версия L4T со ссылками и суммами, совместимые SoC (`SOCS`), официальные хосты прошивки | `releases/35.6.5.env` |
 | `pairs/<плата>@<релиз>.env` | точечное исключение на конкретную пару — не у каждого релиза платы есть свой оверлей или пакет камер | `pairs/agx-orin@36.4.3.env` |
 
@@ -71,24 +71,50 @@ sudo -E /opt/nvidia-jetpack/09-build-jetson-base.sh
 * **Камер Sensing на нём нет** — шаг `02` при пустом `CAMERA_PKG_REL`
   завершается успешно и ничего не качает.
 
+### Чем Nano отличается по существу
+
+Пара `nano@32.7.4` **смешанная** и названа по версии загрузчика: QSPI шьётся
+R32.7.4 из официального BSP, а система — образ Q-engineering на R32.6.1
+(`ROOTFS_SOURCE=vendor-image`, `ROOTFS_L4T=32.6.1`). Отсюда три отличия:
+
+* **Система не собирается из BSP.** Шаг `01` не качает sample rootfs, `03`
+  только распаковывает BSP (пустой `rootfs/` с каталогом `rootfs/etc`), `02`,
+  `04` и `08` не выполняются. `09` скачивает `.img.xz` в `$WORK/downloads/`
+  (кеш), сверяет sha256 — расхождение означает отказ и удаление файла, —
+  распаковывает в разреженный raw и конвертирует в `system.qcow2`. Внутренний
+  манифест кладёт `guestfish` — один добавленный файл; `virt-customize` не
+  годится: он переписывает в госте random seed. Перед скачиванием,
+  распаковкой и конвертацией сверяется свободное место; станцию сценарий не
+  чистит.
+* **Загрузчик пакует `nvmassflashgen.sh`**: у t210 в R32 нет
+  `tools/kernel_flash/`, а значит, нет ни `--massflash`, ни `--qspi-only`.
+  Цель строго `jetson-nano-qspi` (разметка только SPI, `NO_ROOTFS=1`) —
+  шаг `11` отказывает на любой другой. `.tbz2` NVIDIA перекодируется потоком
+  в `bootloader.tar.gz`: tar внутри тот же байт в байт. Хеши — по всему
+  `mfi_jetson-nano-qspi/`, кроме `mfi.log` и `mfilogs/`.
+* **Шьёт `nvmflash.sh` из пакета**, и он шьёт **все** платы в recovery разом,
+  поэтому «ровно одна плата 0955» у Nano несущая. Слотов A/B нет: прерванная
+  заливка QSPI лечится только повторной заливкой.
+
 ## Нумерация — это порядок
 
 | Скрипт | Что делает | Плата нужна | root |
 |---|---|---|---|
-| `01-fetch-l4t.sh` | BSP, sample rootfs, оверлеи профиля; сверка SHA1 | нет | нет |
+| `01-fetch-l4t.sh` | BSP, sample rootfs (кроме пар с `ROOTFS_SOURCE=vendor-image`), оверлеи профиля; сверка SHA1 | нет | нет |
 | `02-fetch-camera-drivers.sh` | драйверы Sensing с GitHub | нет | нет |
-| `03-prepare-bsp.sh` | распаковка, оверлей QSPI, `apply_binaries.sh`, оверлей камер | нет | **да** |
+| `03-prepare-bsp.sh` | распаковка, оверлей QSPI, `apply_binaries.sh`, оверлей камер; при `vendor-image` — только дерево BSP, без `apply_binaries` | нет | **да** |
 | `04-customize-rootfs.sh` | пользователь без `oem-config`, пакеты и драйверы в rootfs | нет | **да** |
 | `05-generate-images.sh` | генерация образов (`--no-flash`) | **да, в recovery** | **да** |
 | `06-flash.sh` | заливка (`--flash-only`) — **необратимо** | **да, в recovery** | **да** |
 | `07-flash-rootfs-ssh.sh` | обход, если `06` оборвался на `system.img` | **да, в initrd** | **да** |
 | `08-build-base-image.sh` | базовый образ диска (`.img` + `.qcow2`) для тиражирования на флот | нет | **да** |
-| `09-build-jetson-base.sh` | оркестратор: `01`→`02`→`03`→`04 -U`→`11`→манифест→`08`→манифест | нет | **да** |
+| `09-build-jetson-base.sh` | оркестратор: `01`→`02`→`03`→`04 -U`→`11`→манифест→`08`→манифест; у `vendor-image` — `01`→`03`→`11`→образ вендора→qcow2→манифесты | нет | **да** |
 | `10-flash-internal.sh` | выборочно: только QSPI, либо QSPI + eMMC | **в recovery** | **да** |
-| `11-package-bootloader.sh` | пакет прошивки загрузчика (offline massflash NVIDIA) | нет | **да** |
-| `14-flash-bootloader.sh` | прошивка загрузчика готовым пакетом — **необратимо** | **да, в recovery** | **да** |
-| `15-verify-pair.sh` | доказать по самому BSP, что пара плата×релиз вообще собирается | нет | нет |
+| `11-package-bootloader.sh` | пакет прошивки загрузчика, плата не нужна: `l4t_initrd_flash.sh --massflash` у AGX, `nvmassflashgen.sh` у Nano | нет | **да** |
+| `14-flash-bootloader.sh` | прошивка загрузчика готовым пакетом — **необратимо**; у Nano — `nvmflash.sh` из самого пакета | **да, в recovery** | **да** |
+| `15-verify-pair.sh` | доказать по самому BSP, что пара плата×релиз вообще собирается; у Nano — ещё sha256 образа вендора | нет | нет |
 | `16-matrix.sh` | таблица «плата × релиз × статус» из профилей и записей | нет | нет |
+| `vendor-image.sh` | не шаг: функции шага `09` для пары с образом вендора | нет | — |
 | `90-install-sdkmanager.sh` | NVIDIA SDK Manager (по желанию) | нет | **да** |
 
 Шаги `05`–`07` и `14` прошивают **одну** плату через USB-кабель, и плата
@@ -145,6 +171,10 @@ sudo -E /opt/nvidia-jetpack/09-build-jetson-base.sh
 | `BOARD_REVISION` | `default` | `08` | ревизия в терминах creator'а, уезжает как `FAB=` |
 | `ROOTFS_DEV` | `USB` | `08` | что creator впишет в `root=` — потом заменяется на `PARTUUID` |
 | `OUT_RAW`, `OUT_QCOW2` | `$WORK/jetson-orin-bsp.*` | `08`, `09` | куда лечь результату |
+| `BOOTLOADER_TOOL` | — (обязателен) | `11`, `14`, `15` | `initrd-flash` или `nvmassflashgen`; пусто — отказ |
+| `ROOTFS_SOURCE` | `nvidia-bsp` (ставит `load_profile`) | `01`, `03`, `09`, `15` | `vendor-image` — система из готового образа вендора, sample rootfs и `apply_binaries` не нужны |
+| `ROOTFS_L4T` | `$L4T` (ставит `load_profile`) | `manifest.py` | версия системы; у смешанной пары отличается от версии загрузчика |
+| `VENDOR_IMG_URL`, `VENDOR_IMG_SIZE`, `VENDOR_IMG_SHA256`, `VENDOR_IMG_MD5`, `VENDOR_IMG_DATE` | — | `09`, `15`, `manifest.py` | образ вендора: ссылка, размер `.img.xz`, эталон sha256 (расхождение — отказ), md5 и дата снимка — справочно |
 
 `APP_SIZE` и `BOARD_TARGET` обязаны совпадать у `05` и `06`: заливка ищет
 файлы, собранные с теми же параметрами. Под `sudo` переменные передаются
