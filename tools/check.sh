@@ -21,6 +21,9 @@ echo "== test-conf =="
 echo "== test-nvidia-jetpack =="
 "$HERE/test-nvidia-jetpack.sh" || rc=1
 
+echo "== test-sensing-gmsl2-camera =="
+"$HERE/test-sensing-gmsl2-camera.sh" || rc=1
+
 echo
 if (( rc )); then
     echo "проверки не прошли" >&2
