@@ -65,5 +65,27 @@ check   "пакет загрузчика до образа"   bash -c "$(declare
 refuses "импорта в bisquite нет"        bash -c "$(declare -f p09); S='$S'; p09 | grep -q 'import'"
 refuses "без профиля — отказ"           bash -c "unset WORK; DRY_RUN=1 bash '$S/09-build-jetson-base.sh'"
 
+echo "== шаг 14: сверка пакета перед прошивкой =="
+ft="$(mktemp -d)"
+mk14() {  # $1 — содержимое a.bin в архиве; манифест всегда от "AAA"
+  rm -rf "$ft/src" "$ft/out"; mkdir -p "$ft/src/mfi_x/tools/kernel_flash/images/internal" "$ft/out"
+  echo AAA > "$ft/src/mfi_x/tools/kernel_flash/images/internal/a.bin"
+  ( cd "$ft/src/mfi_x/tools/kernel_flash/images/internal" && find . -type f -print0 | sort -z | xargs -0 sha256sum ) > "$ft/out/bootloader-files.sha256"
+  echo "$1" > "$ft/src/mfi_x/tools/kernel_flash/images/internal/a.bin"
+  tar -czf "$ft/out/bootloader.tar.gz" -C "$ft/src" mfi_x
+  echo q > "$ft/out/system.qcow2"
+  ( set -a; JETSON=agx-xavier L4T=35.6.5 SOC=t194 BOARD_TARGET=x BOARDID=1 FAB=1 BOARD_SKU=1 BOARDREV=1 \
+    BOOTLOADER_PACKAGE=full BSP_FILE=b BSP_SHA1=c; set +a
+    python3 "$S/manifest.py" outer --bootloader-files "$ft/out/bootloader-files.sha256" --out "$ft/out/manifest.json" \
+      --artifact "$ft/out/system.qcow2" --artifact "$ft/out/bootloader.tar.gz" )
+}
+r14() { env JETSON="${1:-agx-xavier}" L4T=35.6.5 BOARD_TARGET=x BOOTLOADER_PACKAGE=full FLASH_HOSTS=22.04 \
+        OUT_DIR="$ft/out" DRY_RUN=1 bash "$S/14-flash-bootloader.sh"; }
+mk14 AAA; check   "целый пакет проходит сверку"       r14
+          refuses "чужая пара — отказ"                r14 agx-orin
+mk14 BBB; refuses "подменённый файл загрузчика — отказ" r14
+mk14 AAA; echo tamper >> "$ft/out/bootloader.tar.gz"
+          refuses "испорченный архив — отказ"         r14
+
 echo "проверок: $total, не прошло: $fails"
 [ "$fails" -eq 0 ]
