@@ -21,6 +21,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${WORK:?профиль не загружен: . profile.sh && load_profile <плата> <релиз>}"
 : "${OUT_DIR:?профиль не загружен}"
 LFT="$WORK/Linux_for_Tegra"
+# Результат пары — ровно $OUT_DIR: манифест хеширует $OUT_DIR/system.qcow2,
+# chown отдаёт $OUT_DIR. Унаследованный OUT_QCOW2 (из старой оболочки
+# станции) отправил бы qcow2 в другое место, а манифест захешировал бы
+# qcow2 ПРОШЛОЙ сборки, оставшийся в $OUT_DIR, — поэтому отказ, а не догадка.
+[ "${OUT_QCOW2:-}" = "$OUT_DIR/system.qcow2" ] || {
+    echo "ОТКАЗ: OUT_QCOW2=${OUT_QCOW2:-<пусто>}, а результат пары — $OUT_DIR/system.qcow2"
+    echo "       (унаследован из окружения? unset OUT_QCOW2 и загрузи профиль заново)"
+    exit 1
+}
 
 FRESH=0
 case "${1:-}" in

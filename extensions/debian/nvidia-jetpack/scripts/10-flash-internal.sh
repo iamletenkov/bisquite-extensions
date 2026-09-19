@@ -166,6 +166,11 @@ unset TMPDIR || true
 echo "убрано; TMPDIR = [${TMPDIR:-}] (обязано быть пусто)"
 
 step "5. ПОДТВЕРЖДЕНИЕ"
+cat <<WARN
+Пара:   ${JETSON:-?}@${L4T:-?}
+Дерево: $LFT
+
+WARN
 if [ "$TARGET" = qspi ]; then
     cat <<WARN
 Сейчас будет переписан ЗАГРУЗЧИК В QSPI-NOR на модуле. Это НЕОБРАТИМО:

@@ -65,6 +65,7 @@ p09() { ( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && DRY_RUN=1 bash 
 check   "пакет загрузчика до образа"   bash -c "$(declare -f p09); S='$S'; p09 | tr '\n' ' ' | grep -q '11-package-bootloader.sh manifest:internal 08-build-base-image.sh manifest:outer'"
 refuses "импорта в bisquite нет"        bash -c "$(declare -f p09); S='$S'; p09 | grep -q 'import'"
 refuses "без профиля — отказ"           bash -c "unset WORK; DRY_RUN=1 bash '$S/09-build-jetson-base.sh'"
+check   "OUT_QCOW2 вне OUT_DIR — отказ"  bash -c "export OUT_QCOW2=/elsewhere/x.qcow2; . '$S/profile.sh' && load_profile agx-xavier 35.6.5 && out=\"\$(DRY_RUN=1 bash '$S/09-build-jetson-base.sh')\"; [ \$? -ne 0 ] && grep -q 'ОТКАЗ: OUT_QCOW2=/elsewhere' <<<\"\$out\""
 
 echo "== шаг 14: сверка пакета перед прошивкой =="
 ft="$(mktemp -d)"
