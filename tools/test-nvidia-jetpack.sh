@@ -36,5 +36,20 @@ c08() { ( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && CREATOR_HAS_DEV
 check   "с -d, когда creator его знает"   bash -c "$(declare -f c08); S='$S'; c08 yes | grep -q -- '-d USB'"
 refuses "без -d, когда не знает (R32)"    bash -c "$(declare -f c08); S='$S'; c08 no | grep -q -- '-d '"
 
+echo "== manifest.py =="
+mt="$(mktemp -d)"
+( set -a; JETSON=agx-xavier L4T=35.6.5 SOC=t194 BOARD_TARGET=jetson-agx-xavier-devkit BOARDID=2888 FAB=400 \
+  BOARD_SKU=0001 BOARDREV=J.0 BOOTLOADER_PACKAGE=full BSP_FILE=b.tbz2 BSP_SHA1=abc; set +a
+  printf 'aaa  ./a.bin\nbbb  ./sub/b.bin\n' > "$mt/files.sha256"
+  echo qcow > "$mt/system.qcow2"; echo tgz > "$mt/bootloader.tar.gz"
+  python3 "$S/manifest.py" internal --bootloader-files "$mt/files.sha256" --out "$mt/in.json"
+  python3 "$S/manifest.py" outer --bootloader-files "$mt/files.sha256" --out "$mt/out.json" \
+      --artifact "$mt/system.qcow2" --artifact "$mt/bootloader.tar.gz"
+  ! python3 "$S/manifest.py" internal --bootloader-files "$mt/files.sha256" --out "$mt/x.json" --artifact "$mt/system.qcow2" 2>/dev/null
+) >/dev/null 2>&1 && ok "manifest.py отработал" || bad "manifest.py отработал"
+check "внутренний: пара и файлы" python3 -c "import json;m=json.load(open('$mt/in.json'));assert m['pair']['jetson']=='agx-xavier' and len(m['bootloader_files'])==2 and 'artifacts' not in m"
+check "внешний: суммы артефактов" python3 -c "import json,hashlib;m=json.load(open('$mt/out.json'));assert m['artifacts']['system.qcow2']==hashlib.sha256(open('$mt/system.qcow2','rb').read()).hexdigest()"
+refuses "без профиля — отказ" env -i PATH="$PATH" python3 "$S/manifest.py" internal --bootloader-files "$mt/files.sha256" --out "$mt/y.json"
+
 echo "проверок: $total, не прошло: $fails"
 [ "$fails" -eq 0 ]
