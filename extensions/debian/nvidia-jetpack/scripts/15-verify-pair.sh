@@ -29,14 +29,33 @@ members=(
 )
 tar_opts=(--wildcards --no-wildcards-match-slash)
 local_bsp="${WORK:-/nonexistent}/downloads/${BSP_FILE:-none}"
+# Вердикт относится к архиву с суммой BSP_SHA1 — значит, сумма считается по
+# байтам, которые реально прочитаны (файл или поток), и сверяется с ней.
+# Без эталона вердикт не к чему привязать.
+[ -n "${BSP_SHA1:-}" ] || { echo "ОТКАЗ: в профиле пуст BSP_SHA1 — вердикта нет, отпечаток не записан"; exit 2; }
 # Отсутствующий в архиве член (кроме creator'а, см. ниже) — это и есть ответ
 # «нет», поэтому код tar сам по себе не проверяется; проверяются файлы ниже.
 curl_status=0
 if [ -s "$local_bsp" ]; then
+    src="$local_bsp"
+    got_sha1="$(sha1sum "$local_bsp" | cut -d' ' -f1)"
     tar -xjf "$local_bsp" -C "$tmp" "${tar_opts[@]}" "${members[@]}" 2>/dev/null
 else
-    curl -fsSL --max-time 2400 "$BSP_URL" | tar -xjf - -C "$tmp" "${tar_opts[@]}" "${members[@]}" 2>/dev/null
+    src="$BSP_URL"
+    # tar может выйти, не дочитав поток (все члены найдены раньше конца), —
+    # тогда sha1sum увидел бы обрезок. cat после tar дочитывает остаток.
+    curl -fsSL --max-time 2400 "$BSP_URL" \
+        | tee >(sha1sum | cut -d' ' -f1 > "$tmp/sha1") \
+        | { tar -xjf - -C "$tmp" "${tar_opts[@]}" "${members[@]}" 2>/dev/null; cat >/dev/null; }
     curl_status="${PIPESTATUS[0]}"
+    # Процесс-подстановка асинхронна: ждать, пока sha1sum допишет сумму.
+    for _ in $(seq 100); do [ -s "$tmp/sha1" ] && break; sleep 0.1; done
+    got_sha1="$(cat "$tmp/sha1" 2>/dev/null)"
+fi
+if [ "$curl_status" -eq 0 ] && [ "$got_sha1" != "$BSP_SHA1" ]; then
+    echo "ОТКАЗ: SHA1 прочитанного BSP ($src) = ${got_sha1:-?}, в профиле $BSP_SHA1 —"
+    echo "       архив обрезан или подменён; вердикта нет, отпечаток не записан"
+    exit 2
 fi
 
 L="$tmp/Linux_for_Tegra"
@@ -71,7 +90,7 @@ out="$VERIFY_DIR/$JETSON@$L4T.txt"
     echo "pair=$JETSON@$L4T"
     echo "date=$(date -I)"
     echo "bsp=$(basename "$BSP_URL")"
-    echo "bsp_sha1=${BSP_SHA1:-}"
+    echo "bsp_sha1=$got_sha1"
     echo "creator_branch=$v_branch"
     echo "conf=$v_conf"
     echo "flash_xml=$v_xml"

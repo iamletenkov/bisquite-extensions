@@ -111,19 +111,44 @@ mkbsp() {  # $1=yes — положить .conf платы; dangling — ссыл
   [ "$1" = no ] || ln -s p2822-0000+p2888-0004.conf "$vt/L/Linux_for_Tegra/jetson-agx-xavier-devkit.conf"
   tar -cjf "$vt/bsp.tbz2" -C "$vt/L" Linux_for_Tegra
 }
+# Профили несут настоящие SHA1 BSP NVIDIA; тестовому архиву нужна его сумма.
+sha1of() { sha1sum "$1" | cut -d' ' -f1; }
+# r15 [VAR=значение …] — поправки окружения после load_profile.
 r15() { ( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && unset WORK && \
-          BSP_URL="file://$vt/bsp.tbz2" VERIFY_DIR="$vt/v" bash "$S/15-verify-pair.sh" ); }
+          env BSP_URL="file://$vt/bsp.tbz2" BSP_SHA1="$(sha1of "$vt/bsp.tbz2")" VERIFY_DIR="$vt/v" "$@" \
+              bash "$S/15-verify-pair.sh" ); }
+code15() { local want="$1"; shift; r15 "$@" >/dev/null 2>&1; [ "$?" -eq "$want" ]; }
 mkbsp yes; check   "ветка, конфиг и XML на месте — проверено" r15
            check   "отпечаток записан"  grep -q '^verdict=проверено' "$vt/v/agx-xavier@35.6.5.txt"
+           check   "в отпечатке — посчитанная SHA1 потока" grep -qx "bsp_sha1=$(sha1of "$vt/bsp.tbz2")" "$vt/v/agx-xavier@35.6.5.txt"
 mkbsp no;  refuses "ветка в creator есть, конфига нет — не собирается" r15
            check   "это видно в отпечатке" grep -q '^conf=нет' "$vt/v/agx-xavier@35.6.5.txt"
 mkbsp dangling; refuses "симлинк конфига без цели — не собирается" r15
            check   "это тоже видно в отпечатке" grep -q '^conf=нет' "$vt/v/agx-xavier@35.6.5.txt"
-r15fail() { ( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && unset WORK && \
-          BSP_URL="file://$vt/nope.tbz2" VERIFY_DIR="$vt/v" bash "$S/15-verify-pair.sh" ); }
 mkbsp yes; r15 >/dev/null 2>&1
-refuses "недоступный BSP — отказ, а не вердикт"        r15fail
+check   "недоступный BSP — код 2, а не вердикт"        code15 2 BSP_URL="file://$vt/nope.tbz2"
 check   "отпечаток после сбоя загрузки не тронут"      grep -q '^verdict=проверено' "$vt/v/agx-xavier@35.6.5.txt"
+check   "SHA1 потока не сошлась с профилем — код 2"    code15 2 BSP_SHA1=0000000000000000000000000000000000000000
+check   "пустой BSP_SHA1 в профиле — код 2"            code15 2 BSP_SHA1=
+# Локальный тарболл шага 01, оборванный wget -c: creator в начале архива
+# извлекается, .conf дальше обрыва — нет. Без сверки суммы вышло бы
+# записанное «не-собирается».
+# Архив, где creator лежит в первом блоке bzip2, а .conf и XML — после 2 МБ
+# несжимаемого наполнителя, то есть за обрывом.
+mkbsp yes
+head -c 2097152 /dev/urandom > "$vt/L/Linux_for_Tegra/filler.bin"
+( cd "$vt/L" && tar -cjf "$vt/bsp.tbz2" Linux_for_Tegra/tools/jetson-disk-image-creator.sh \
+    Linux_for_Tegra/filler.bin Linux_for_Tegra/p2822-0000+p2888-0004.conf \
+    Linux_for_Tegra/jetson-agx-xavier-devkit.conf Linux_for_Tegra/tools/kernel_flash )
+lb="$vt/w/downloads/$( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && echo "$BSP_FILE")"
+mkdir -p "$(dirname "$lb")"
+cp "$vt/bsp.tbz2" "$lb"
+check   "целый локальный тарболл — проверено"          code15 0 WORK="$vt/w" BSP_URL=file:///nonexistent.tbz2
+head -c "$(( $(stat -c %s "$vt/bsp.tbz2") * 3 / 4 ))" "$vt/bsp.tbz2" > "$lb"
+cp "$vt/v/agx-xavier@35.6.5.txt" "$vt/before.txt"
+check   "обрезанный локальный тарболл — код 2"         code15 2 WORK="$vt/w" BSP_URL=file:///nonexistent.tbz2
+check   "отпечаток после обрезанного тарболла не тронут" cmp -s "$vt/before.txt" "$vt/v/agx-xavier@35.6.5.txt"
+check   "тот же большой архив потоком — SHA1 сошлась"  code15 0
 
 echo "== шаг 16: матрица =="
 mx="$(mktemp -d)"; mkdir -p "$mx/v"
