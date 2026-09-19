@@ -22,16 +22,32 @@ members=(
     "Linux_for_Tegra/$FLASH_XML"
 )
 local_bsp="${WORK:-/nonexistent}/downloads/${BSP_FILE:-none}"
-# Отсутствующий в архиве член — это и есть ответ «нет», поэтому код tar
-# здесь не проверяется; проверяются сами файлы ниже.
+# Отсутствующий в архиве член (кроме creator'а, см. ниже) — это и есть ответ
+# «нет», поэтому код tar сам по себе не проверяется; проверяются файлы ниже.
+curl_status=0
 if [ -s "$local_bsp" ]; then
     tar -xjf "$local_bsp" -C "$tmp" "${members[@]}" 2>/dev/null
 else
-    curl -sL --max-time 2400 "$BSP_URL" | tar -xjf - -C "$tmp" "${members[@]}" 2>/dev/null
+    curl -fsSL --max-time 2400 "$BSP_URL" | tar -xjf - -C "$tmp" "${members[@]}" 2>/dev/null
+    curl_status="${PIPESTATUS[0]}"
 fi
 
 L="$tmp/Linux_for_Tegra"
 creator="$L/tools/jetson-disk-image-creator.sh"
+# Сбой загрузки — это не вердикт «не собирается», а невозможность его
+# вынести. jetson-disk-image-creator.sh есть в КАЖДОМ BSP NVIDIA, поэтому его
+# отсутствие после распаковки значит «архив не дошёл» (сеть, HTTP-ошибка,
+# обрыв потока), а не «пара не собирается». Отпечаток — доказательство, и
+# записывать его по недоказанному нельзя: «не удалось проверить» ≠ «доказано,
+# что не собирается» — временный сбой сети иначе навсегда пометил бы
+# собираемую пару как несобираемую.
+if [ "$curl_status" -ne 0 ] || [ ! -f "$creator" ]; then
+    reason="curl вернул $curl_status"
+    [ "$curl_status" -eq 0 ] && reason="jetson-disk-image-creator.sh не извлёкся из архива"
+    echo "ОТКАЗ: BSP не получен ($reason) — вердикта нет, отпечаток не записан"
+    exit 2
+fi
+
 v_branch=нет; grep -qE "^[[:space:]]*${BOARD_TARGET}\)" "$creator" 2>/dev/null && v_branch=ok
 v_conf=нет;   [ -f "$L/$BOARD_TARGET.conf" ] && v_conf=ok
 v_xml=нет;    [ -f "$L/$FLASH_XML" ] && v_xml=ok

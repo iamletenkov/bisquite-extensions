@@ -103,6 +103,11 @@ mkbsp yes; check   "ветка, конфиг и XML на месте — пров
            check   "отпечаток записан"  grep -q '^verdict=проверено' "$vt/v/agx-xavier@35.6.5.txt"
 mkbsp no;  refuses "ветка в creator есть, конфига нет — не собирается" r15
            check   "это видно в отпечатке" grep -q '^conf=нет' "$vt/v/agx-xavier@35.6.5.txt"
+r15fail() { ( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && unset WORK && \
+          BSP_URL="file://$vt/nope.tbz2" VERIFY_DIR="$vt/v" bash "$S/15-verify-pair.sh" ); }
+mkbsp yes; r15 >/dev/null 2>&1
+refuses "недоступный BSP — отказ, а не вердикт"        r15fail
+check   "отпечаток после сбоя загрузки не тронут"      grep -q '^verdict=проверено' "$vt/v/agx-xavier@35.6.5.txt"
 
 echo "== шаг 16: матрица =="
 mx="$(mktemp -d)"; mkdir -p "$mx/v"
