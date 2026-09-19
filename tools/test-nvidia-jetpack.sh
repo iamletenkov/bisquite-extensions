@@ -201,6 +201,43 @@ check   "повторный прогон по готовому дереву"    
 check   "…файл rootfs/etc от flash.sh стал каталогом"  test -d "$pt/w/Linux_for_Tegra/rootfs/etc"
 refuses "SHA1 тарболла не сошлась — отказ"            r03 BSP_SHA1=0000000000000000000000000000000000000000
 
+echo "== шаг 11: пакет Nano (nvmassflashgen) =="
+check   "nano: offline nvmassflashgen, цель QSPI"   bash -c "$(declare -f c11); S='$S'; c11 nano 32.7.4 | grep -q 'FUSELEVEL=fuselevel_production ./nvmassflashgen.sh jetson-nano-qspi mmcblk0p1'"
+check   "nano: измеренные значения"                 bash -c "$(declare -f c11); S='$S'; c11 nano 32.7.4 | grep -q 'BOARDID=3448 BOARDSKU=0000 FAB=400 BOARDREV=F.0'"
+refuses "nano: не l4t_initrd_flash"                 bash -c "$(declare -f c11); S='$S'; c11 nano 32.7.4 | grep -q l4t_initrd_flash"
+refuses "t210 с целью -qspi-sd — отказ"             bash -c ". '$S/profile.sh' && load_profile nano 32.7.4 && BOARD_TARGET=jetson-nano-qspi-sd DRY_RUN=1 bash '$S/11-package-bootloader.sh'"
+refuses "t210 с целью -devkit — отказ"              bash -c ". '$S/profile.sh' && load_profile nano 32.7.4 && BOARD_TARGET=jetson-nano-devkit DRY_RUN=1 bash '$S/11-package-bootloader.sh'"
+refuses "неизвестный BOOTLOADER_TOOL — отказ"       bash -c ". '$S/profile.sh' && load_profile nano 32.7.4 && BOOTLOADER_TOOL=flash-sh DRY_RUN=1 bash '$S/11-package-bootloader.sh'"
+nt="$(mktemp -d)"; mkdir -p "$nt/w/Linux_for_Tegra/bootloader" "$nt/w/Linux_for_Tegra/rootfs"
+# What flash.sh leaves behind in an empty rootfs/: a FILE named etc.
+: > "$nt/w/Linux_for_Tegra/rootfs/etc"
+cat > "$nt/w/Linux_for_Tegra/nvmassflashgen.sh" <<'EOF'
+#!/bin/bash
+# Stub with the real layout: the package directory in bootloader/, the
+# tarball one level up (nvmassflashgen.sh:1198-1200). Records what it got.
+set -e
+echo "BOARDID=$BOARDID BOARDSKU=$BOARDSKU FAB=$FAB BOARDREV=$BOARDREV FUSELEVEL=$FUSELEVEL ARGS=$*" > ../gen.env
+[ "${STUB_FAIL:-0}" = 1 ] && exit 1
+d="mfi_$1"
+cd bootloader && rm -rf "$d" && mkdir "$d"
+printf '#!/bin/sh\necho flash\n' > "$d/nvmflash.sh"; chmod 755 "$d/nvmflash.sh"
+echo cboot > "$d/cboot.bin"; echo "build log $RANDOM" > "$d/mfi.log"
+tar cjf "../$d.tbz2" "$d"
+EOF
+chmod +x "$nt/w/Linux_for_Tegra/nvmassflashgen.sh"
+r11n() { ( . "$S/profile.sh" && load_profile nano 32.7.4 && \
+           env PATH="$rb:$PATH" WORK="$nt/w" OUT_DIR="$nt/out" "$@" bash "$S/11-package-bootloader.sh" ); }
+check   "nano: пакет собран"                        r11n
+check   "…rootfs/etc — каталог, а не файл"          test -d "$nt/w/Linux_for_Tegra/rootfs/etc"
+check   "…offline-значения доехали до генератора"   grep -qx 'BOARDID=3448 BOARDSKU=0000 FAB=400 BOARDREV=F.0 FUSELEVEL=fuselevel_production ARGS=jetson-nano-qspi mmcblk0p1' "$nt/w/gen.env"
+check   "…tar-поток после перекодирования тот же байт в байт" bash -c "cmp -s <(bzip2 -dc '$nt/w/Linux_for_Tegra/mfi_jetson-nano-qspi.tbz2') <(gzip -dc '$nt/out/bootloader.tar.gz')"
+check   "…режимы сохранены: nvmflash.sh исполняемый" bash -c "tar -tvzf '$nt/out/bootloader.tar.gz' | grep -qE '^-rwxr-xr-x .* mfi_jetson-nano-qspi/nvmflash.sh$'"
+check   "…хеши: весь каталог, скрипт заливки тоже"  bash -c "grep -q ' ./nvmflash.sh$' '$nt/out/bootloader-files.sha256' && grep -q ' ./cboot.bin$' '$nt/out/bootloader-files.sha256'"
+refuses "…хеши: журнал сборки не входит"            grep -q 'mfi.log' "$nt/out/bootloader-files.sha256"
+rm -rf "$nt/out"
+refuses "сбой nvmassflashgen — отказ"               r11n STUB_FAIL=1
+refuses "…и пакета нет"                             test -e "$nt/out/bootloader.tar.gz"
+
 echo "== шаг 15: проверка по BSP =="
 vt="$(mktemp -d)"
 # Раскладка как у NVIDIA: .conf платы и XML разметки — симлинки на соседние
