@@ -90,12 +90,17 @@ mk14 AAA; echo tamper >> "$ft/out/bootloader.tar.gz"
 
 echo "== шаг 15: проверка по BSP =="
 vt="$(mktemp -d)"
-mkbsp() {  # $1=yes — положить .conf платы
+# Раскладка как у NVIDIA: .conf платы и XML разметки — симлинки на соседние
+# файлы с другими именами (R35.6.5: jetson-agx-xavier-devkit.conf ->
+# p2822-0000+p2888-0004.conf, flash_l4t_t194_nvme.xml -> flash_l4t_nvme.xml).
+mkbsp() {  # $1=yes — положить .conf платы; dangling — ссылка без цели
   rm -rf "$vt/L"; mkdir -p "$vt/L/Linux_for_Tegra/tools/kernel_flash"
   printf '\t\tjetson-agx-xavier-devkit)\n\t\t\tboardid="2888"\n\t\t-d | --device)\n' \
       > "$vt/L/Linux_for_Tegra/tools/jetson-disk-image-creator.sh"
-  touch "$vt/L/Linux_for_Tegra/tools/kernel_flash/flash_l4t_t194_nvme.xml"
-  [ "$1" = yes ] && touch "$vt/L/Linux_for_Tegra/jetson-agx-xavier-devkit.conf"
+  touch "$vt/L/Linux_for_Tegra/tools/kernel_flash/flash_l4t_nvme.xml"
+  ln -s flash_l4t_nvme.xml "$vt/L/Linux_for_Tegra/tools/kernel_flash/flash_l4t_t194_nvme.xml"
+  [ "$1" = yes ] && touch "$vt/L/Linux_for_Tegra/p2822-0000+p2888-0004.conf"
+  [ "$1" = no ] || ln -s p2822-0000+p2888-0004.conf "$vt/L/Linux_for_Tegra/jetson-agx-xavier-devkit.conf"
   tar -cjf "$vt/bsp.tbz2" -C "$vt/L" Linux_for_Tegra
 }
 r15() { ( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && unset WORK && \
@@ -104,6 +109,8 @@ mkbsp yes; check   "ветка, конфиг и XML на месте — пров
            check   "отпечаток записан"  grep -q '^verdict=проверено' "$vt/v/agx-xavier@35.6.5.txt"
 mkbsp no;  refuses "ветка в creator есть, конфига нет — не собирается" r15
            check   "это видно в отпечатке" grep -q '^conf=нет' "$vt/v/agx-xavier@35.6.5.txt"
+mkbsp dangling; refuses "симлинк конфига без цели — не собирается" r15
+           check   "это тоже видно в отпечатке" grep -q '^conf=нет' "$vt/v/agx-xavier@35.6.5.txt"
 r15fail() { ( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && unset WORK && \
           BSP_URL="file://$vt/nope.tbz2" VERIFY_DIR="$vt/v" bash "$S/15-verify-pair.sh" ); }
 mkbsp yes; r15 >/dev/null 2>&1

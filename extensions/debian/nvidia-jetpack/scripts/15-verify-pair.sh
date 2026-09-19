@@ -16,19 +16,26 @@ VERIFY_DIR="${VERIFY_DIR:-./verified}"
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 
+# .conf платы и XML разметки у NVIDIA — симлинки на соседей с другими именами
+# (jetson-agx-xavier-devkit.conf -> p2822-0000+p2888-0004.conf,
+# flash_l4t_t194_nvme.xml -> flash_l4t_nvme.xml). Вынутая по имени одна ссылка
+# осталась бы битой и дала ложное «нет» на каждой паре, поэтому берутся все
+# соседи того же каталога — без подкаталогов (--no-wildcards-match-slash).
+xml_dir="$(dirname "$FLASH_XML")"
 members=(
     "Linux_for_Tegra/tools/jetson-disk-image-creator.sh"
-    "Linux_for_Tegra/$BOARD_TARGET.conf"
-    "Linux_for_Tegra/$FLASH_XML"
+    "Linux_for_Tegra/*.conf"
+    "Linux_for_Tegra/$xml_dir/*.xml"
 )
+tar_opts=(--wildcards --no-wildcards-match-slash)
 local_bsp="${WORK:-/nonexistent}/downloads/${BSP_FILE:-none}"
 # Отсутствующий в архиве член (кроме creator'а, см. ниже) — это и есть ответ
 # «нет», поэтому код tar сам по себе не проверяется; проверяются файлы ниже.
 curl_status=0
 if [ -s "$local_bsp" ]; then
-    tar -xjf "$local_bsp" -C "$tmp" "${members[@]}" 2>/dev/null
+    tar -xjf "$local_bsp" -C "$tmp" "${tar_opts[@]}" "${members[@]}" 2>/dev/null
 else
-    curl -fsSL --max-time 2400 "$BSP_URL" | tar -xjf - -C "$tmp" "${members[@]}" 2>/dev/null
+    curl -fsSL --max-time 2400 "$BSP_URL" | tar -xjf - -C "$tmp" "${tar_opts[@]}" "${members[@]}" 2>/dev/null
     curl_status="${PIPESTATUS[0]}"
 fi
 
