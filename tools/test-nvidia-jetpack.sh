@@ -58,7 +58,8 @@ echo "== manifest.py =="
 mt="$(mktemp -d)"
 # shellcheck disable=SC2034  # переменные экспортируются для manifest.py через set -a
 ( set -a; JETSON=agx-xavier L4T=35.6.5 SOC=t194 BOARD_TARGET=jetson-agx-xavier-devkit BOARDID=2888 FAB=400 \
-  BOARD_SKU=0001 BOARDREV=J.0 BOOTLOADER_PACKAGE=full BSP_FILE=b.tbz2 BSP_SHA1=abc; set +a
+  BOARD_SKU=0001 BOARDREV=J.0 BOOTLOADER_PACKAGE=full BSP_FILE=b.tbz2 BSP_SHA1=abc \
+  ROOTFS_SOURCE=nvidia-bsp ROOTFS_L4T=35.6.5; set +a
   printf 'aaa  ./a.bin\nbbb  ./sub/b.bin\n' > "$mt/files.sha256"
   echo qcow > "$mt/system.qcow2"; echo tgz > "$mt/bootloader.tar.gz"
   python3 "$S/manifest.py" internal --bootloader-files "$mt/files.sha256" --out "$mt/in.json"
@@ -69,6 +70,17 @@ mt="$(mktemp -d)"
 check "внутренний: пара и файлы" python3 -c "import json;m=json.load(open('$mt/in.json'));assert m['pair']['jetson']=='agx-xavier' and len(m['bootloader_files'])==2 and 'artifacts' not in m"
 check "внешний: суммы артефактов" python3 -c "import json,hashlib;m=json.load(open('$mt/out.json'));assert m['artifacts']['system.qcow2']==hashlib.sha256(open('$mt/system.qcow2','rb').read()).hexdigest()"
 refuses "без профиля — отказ" env -i PATH="$PATH" python3 "$S/manifest.py" internal --bootloader-files "$mt/files.sha256" --out "$mt/y.json"
+
+echo "== manifest.py: происхождение системы =="
+mr() { ( . "$S/profile.sh" && load_profile "$1" "$2" && python3 "$S/manifest.py" internal --bootloader-files "$mt/files.sha256" --out "$mt/$1.json" ); }
+check   "agx: манифест из профиля"                     mr agx-xavier 35.6.5
+check   "agx: rootfs — nvidia-bsp той же версии, без суммы образа" python3 -c "import json;r=json.load(open('$mt/agx-xavier.json'))['rootfs'];assert r=={'source':'nvidia-bsp','l4t':'35.6.5'},r"
+check   "nano: манифест из профиля"                    mr nano 32.7.4
+check   "nano: rootfs — образ вендора 32.6.1 с суммой входа" python3 -c "import json;r=json.load(open('$mt/nano.json'))['rootfs'];assert r=={'source':'vendor-image','l4t':'32.6.1','vendor_img_sha256':'2e74215dd7d36bcbe91175c2e69399492c5b493bcfecdd0a7300c6dfa3d45fd8'},r"
+check   "nano: пара названа по загрузчику — 32.7.4"    python3 -c "import json;p=json.load(open('$mt/nano.json'))['pair'];assert p['l4t']=='32.7.4' and 'rootfs_source' not in p"
+check   "PROFILE_KEYS не тронуты"                      env PYTHONDONTWRITEBYTECODE=1 python3 -c "import sys;sys.path.insert(0,'$S');from manifest import PROFILE_KEYS as K;assert K==['JETSON','L4T','SOC','BOARD_TARGET','BOARDID','FAB','BOARD_SKU','BOARDREV','BOOTLOADER_PACKAGE','BSP_FILE','BSP_SHA1']"
+refuses "неизвестный источник системы — отказ"         bash -c ". '$S/profile.sh' && load_profile agx-xavier 35.6.5 && ROOTFS_SOURCE=nope python3 '$S/manifest.py' internal --bootloader-files '$mt/files.sha256' --out '$mt/z.json'"
+refuses "vendor-image без суммы образа — отказ"        bash -c ". '$S/profile.sh' && load_profile nano 32.7.4 && VENDOR_IMG_SHA256= python3 '$S/manifest.py' internal --bootloader-files '$mt/files.sha256' --out '$mt/z.json'"
 
 echo "== шаг 11: команда пакета =="
 c11() { ( . "$S/profile.sh" && load_profile "$1" "$2" && DRY_RUN=1 bash "$S/11-package-bootloader.sh" ); }
@@ -100,7 +112,7 @@ mk14() {  # $1 — содержимое a.bin в архиве; манифест 
 }
 # Профиль, под который собран тестовый пакет; r14 принимает поправки поверх.
 P14=(JETSON=agx-xavier L4T=35.6.5 SOC=t194 BOARD_TARGET=x BOARDID=1 FAB=1 BOARD_SKU=1 BOARDREV=1
-     BOOTLOADER_PACKAGE=full BSP_FILE=b BSP_SHA1=c)
+     BOOTLOADER_PACKAGE=full BSP_FILE=b BSP_SHA1=c ROOTFS_SOURCE=nvidia-bsp ROOTFS_L4T=35.6.5)
 r14() { env "${P14[@]}" FLASH_HOSTS=22.04 OUT_DIR="$ft/out" DRY_RUN=1 "$@" bash "$S/14-flash-bootloader.sh"; }
 mk14 AAA; check   "целый пакет проходит сверку"       r14
           refuses "после DRY_RUN распакованное убрано" test -e "$ft/out/.flash"
@@ -114,6 +126,11 @@ mk14 BBB; refuses "подменённый файл загрузчика — от
           refuses "после отказа распакованное убрано" test -e "$ft/out/.flash"
 mk14 AAA; echo tamper >> "$ft/out/bootloader.tar.gz"
           refuses "испорченный архив — отказ"         r14
+# A package built before rootfs existed: its manifest has no "rootfs" key.
+# Step 14 must not care — PROFILE_KEYS did not change.
+mk14 AAA; python3 -c "import json,sys;p=sys.argv[1];m=json.load(open(p));m.pop('rootfs');json.dump(m,open(p,'w'))" "$ft/out/manifest.json"
+          check   "манифест старого образца действительно без rootfs" python3 -c "import json;assert 'rootfs' not in json.load(open('$ft/out/manifest.json'))"
+          check   "пакет AGX, собранный до rootfs, проходит сверку" r14
 
 echo "== шаг 07: rootfs по ssh =="
 st="$(mktemp -d)"; mkdir -p "$st/bin" "$st/w/Linux_for_Tegra/tools/kernel_flash/images/external"
