@@ -51,5 +51,13 @@ check "внутренний: пара и файлы" python3 -c "import json;m=j
 check "внешний: суммы артефактов" python3 -c "import json,hashlib;m=json.load(open('$mt/out.json'));assert m['artifacts']['system.qcow2']==hashlib.sha256(open('$mt/system.qcow2','rb').read()).hexdigest()"
 refuses "без профиля — отказ" env -i PATH="$PATH" python3 "$S/manifest.py" internal --bootloader-files "$mt/files.sha256" --out "$mt/y.json"
 
+echo "== шаг 11: команда пакета =="
+c11() { ( . "$S/profile.sh" && load_profile "$1" "$2" && DRY_RUN=1 bash "$S/11-package-bootloader.sh" ); }
+check   "orin: --qspi-only"               bash -c "$(declare -f c11); S='$S'; c11 agx-orin 36.4.3 | grep -q -- '--qspi-only'"
+refuses "xavier: без --qspi-only"         bash -c "$(declare -f c11); S='$S'; c11 agx-xavier 35.6.5 | grep -q -- '--qspi-only'"
+check   "xavier: измеренные значения"     bash -c "$(declare -f c11); S='$S'; c11 agx-xavier 35.6.5 | grep -q 'BOARDID=2888 FAB=400 BOARDSKU=0001 BOARDREV=J.0'"
+check   "offline massflash, internal"     bash -c "$(declare -f c11); S='$S'; c11 agx-orin 36.4.3 | grep -q -- '--no-flash --massflash 1 --network usb0.*jetson-agx-orin-devkit internal'"
+refuses "пустой BOARDREV — отказ"         bash -c ". '$S/profile.sh' && load_profile agx-orin 36.4.3 && BOARDREV= DRY_RUN=1 bash '$S/11-package-bootloader.sh'"
+
 echo "проверок: $total, не прошло: $fails"
 [ "$fails" -eq 0 ]
