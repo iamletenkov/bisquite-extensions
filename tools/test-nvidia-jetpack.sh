@@ -31,6 +31,24 @@ refuses "xavier на 36.4.3 (t194 не в SOCS)"        lp agx-xavier 36.4.3 tru
 check "_profile_pairs: xavier@35.6.5 есть"  bash -c ". '$S/profile.sh'; _profile_pairs | grep -qx 'agx-xavier@35.6.5'"
 check "_profile_pairs: xavier@36.4.3 нет"   bash -c ". '$S/profile.sh'; ! _profile_pairs | grep -qx 'agx-xavier@36.4.3'"
 
+echo "== профили: Nano и источник системы =="
+check "nano@32.7.4 грузится, BOARDID=3448"           lp nano 32.7.4 '[ "$BOARDID" = 3448 ]'
+check "nano: FAB/SKU/BOARDREV из EEPROM"              lp nano 32.7.4 '[ "$FAB $BOARD_SKU $BOARDREV" = "400 0000 F.0" ]'
+check "nano: цель jetson-nano-qspi, nvmassflashgen"   lp nano 32.7.4 '[ "$BOARD_TARGET" = jetson-nano-qspi ] && [ "$BOOTLOADER_TOOL" = nvmassflashgen ]'
+check "nano: разметка QSPI, FLASH_XML пуст"           lp nano 32.7.4 '[ "$QSPI_CFG" = bootloader/t210ref/cfg/flash_l4t_t210_max-spi_p3448.xml ] && [ -z "$FLASH_XML" ]'
+check "32.7.4: сверенный SHA1, хост 18.04, без -d"    lp nano 32.7.4 '[ "$BSP_SHA1" = 66ba218a9a60373dbbf00e5724fb66e40d1f527c ] && [ "$FLASH_HOSTS" = 18.04 ] && [ "$CREATOR_HAS_DEV_FLAG" = no ]'
+check "nano@32.7.4: система — образ вендора R32.6.1"  lp nano 32.7.4 '[ "$ROOTFS_SOURCE" = vendor-image ] && [ "$ROOTFS_L4T" = 32.6.1 ] && [ "$L4T" = 32.7.4 ]'
+check "nano@32.7.4: размер .img.xz — число из HEAD"   lp nano 32.7.4 '[ "$VENDOR_IMG_SIZE" = 9383066480 ]'
+check "nano@32.7.4: sha256 образа закреплена"         lp nano 32.7.4 '[ "$VENDOR_IMG_SHA256" = 2e74215dd7d36bcbe91175c2e69399492c5b493bcfecdd0a7300c6dfa3d45fd8 ]'
+check "xavier: initrd-flash"                          lp agx-xavier 35.6.5 '[ "$BOOTLOADER_TOOL" = initrd-flash ]'
+check "orin: initrd-flash"                            lp agx-orin 36.4.3 '[ "$BOOTLOADER_TOOL" = initrd-flash ]'
+check "AGX: умолчание — nvidia-bsp, система = релиз"  lp agx-xavier 35.6.5 '[ "$ROOTFS_SOURCE" = nvidia-bsp ] && [ "$ROOTFS_L4T" = 35.6.5 ] && [ -z "${VENDOR_IMG_URL:-}" ]'
+check "поля Nano не протекают в следующий профиль"    bash -c ". '$S/profile.sh'; load_profile nano 32.7.4 && load_profile agx-orin 36.4.3 && [ \"\$ROOTFS_SOURCE\" = nvidia-bsp ] && [ \"\$ROOTFS_L4T\" = 36.4.3 ] && [ -z \"\${VENDOR_IMG_URL:-}\" ]"
+refuses "nano на 35.6.5 (t210 не в SOCS)"             lp nano 35.6.5 true
+refuses "orin на 32.7.4 (t234 не в SOCS)"             lp agx-orin 32.7.4 true
+refuses "xavier на 32.7.4 (t194 не в SOCS)"           lp agx-xavier 32.7.4 true
+check "_profile_pairs: у nano одна пара — 32.7.4"     bash -c ". '$S/profile.sh'; [ \"\$(_profile_pairs | grep '^nano@')\" = nano@32.7.4 ]"
+
 echo "== шаг 08: аргументы creator'а =="
 c08() { ( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && CREATOR_HAS_DEV_FLAG="$1" DRY_RUN=1 bash "$S/08-build-base-image.sh" ); }
 check   "с -d, когда creator его знает"   bash -c "$(declare -f c08); S='$S'; c08 yes | grep -q -- '-d USB'"

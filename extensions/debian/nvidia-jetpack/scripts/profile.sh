@@ -27,6 +27,11 @@ load_profile() {
     if [ ! -f "$release" ]; then
         echo "ОТКАЗ: релиз '$l4t' не объявлен" >&2; _profile_list >&2; return 1
     fi
+    # Fields only some profiles declare. A value left by an earlier
+    # load_profile in the same shell would otherwise leak into this pair
+    # (nano@32.7.4 then agx-orin: a vendor image for Orin).
+    unset BOOTLOADER_TOOL ROOTFS_SOURCE ROOTFS_L4T \
+          VENDOR_IMG_URL VENDOR_IMG_SIZE VENDOR_IMG_SHA256 VENDOR_IMG_MD5 VENDOR_IMG_DATE
     set -a
     # shellcheck source=/dev/null
     . "$board"
@@ -44,6 +49,12 @@ load_profile() {
             return 1 ;;
     esac
     export JETSON="$jetson" L4T="$l4t"
+    # Where the system half comes from. The default lives here, after the axis
+    # files: a release file cannot say ROOTFS_L4T=$L4T, L4T is unknown there.
+    # A mixed pair (nano@32.7.4) is named by its bootloader release, and its
+    # pair file declares the system's own version.
+    export ROOTFS_SOURCE="${ROOTFS_SOURCE:-nvidia-bsp}"
+    export ROOTFS_L4T="${ROOTFS_L4T:-$l4t}"
     export WORK="${WORK:-/srv/l4t/$jetson@$l4t}"
     export OUT_DIR="${OUT_DIR:-$WORK/out}"
     export OUT_RAW="${OUT_RAW:-$WORK/system.img}"
