@@ -116,8 +116,11 @@ case "$BOOTLOADER_TOOL" in
         # mfilogs/ (written by nvmflash.sh while flashing). Scripts and host
         # tools stay in: nvmflash.sh, nvaflash.sh, tegrarcm, tegradevflash run
         # as root and decide what lands in QSPI. Step 14 uses the same two names.
+        # Symlinks are hashed by their target's content, exactly as step 14
+        # reads them (Path.is_file()/read_bytes() follow links); -type f alone
+        # would leave a link out here and make 14 refuse a genuine package.
         ( cd "$x/mfi_$BOARD_TARGET" \
-            && find . -type f ! -path ./mfi.log ! -path './mfilogs/*' -print0 | sort -z | xargs -0 sha256sum ) \
+            && find . \( -type f -o -type l \) ! -path ./mfi.log ! -path './mfilogs/*' -print0 | sort -z | xargs -0 sha256sum ) \
             > "$OUT_DIR/bootloader-files.sha256" \
             || { echo "ОТКАЗ: хеши файлов загрузчика не посчитались"; exit 1; } ;;
 esac

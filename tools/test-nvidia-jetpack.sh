@@ -323,6 +323,7 @@ d="mfi_$1"
 cd bootloader && rm -rf "$d" && mkdir "$d"
 printf '#!/bin/sh\necho flash\n' > "$d/nvmflash.sh"; chmod 755 "$d/nvmflash.sh"
 echo cboot > "$d/cboot.bin"; echo "build log $RANDOM" > "$d/mfi.log"
+[ "${STUB_LINK:-0}" = 1 ] && ln -s cboot.bin "$d/cboot-alias.bin"
 tar cjf "../$d.tbz2" "$d"
 EOF
 chmod +x "$nt/w/Linux_for_Tegra/nvmassflashgen.sh"
@@ -335,6 +336,15 @@ check   "…tar-поток после перекодирования тот же
 check   "…режимы сохранены: nvmflash.sh исполняемый" bash -c "tar -tvzf '$nt/out/bootloader.tar.gz' | grep -qE '^-rwxr-xr-x .* mfi_jetson-nano-qspi/nvmflash.sh$'"
 check   "…хеши: весь каталог, скрипт заливки тоже"  bash -c "grep -q ' ./nvmflash.sh$' '$nt/out/bootloader-files.sha256' && grep -q ' ./cboot.bin$' '$nt/out/bootloader-files.sha256'"
 refuses "…хеши: журнал сборки не входит"            grep -q 'mfi.log' "$nt/out/bootloader-files.sha256"
+# Step 11 → manifest.py → step 14 end to end: both steps must walk the package
+# the same way, a symlink included (14 follows links; 11 must hash them too).
+rm -rf "$nt/out"
+check   "nano: пакет со ссылкой внутри собран"      r11n STUB_LINK=1
+check   "…ссылка в списке хешей"                    grep -q ' ./cboot-alias.bin$' "$nt/out/bootloader-files.sha256"
+echo q > "$nt/out/system.qcow2"
+( export "${P14N[@]}"; python3 "$S/manifest.py" outer --bootloader-files "$nt/out/bootloader-files.sha256" \
+    --out "$nt/out/manifest.json" --artifact "$nt/out/system.qcow2" --artifact "$nt/out/bootloader.tar.gz" )
+check   "…шаг 14 принимает пакет шага 11 как есть"  env "${P14N[@]}" FLASH_HOSTS=18.04 OUT_DIR="$nt/out" DRY_RUN=1 bash "$S/14-flash-bootloader.sh"
 rm -rf "$nt/out"
 refuses "сбой nvmassflashgen — отказ"               r11n STUB_FAIL=1
 refuses "…и пакета нет"                             test -e "$nt/out/bootloader.tar.gz"

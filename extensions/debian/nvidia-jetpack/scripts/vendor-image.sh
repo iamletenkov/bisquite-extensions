@@ -118,6 +118,8 @@ vendor_put_manifest() {
             || { echo "ОТКАЗ: guestfish не положил манифест в $tmp"; exit 1; }
     ) || { rm -f -- "$tmp"; return 1; }
     # Only a complete image, manifest included, gets the working name.
-    mv -f -- "$tmp" "$OUT_DIR/system.qcow2"
+    # An unchecked mv would let manifest:outer hash the previous build's image.
+    mv -f -- "$tmp" "$OUT_DIR/system.qcow2" \
+        || { rm -f -- "$tmp"; echo "ОТКАЗ: $tmp не стал $OUT_DIR/system.qcow2"; return 1; }
     echo "внутренний манифест -> $OUT_DIR/system.qcow2:/opt/l4t-boot-firmware/manifest.json"
 }
