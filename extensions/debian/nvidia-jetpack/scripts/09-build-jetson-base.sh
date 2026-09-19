@@ -14,7 +14,7 @@
 # манифеста — это нормально: тот rootfs — следствие формата пакета, а не система.
 #
 # The sequence depends on where the system half comes from (ROOTFS_SOURCE):
-#   nvidia-bsp    01 -> 02 -> 03 -> 04 -U -> 11 -> manifest into rootfs -> 08 -> outer
+#   nvidia-bsp    01 -> 03 -> 04 -U -> 11 -> manifest into rootfs -> 08 -> outer
 #   vendor-image  01 (BSP only) -> 03 (BSP tree only) -> 11 -> vendor image
 #                 fetched and checked -> qcow2.tmp -> manifest into it and the
 #                 working name -> outer (spec 2026-09-19-jetson-nano-mixed-pair.md)
@@ -51,7 +51,6 @@ case "${ROOTFS_SOURCE:-}" in
     nvidia-bsp)
         STEPS=(
             "01-fetch-l4t.sh"
-            "02-fetch-camera-drivers.sh"
             "03-prepare-bsp.sh"
             "04-customize-rootfs.sh -U"
             "11-package-bootloader.sh"

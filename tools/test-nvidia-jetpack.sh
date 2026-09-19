@@ -101,7 +101,7 @@ refuses "без профиля — отказ"           bash -c "unset WORK; DR
 check   "OUT_QCOW2 вне OUT_DIR — отказ"  bash -c "export OUT_QCOW2=/elsewhere/x.qcow2; . '$S/profile.sh' && load_profile agx-xavier 35.6.5 && out=\"\$(DRY_RUN=1 bash '$S/09-build-jetson-base.sh')\"; [ \$? -ne 0 ] && grep -q 'ОТКАЗ: OUT_QCOW2=/elsewhere' <<<\"\$out\""
 p09n() { ( . "$S/profile.sh" && load_profile nano 32.7.4 && DRY_RUN=1 bash "$S/09-build-jetson-base.sh" "$@" ); }
 check   "nano: BSP → пакет → образ вендора → манифесты" bash -c "$(declare -f p09n); S='$S'; [ \"\$(p09n | tr '\n' ' ')\" = '01-fetch-l4t.sh 03-prepare-bsp.sh 11-package-bootloader.sh vendor:fetch vendor:qcow2 manifest:internal manifest:outer ' ]"
-refuses "nano: ни камер, ни 04, ни creator'а"      bash -c "$(declare -f p09n); S='$S'; p09n | grep -qE '^(02|04|08)-'"
+refuses "nano: ни 04, ни creator'а"               bash -c "$(declare -f p09n); S='$S'; p09n | grep -qE '^(04|08)-'"
 check   "--fresh сносит raw образа вендора"          bash -c "$(declare -f p09n); S='$S'; p09n --fresh | grep -qx 'сносится: /srv/l4t/nano@32.7.4/vendor-image.raw'"
 check   "--fresh сносит недописанный qcow2.tmp"      bash -c "$(declare -f p09n); S='$S'; p09n --fresh | grep -q '^сносится: .*/system.qcow2.tmp$'"
 refuses "--fresh не трогает кеш загрузок"            bash -c "$(declare -f p09n); S='$S'; p09n --fresh | grep -q downloads"
@@ -336,6 +336,57 @@ check   "…метка несёт SHA1 тарболла"                  grep -
 echo keep > "$pt/w/Linux_for_Tegra/sentinel"
 check   "метка совпала — распаковка пропущена"       r03
 check   "…дерево не тронуто"                          test -e "$pt/w/Linux_for_Tegra/sentinel"
+
+echo "== камеры ушли из базового образа =="
+# Owner's decision 2026-09-18: the base image is "board x release" only;
+# Sensing cameras come from the sensing-gmsl2-camera extension.
+refuses "шага 02 нет"                                  test -e "$S/02-fetch-camera-drivers.sh"
+refuses "в профилях нет OV_CAM_*, CAMERA_*, L4T_TAG"   grep -rqE '^(OV_CAM_|CAMERA_|L4T_TAG=)' "$S/boards" "$S/releases" "$S/pairs"
+for pr in $(bash -c ". '$S/profile.sh'; _profile_pairs"); do
+    check "$pr: профиль без полей камер" lp "${pr%@*}" "${pr#*@}" '[ -z "${OV_CAM_URL+x}${OV_CAM_FILE+x}${CAMERA_PKG_REL+x}${L4T_TAG+x}" ]'
+done
+check   "orin: 09 без 02"  bash -c "$(declare -f lp); S='$S'; [ \"\$(lp agx-orin 36.4.3 'DRY_RUN=1 bash \"\$S/09-build-jetson-base.sh\"' | tr '\n' ' ')\" = '01-fetch-l4t.sh 03-prepare-bsp.sh 04-customize-rootfs.sh -U 11-package-bootloader.sh manifest:internal 08-build-base-image.sh manifest:outer ' ]"
+refuses "01: оверлея камер нет"                        grep -qE 'OV_CAM|overlay_camera' "$S/01-fetch-l4t.sh"
+refuses "03: подмены libnvisppg.so нет"                grep -qE 'libnvisppg|OV_CAM|LIBISP' "$S/03-prepare-bsp.sh"
+refuses "04: ни /opt/sensing, ни пакетов камер"        grep -qE 'opt/sensing|CAMERA_|L4T_TAG|--no-install-recommends' "$S/04-customize-rootfs.sh"
+refuses "шаги не зовут 02"                             grep -lq '02-fetch-camera-drivers' "$S"/*.sh
+
+# 01 for the Orin pair: file:// stubs for everything it fetches; the camera
+# overlay must not be asked for at all.
+mkdir -p "$ot/q/Linux_for_Tegra/bootloader/generic/BCT" "$ot/o"
+: > "$ot/q/Linux_for_Tegra/bootloader/generic/BCT/tegra234-mb1-bct-device-p3701-0000.dts"
+tar -cjf "$ot/o/overlay_mb1bct_36.x.tbz2" -C "$ot/q" Linux_for_Tegra
+echo bsp > "$ot/o/Jetson_Linux_r36.4.3_aarch64.tbz2"
+echo rfs > "$ot/o/Tegra_Linux_Sample-Root-Filesystem_r36.4.3_aarch64.tbz2"
+echo sums > "$ot/o/release_sha_hashes.txt"
+: > "$ot/wget-orin.log"
+r01o() { ( . "$S/profile.sh" && load_profile agx-orin 36.4.3 && \
+           env PATH="$ot/bin:$PATH" WGET_LOG="$ot/wget-orin.log" WORK="$ot/wo" \
+               BSP_URL="file://$ot/o/Jetson_Linux_r36.4.3_aarch64.tbz2" \
+               BSP_SHA1="$(sha1sum "$ot/o/Jetson_Linux_r36.4.3_aarch64.tbz2" | cut -d' ' -f1)" \
+               RFS_URL="file://$ot/o/Tegra_Linux_Sample-Root-Filesystem_r36.4.3_aarch64.tbz2" \
+               RFS_SHA1="$(sha1sum "$ot/o/Tegra_Linux_Sample-Root-Filesystem_r36.4.3_aarch64.tbz2" | cut -d' ' -f1)" \
+               OV_QSPI_URL="file://$ot/o/overlay_mb1bct_36.x.tbz2" \
+               SHA_URL="file://$ot/o/release_sha_hashes.txt" \
+               bash "$S/01-fetch-l4t.sh" ); }
+check   "orin: 01 проходит"                            r01o
+check   "…оверлей QSPI скачан"                         grep -q overlay_mb1bct "$ot/wget-orin.log"
+refuses "…оверлей камер не запрашивался"               grep -q overlay_camera "$ot/wget-orin.log"
+
+# 04 -U over a fake tree: no chroot and no apt any more, so it runs as is.
+ct="$(mktemp -d)"; R4="$ct/Linux_for_Tegra/rootfs"
+mkdir -p "$R4/bin" "$R4/etc/apt/sources.list.d" "$R4/var/lib/dpkg/info" "$R4/etc/systemd/system" "$ct/Linux_for_Tegra/tools"
+printf '#!/bin/sh\n' > "$R4/bin/bash"; chmod +x "$R4/bin/bash"
+date -Iseconds > "$R4/.applied-binaries"
+printf 'deb https://repo.download.nvidia.com/jetson/<SOC> r36.4 main\n' > "$R4/etc/apt/sources.list.d/nvidia-l4t-apt-source.list"
+printf 'sed -i "s/<SOC>/t234/g" /etc/apt/sources.list.d/nvidia-l4t-apt-source.list\n' > "$R4/var/lib/dpkg/info/nvidia-l4t-apt-source.postinst"
+ln -s /lib/systemd/system/nv-oem-config.target "$R4/etc/systemd/system/default.target"
+r04() { env PATH="$rb:$PATH" WORK="$ct" bash "$S/04-customize-rootfs.sh" -U; }
+check   "04 -U на дереве без chroot"                   r04
+check   "…<SOC> подставлен из postinst"                grep -q 'jetson/t234 ' "$R4/etc/apt/sources.list.d/nvidia-l4t-apt-source.list"
+refuses "…oem-config снят"                             test -L "$R4/etc/systemd/system/default.target"
+refuses "…/opt/sensing не появился"                    test -e "$R4/opt/sensing"
+refuses "…про камеры ни слова"                         bash -c "$(declare -f r04); rb='$rb' ct='$ct' S='$S'; r04 2>&1 | grep -qi 'камер'"
 
 echo "== шаг 11: пакет Nano (nvmassflashgen) =="
 check   "nano: offline nvmassflashgen, цель QSPI"   bash -c "$(declare -f c11); S='$S'; c11 nano 32.7.4 | grep -q 'FUSELEVEL=fuselevel_production ./nvmassflashgen.sh jetson-nano-qspi mmcblk0p1'"

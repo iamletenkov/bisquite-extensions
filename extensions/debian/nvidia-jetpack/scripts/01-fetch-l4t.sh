@@ -1,5 +1,5 @@
 #!/bin/bash
-# Шаг 1: скачивание L4T — BSP, sample rootfs и оверлеи. Умолчания — AGX Orin
+# Шаг 1: скачивание L4T — BSP, sample rootfs и оверлей QSPI. Умолчания — AGX Orin
 # (JetPack 6.2, L4T 36.4.3); другая плата задаётся ПРОФИЛЕМ, а не правкой.
 #
 #     bash /opt/nvidia-jetpack/01-fetch-l4t.sh
@@ -35,15 +35,15 @@ SHA_URL="${SHA_URL:-https://developer.nvidia.com/downloads/embedded/l4t/r36_rele
 BSP_SHA1="${BSP_SHA1:-3eb3c5a19a417313383c3bce297e07274a237e36}"   # ~683 MB
 RFS_SHA1="${RFS_SHA1:-0bdb4e655d48bdf7e7bd98d3b7b69480576bfd7e}"   # ~1.7 GB
 
-# ОВЕРЛЕИ НЕОБЯЗАТЕЛЬНЫ, и пустая ссылка здесь — осмысленное значение:
-# «этой плате оверлей не положен». У AGX Xavier нет ни QSPI (загрузчик
-# лежит в eMMC модуля), ни оверлея камер JP6 — профиль обнуляет обе строки.
+# ОВЕРЛЕЙ НЕОБЯЗАТЕЛЕН, и пустая ссылка здесь — осмысленное значение:
+# «этой плате оверлей не положен». У AGX Xavier нет QSPI (загрузчик лежит
+# в eMMC модуля) — профиль обнуляет строку. The camera overlay is no longer
+# fetched here: libnvisppg.so is the sensing-gmsl2-camera extension's job.
 #
 # РАСКРЫТИЕ ЧЕРЕЗ `-`, А НЕ `:-`, И ЭТО СУЩЕСТВЕННО: `${VAR:-умолчание}`
 # подставляет умолчание и на ПУСТОЕ значение, то есть профиль, обнуливший
 # ссылку, получил бы обратно оринский оверлей и скачал его молча.
 OV_QSPI_URL="${OV_QSPI_URL-https://developer.nvidia.com/downloads/embedded/L4T/overlay_mb1bct_36.x.tbz2}"
-OV_CAM_URL="${OV_CAM_URL-https://developer.nvidia.com/downloads/embedded/L4T/r36_Release_v4.3/overlay_camera_36.4.3.tbz2}"
 
 # Что искать в оверлее QSPI, чтобы убедиться: скачан тот файл и тот модуль.
 QSPI_OVERLAY_DTS="${QSPI_OVERLAY_DTS:-tegra234-mb1-bct-device-p3701-0000.dts}"
@@ -58,7 +58,6 @@ ROOTFS_SOURCE="${ROOTFS_SOURCE:-nvidia-bsp}"
 BSP_FILE=$(basename "$BSP_URL")
 RFS_FILE=$(basename "$RFS_URL")
 OV_QSPI_FILE=${OV_QSPI_URL:+$(basename "$OV_QSPI_URL")}
-OV_CAM_FILE=${OV_CAM_URL:+$(basename "$OV_CAM_URL")}
 SHA_FILE=$(basename "$SHA_URL")
 
 # ------------------------------------------------------------- подготовка
@@ -110,11 +109,6 @@ if [ -n "$OV_QSPI_URL" ]; then
 else
     echo "оверлей QSPI                                               профиль его не объявляет — пропуск"
 fi
-if [ -n "$OV_CAM_URL" ]; then
-    fetch "$OV_CAM_URL"
-else
-    echo "оверлей камер                                              профиль его не объявляет — пропуск"
-fi
 fetch "$SHA_URL"
 
 # ---------------------------------------------------------------- сверка
@@ -146,16 +140,16 @@ if [ "$fail" -ne 0 ]; then
     exit 1
 fi
 
-# ------------------------------------------------- содержимое оверлеев
+# ------------------------------------------------- содержимое оверлея
 #
-# У оверлеев эталонных сумм NVIDIA не публикует, поэтому целостность
+# У оверлея эталонной суммы NVIDIA не публикует, поэтому целостность
 # проверяем содержимым: битый tbz2 не перечислится (`tar tf` упадёт), а
 # перечислившийся сверяем с тем, что мы от него ждём. Это же ловит подмену
 # оверлея на другую ревизию — состав у них разный.
-step "3. Состав оверлеев"
+step "3. Состав оверлея QSPI"
 
-if [ -z "$OV_QSPI_URL" ] && [ -z "$OV_CAM_URL" ]; then
-    echo "профиль оверлеев не объявляет — проверять нечего"
+if [ -z "$OV_QSPI_URL" ]; then
+    echo "профиль оверлея не объявляет — проверять нечего"
 fi
 
 if [ -n "$OV_QSPI_URL" ]; then
@@ -180,27 +174,6 @@ fi
 echo
 fi
 
-if [ -n "$OV_CAM_URL" ]; then
-echo "--- $OV_CAM_FILE"
-if ! cam_list=$(tar tf "$OV_CAM_FILE" 2>&1); then
-    echo "$cam_list"
-    echo "ОСТАНОВ: архив не читается. Удали и перезапусти: rm $DL/$OV_CAM_FILE"
-    exit 1
-fi
-printf '%s\n' "$cam_list"
-# Оверлей камер — это ровно одна библиотека в корне Linux_for_Tegra, и
-# сама она никуда не встаёт: подкладывает её руками 03-prepare-bsp.sh
-# ПОСЛЕ apply_binaries. Если файлов вдруг больше одного — состав оверлея
-# изменился, и шаг подмены надо переписывать, а не запускать как есть.
-cam_count=$(printf '%s\n' "$cam_list" | grep -c 'libnvisppg\.so$' || true)
-if [ "$cam_count" -eq 1 ]; then
-    echo "OK: ровно один libnvisppg.so"
-else
-    echo "ОСТАНОВ: ждали ровно один libnvisppg.so, нашли $cam_count."
-    exit 1
-fi
-fi
-
 step "4. Справочно: суммы от NVIDIA"
 # Имена внутри — с заглавной R, наши файлы на диске — с маленькой.
 # Сверять по нему нечего, смотрим глазами.
@@ -209,4 +182,4 @@ grep -iE "$SHA_GREP" "$SHA_FILE" || true
 step "ГОТОВО"
 ls -lh "$DL"
 echo
-echo "Дальше — 02-fetch-camera-drivers.sh (драйверы Sensing)."
+echo "Дальше — 03-prepare-bsp.sh (распаковка и apply_binaries)."

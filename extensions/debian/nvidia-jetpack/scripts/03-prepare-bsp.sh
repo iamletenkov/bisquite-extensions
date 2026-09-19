@@ -1,6 +1,7 @@
 #!/bin/bash
-# Шаг 3: разворачивание BSP — распаковка, оверлей QSPI, apply_binaries.sh,
-# подмена libnvisppg.so из оверлея камер.
+# Шаг 3: разворачивание BSP — распаковка, оверлей QSPI, apply_binaries.sh.
+# Библиотеку ISP из оверлея камер NVIDIA здесь больше не подменяют: это
+# делает расширение sensing-gmsl2-camera слоем bisquite.
 #
 #     sudo bash /opt/nvidia-jetpack/03-prepare-bsp.sh
 #
@@ -24,24 +25,17 @@ LFT="$WORK/Linux_for_Tegra"
 # обязаны совпасть с тем, что шаг 01 положил в $DL.
 #
 # Пустое имя оверлея — осмысленное значение: «этой плате оверлей не положен»
-# (у AGX Xavier нет ни QSPI, ни оверлея камер JP6). Поэтому раскрытие через
-# `-`, а не `:-`: последнее вернуло бы оринское умолчание на пустую строку.
+# (у AGX Xavier нет QSPI). Поэтому раскрытие через `-`, а не `:-`: последнее
+# вернуло бы оринское умолчание на пустую строку.
 BSP_FILE="${BSP_FILE:-Jetson_Linux_r36.4.3_aarch64.tbz2}"
 RFS_FILE="${RFS_FILE:-Tegra_Linux_Sample-Root-Filesystem_r36.4.3_aarch64.tbz2}"
 OV_QSPI_FILE="${OV_QSPI_FILE-overlay_mb1bct_36.x.tbz2}"
-OV_CAM_FILE="${OV_CAM_FILE-overlay_camera_36.4.3.tbz2}"
 
 BSP_SHA1="${BSP_SHA1:-3eb3c5a19a417313383c3bce297e07274a237e36}"
 RFS_SHA1="${RFS_SHA1:-0bdb4e655d48bdf7e7bd98d3b7b69480576bfd7e}"
 
 # Что обязано появиться после наложения оверлея QSPI — имя dts модуля.
 QSPI_OVERLAY_DTS="${QSPI_OVERLAY_DTS:-tegra234-mb1-bct-device-p3701-0000.dts}"
-
-# Ожидаемые MD5 библиотеки ISP. Совпали — значит подменяем именно то и
-# именно на то; разошлись — оверлей или BSP другой ревизии, и молча
-# копировать нельзя.
-LIBISP_OVERLAY_MD5=5cccbf56e6e56f7f00fb09891517d67e
-LIBISP_STOCK_MD5=bc9fe35d290fe21402c363cedeebdfff
 
 step() { echo; echo "=== $* ==="; }
 
@@ -112,7 +106,7 @@ if [ -e "$LFT/rootfs/.applied-binaries" ]; then
     exit 1
 fi
 
-for f in "$BSP_FILE" "$RFS_FILE" "$OV_QSPI_FILE" "$OV_CAM_FILE"; do
+for f in "$BSP_FILE" "$RFS_FILE" "$OV_QSPI_FILE"; do
     # Пустое имя = профиль объявил «этого оверлея плате не положено», и шаг 01
     # его не качал. Без этой строки "$DL/$f" вырождается в сам каталог загрузок,
     # `-f` на нём ложно, и шаг отказывает сообщением «нет .../downloads/» —
@@ -244,50 +238,8 @@ echo "TMPDIR = [${TMPDIR:-}]   (обязано быть пусто)"
 cd "$LFT"
 ./apply_binaries.sh
 
-# --------------------------------------------------- 7. оверлей камер
-step "7. Подмена libnvisppg.so из оверлея камер"
-# Порядок здесь несущий: подмена делается ПОСЛЕ apply_binaries, потому что
-# apply_binaries раскладывает штатный nvidia-l4t-camera и затирает файл.
-# Сделаешь до — получишь тихо потерянную правку и неработающий ISP.
-#
-# Сам оверлей ничего не устанавливает: библиотека лежит в КОРНЕ
-# Linux_for_Tegra внутри архива, а не в rootfs, и копируется руками.
-if [ -z "$OV_CAM_FILE" ]; then
-    echo "профиль оверлея камер не объявляет — пропуск"
-    SKIP_CAM_OVERLAY=1
-else
-    SKIP_CAM_OVERLAY=0
-fi
-if [ "$SKIP_CAM_OVERLAY" = 0 ]; then
-TMPOV=$(mktemp -d "$WORK/.overlay-camera.XXXXXX")
-trap 'rm -rf "$TMPOV"' EXIT
-tar -xpf "$DL/$OV_CAM_FILE" -C "$TMPOV"
-
-SRC="$TMPOV/Linux_for_Tegra/libnvisppg.so"
-DST="$LFT/rootfs/usr/lib/aarch64-linux-gnu/tegra/libnvisppg.so"
-[ -f "$SRC" ] || { echo "ОСТАНОВ: в оверлее нет $SRC"; exit 1; }
-[ -f "$DST" ] || { echo "ОСТАНОВ: в rootfs нет $DST — apply_binaries отработал не до конца?"; exit 1; }
-
-md5_src=$(md5sum "$SRC" | cut -d' ' -f1)
-md5_dst=$(md5sum "$DST" | cut -d' ' -f1)
-echo "из оверлея : $md5_src   (ждём $LIBISP_OVERLAY_MD5)"
-echo "штатная    : $md5_dst   (ждём $LIBISP_STOCK_MD5)"
-[ "$md5_src" = "$LIBISP_OVERLAY_MD5" ] \
-    || echo "ВНИМАНИЕ: оверлей другой ревизии, чем проверенный нами."
-# Штатная сумма может отличаться и законно — если скрипт перезапущен по
-# уже подменённому файлу. Такой случай не отказ, а «уже сделано».
-if [ "$md5_dst" = "$LIBISP_OVERLAY_MD5" ]; then
-    echo "штатная уже равна оверлейной — подмена была сделана раньше"
-elif [ "$md5_dst" != "$LIBISP_STOCK_MD5" ]; then
-    echo "ВНИМАНИЕ: штатная библиотека не той ревизии, что мы видели."
-fi
-
-cp -f "$SRC" "$DST"
-echo "после копии: $(md5sum "$DST" | cut -d' ' -f1)"
-fi
-
-# ------------------------------------------------------------- 8. метка
-step "8. Метка готовности дерева"
+# ------------------------------------------------------------- 7. метка
+step "7. Метка готовности дерева"
 # Она же — барьер шага 0 при повторном запуске.
 date -Iseconds > "$LFT/rootfs/.applied-binaries"
 cat "$LFT/rootfs/.applied-binaries"
@@ -296,4 +248,4 @@ step "ГОТОВО"
 du -sh "$LFT"
 df -h "$WORK" | tail -1
 echo
-echo "Дальше — 04-customize-rootfs.sh (пользователь, пакеты, драйверы камер)."
+echo "Дальше — 04-customize-rootfs.sh (пользователь, oem-config, источник apt NVIDIA)."
