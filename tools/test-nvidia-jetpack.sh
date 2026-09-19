@@ -83,8 +83,10 @@ mk14() {  # $1 — содержимое a.bin в архиве; манифест 
 r14() { env JETSON="${1:-agx-xavier}" L4T=35.6.5 BOARD_TARGET=x BOOTLOADER_PACKAGE=full FLASH_HOSTS=22.04 \
         OUT_DIR="$ft/out" DRY_RUN=1 bash "$S/14-flash-bootloader.sh"; }
 mk14 AAA; check   "целый пакет проходит сверку"       r14
+          refuses "после DRY_RUN распакованное убрано" test -e "$ft/out/.flash"
           refuses "чужая пара — отказ"                r14 agx-orin
 mk14 BBB; refuses "подменённый файл загрузчика — отказ" r14
+          refuses "после отказа распакованное убрано" test -e "$ft/out/.flash"
 mk14 AAA; echo tamper >> "$ft/out/bootloader.tar.gz"
           refuses "испорченный архив — отказ"         r14
 

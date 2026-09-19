@@ -35,6 +35,9 @@ echo "архив: сумма сошлась"
 
 rm -rf -- "$FLASH_DIR"
 mkdir -p "$FLASH_DIR"
+# Распакованный пакет — до 12 ГБ от root. После DRY_RUN и отказа он не нужен
+# никому; ловушка снимается только перед настоящей заливкой (см. ниже).
+trap 'rm -rf -- "$FLASH_DIR"' EXIT
 tar -xzf "$PKG" -C "$FLASH_DIR" || fail "архив не распаковался"
 MFI="$FLASH_DIR/mfi_$BOARD_TARGET"
 [ -d "$MFI/tools/kernel_flash/images/internal" ] || fail "в архиве нет mfi_$BOARD_TARGET — пакет от другой платы?"
@@ -78,6 +81,9 @@ MODE=()
 [ "$BOOTLOADER_PACKAGE" = qspi-only ] && MODE=(--qspi-only)
 unset TMPDIR
 export USER="${USER:-root}"
+# После заливки дерево остаётся: заливка пакетом на железе не проверена,
+# и журналы l4t_initrd_flash внутри него — единственные улики при сбое.
+trap - EXIT
 cd "$MFI" || exit 1
 ./tools/kernel_flash/l4t_initrd_flash.sh --flash-only --massflash 1 --network usb0 \
     ${MODE[@]+"${MODE[@]}"} 2>&1 | tee "$OUT_DIR/flash-bootloader.log"
