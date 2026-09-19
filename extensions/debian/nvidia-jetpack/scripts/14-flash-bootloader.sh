@@ -28,7 +28,7 @@ export MANIFEST_PY
 # манифест — единственное место, где ревизия (BOARDID/FAB/BOARD_SKU/BOARDREV)
 # вообще записана. Правка профиля без пересборки пакета (другой SKU модуля)
 # иначе прошла бы молча. Сверка — до распаковки.
-board_line="$(python3 - "$MAN" <<'PY'
+board_line="$(PYTHONDONTWRITEBYTECODE=1 python3 - "$MAN" <<'PY'
 import json, os, sys
 sys.path.insert(0, os.path.dirname(os.environ["MANIFEST_PY"]))
 from manifest import PROFILE_KEYS
