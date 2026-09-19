@@ -31,5 +31,10 @@ refuses "xavier на 36.4.3 (t194 не в SOCS)"        lp agx-xavier 36.4.3 tru
 check "_profile_pairs: xavier@35.6.5 есть"  bash -c ". '$S/profile.sh'; _profile_pairs | grep -qx 'agx-xavier@35.6.5'"
 check "_profile_pairs: xavier@36.4.3 нет"   bash -c ". '$S/profile.sh'; ! _profile_pairs | grep -qx 'agx-xavier@36.4.3'"
 
+echo "== шаг 08: аргументы creator'а =="
+c08() { ( . "$S/profile.sh" && load_profile agx-xavier 35.6.5 && CREATOR_HAS_DEV_FLAG="$1" DRY_RUN=1 bash "$S/08-build-base-image.sh" ); }
+check   "с -d, когда creator его знает"   bash -c "$(declare -f c08); S='$S'; c08 yes | grep -q -- '-d USB'"
+refuses "без -d, когда не знает (R32)"    bash -c "$(declare -f c08); S='$S'; c08 no | grep -q -- '-d '"
+
 echo "проверок: $total, не прошло: $fails"
 [ "$fails" -eq 0 ]

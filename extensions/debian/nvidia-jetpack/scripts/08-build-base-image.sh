@@ -67,6 +67,18 @@ MIN_FREE_GIB="${MIN_FREE_GIB:-30}"
 
 CREATOR="$LFT/tools/jetson-disk-image-creator.sh"
 
+# Аргументы creator'а собираются здесь, до проверок хоста, чтобы их состав
+# можно было проверить без BSP (DRY_RUN=1). Флага -d у creator'а R32 нет
+# вовсе — передать его значит получить мгновенный отказ с печатью usage.
+CREATOR_ARGS=(-o "$OUT_RAW" -b "$BOARD_TARGET" -r "$BOARD_REVISION")
+if [ "${CREATOR_HAS_DEV_FLAG:-yes}" = yes ]; then
+    CREATOR_ARGS+=(-d "$ROOTFS_DEV")
+fi
+if [ "${DRY_RUN:-0}" = 1 ]; then
+    echo "creator ${CREATOR_ARGS[*]}"
+    exit 0
+fi
+
 if [ -z "$BOARD_SKU" ]; then
     echo "ОТКАЗ: BOARD_SKU пуст — профиль платы не знает SKU модуля."
     echo "Без него flash.sh откажет с 'Unrecognized module SKU', а угаданный"
@@ -221,7 +233,7 @@ echo
 # APP и лежит физически последним (служебные разделы идут ПЕРЕД ним, несмотря
 # на то, что APP в таблице GPT числится первым).
 rm -f "$OUT_RAW"
-if ! "$CREATOR_PATCHED" -o "$OUT_RAW" -b "$BOARD_TARGET" -r "$BOARD_REVISION" -d "$ROOTFS_DEV"; then
+if ! "$CREATOR_PATCHED" "${CREATOR_ARGS[@]}"; then
     fail "jetson-disk-image-creator.sh не собрал образ"
 fi
 [ -s "$OUT_RAW" ] || fail "образ $OUT_RAW пуст"
