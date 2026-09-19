@@ -104,5 +104,15 @@ mkbsp yes; check   "ветка, конфиг и XML на месте — пров
 mkbsp no;  refuses "ветка в creator есть, конфига нет — не собирается" r15
            check   "это видно в отпечатке" grep -q '^conf=нет' "$vt/v/agx-xavier@35.6.5.txt"
 
+echo "== шаг 16: матрица =="
+mx="$(mktemp -d)"; mkdir -p "$mx/v"
+echo "verdict=проверено" > "$mx/v/agx-orin@39.2.txt"
+printf 'agx-orin@36.4.3\tпрогнано\tробот\n' > "$mx/status.tsv"
+m16() { VERIFY_DIR="$mx/v" STATUS_FILE="$mx/status.tsv" bash "$S/16-matrix.sh"; }
+check   "orin@36.4.3 — прогнано (из status.tsv)" bash -c "$(declare -f m16); mx='$mx'; S='$S'; m16 | grep -E '^agx-orin +36\.4\.3 +прогнано'"
+check   "orin@39.2 — проверено (из отпечатка)"   bash -c "$(declare -f m16); mx='$mx'; S='$S'; m16 | grep -E '^agx-orin +39\.2 +проверено'"
+check   "xavier@35.6.5 — объявлено"              bash -c "$(declare -f m16); mx='$mx'; S='$S'; m16 | grep -E '^agx-xavier +35\.6\.5 +объявлено'"
+refuses "xavier@36.4.3 в матрице отсутствует"    bash -c "$(declare -f m16); mx='$mx'; S='$S'; m16 | grep -E '^agx-xavier +36\.4\.3'"
+
 echo "проверок: $total, не прошло: $fails"
 [ "$fails" -eq 0 ]
