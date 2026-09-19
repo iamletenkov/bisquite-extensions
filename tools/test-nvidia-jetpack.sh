@@ -38,6 +38,7 @@ refuses "без -d, когда не знает (R32)"    bash -c "$(declare -f c
 
 echo "== manifest.py =="
 mt="$(mktemp -d)"
+# shellcheck disable=SC2034  # переменные экспортируются для manifest.py через set -a
 ( set -a; JETSON=agx-xavier L4T=35.6.5 SOC=t194 BOARD_TARGET=jetson-agx-xavier-devkit BOARDID=2888 FAB=400 \
   BOARD_SKU=0001 BOARDREV=J.0 BOOTLOADER_PACKAGE=full BSP_FILE=b.tbz2 BSP_SHA1=abc; set +a
   printf 'aaa  ./a.bin\nbbb  ./sub/b.bin\n' > "$mt/files.sha256"
@@ -74,17 +75,22 @@ mk14() {  # $1 — содержимое a.bin в архиве; манифест 
   echo "$1" > "$ft/src/mfi_x/tools/kernel_flash/images/internal/a.bin"
   tar -czf "$ft/out/bootloader.tar.gz" -C "$ft/src" mfi_x
   echo q > "$ft/out/system.qcow2"
-  # shellcheck disable=SC2034  # переменные экспортируются для дочернего сценария через set -a
-  ( set -a; JETSON=agx-xavier L4T=35.6.5 SOC=t194 BOARD_TARGET=x BOARDID=1 FAB=1 BOARD_SKU=1 BOARDREV=1 \
-    BOOTLOADER_PACKAGE=full BSP_FILE=b BSP_SHA1=c; set +a
+  ( export "${P14[@]}"
     python3 "$S/manifest.py" outer --bootloader-files "$ft/out/bootloader-files.sha256" --out "$ft/out/manifest.json" \
       --artifact "$ft/out/system.qcow2" --artifact "$ft/out/bootloader.tar.gz" )
 }
-r14() { env JETSON="${1:-agx-xavier}" L4T=35.6.5 BOARD_TARGET=x BOOTLOADER_PACKAGE=full FLASH_HOSTS=22.04 \
-        OUT_DIR="$ft/out" DRY_RUN=1 bash "$S/14-flash-bootloader.sh"; }
+# Профиль, под который собран тестовый пакет; r14 принимает поправки поверх.
+P14=(JETSON=agx-xavier L4T=35.6.5 SOC=t194 BOARD_TARGET=x BOARDID=1 FAB=1 BOARD_SKU=1 BOARDREV=1
+     BOOTLOADER_PACKAGE=full BSP_FILE=b BSP_SHA1=c)
+r14() { env "${P14[@]}" FLASH_HOSTS=22.04 OUT_DIR="$ft/out" DRY_RUN=1 "$@" bash "$S/14-flash-bootloader.sh"; }
 mk14 AAA; check   "целый пакет проходит сверку"       r14
           refuses "после DRY_RUN распакованное убрано" test -e "$ft/out/.flash"
-          refuses "чужая пара — отказ"                r14 agx-orin
+          refuses "чужая пара — отказ"                r14 JETSON=agx-orin
+          refuses "чужой BOARD_SKU — отказ"           r14 BOARD_SKU=2
+          refuses "чужой BOARD_TARGET — отказ"        r14 BOARD_TARGET=y
+          check   "отказ по SKU называет поле"        bash -c "$(declare -f r14); $(declare -p P14); S='$S' ft='$ft'; out=\"\$(r14 BOARD_SKU=2 2>&1)\"; grep -q 'board_sku' <<<\"\$out\""
+          check   "баннер/вывод показывает плату из манифеста" bash -c "$(declare -f r14); $(declare -p P14); S='$S' ft='$ft'; out=\"\$(r14 2>&1)\"; grep -q 'board_sku=1 boardrev=1' <<<\"\$out\""
+          check   "отказ по BOARD_TARGET — до распаковки, с именем поля" bash -c "$(declare -f r14); $(declare -p P14); S='$S' ft='$ft'; out=\"\$(r14 BOARD_TARGET=y 2>&1)\"; grep -q 'board_target' <<<\"\$out\" && ! grep -q 'архив:' <<<\"\$out\""
 mk14 BBB; refuses "подменённый файл загрузчика — отказ" r14
           refuses "после отказа распакованное убрано" test -e "$ft/out/.flash"
 mk14 AAA; echo tamper >> "$ft/out/bootloader.tar.gz"

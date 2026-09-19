@@ -17,16 +17,35 @@ PKG="$OUT_DIR/bootloader.tar.gz"
 MAN="$OUT_DIR/manifest.json"
 FLASH_DIR="$OUT_DIR/.flash"
 fail() { echo "ОТКАЗ: $*"; exit 1; }
+MANIFEST_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/manifest.py"
+export MANIFEST_PY
 
 [ -s "$PKG" ] || fail "нет $PKG — сначала make build"
 [ -s "$MAN" ] || fail "нет $MAN — сначала make build"
 
-python3 - "$MAN" "$JETSON" "$L4T" <<'PY' || exit 1
-import json, sys
+# Пара сверяется ПОЛНОСТЬЮ — всеми полями, которые manifest.py записал в
+# "pair", а не только (jetson, l4t). Offline-пакет EEPROM платы не читает:
+# манифест — единственное место, где ревизия (BOARDID/FAB/BOARD_SKU/BOARDREV)
+# вообще записана. Правка профиля без пересборки пакета (другой SKU модуля)
+# иначе прошла бы молча. Сверка — до распаковки.
+board_line="$(python3 - "$MAN" <<'PY'
+import json, os, sys
+sys.path.insert(0, os.path.dirname(os.environ["MANIFEST_PY"]))
+from manifest import PROFILE_KEYS
 p = json.load(open(sys.argv[1]))["pair"]
-if (p["jetson"], p["l4t"]) != (sys.argv[2], sys.argv[3]):
-    sys.exit(f"ОТКАЗ: пакет от {p['jetson']}@{p['l4t']}, а просили {sys.argv[2]}@{sys.argv[3]}")
+if (p.get("jetson"), p.get("l4t")) != (os.environ.get("JETSON"), os.environ.get("L4T")):
+    sys.exit(f"ОТКАЗ: пакет от {p.get('jetson')}@{p.get('l4t')}, а просили "
+             f"{os.environ.get('JETSON')}@{os.environ.get('L4T')}")
+bad = [f"{k.lower()}: в манифесте {p.get(k.lower())!r}, в профиле {os.environ.get(k)!r}"
+       for k in PROFILE_KEYS if p.get(k.lower()) != os.environ.get(k)]
+if bad:
+    sys.exit("ОТКАЗ: пакет собран не под этот профиль — пересобери (make build):\n  "
+             + "\n  ".join(bad))
+print(" ".join(f"{k}={p[k]}" for k in
+               ("board_target", "boardid", "fab", "board_sku", "boardrev", "bootloader_package")))
 PY
+)" || exit 1
+echo "пара: сошлась с манифестом ($board_line)"
 
 want="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["artifacts"]["bootloader.tar.gz"])' "$MAN")"
 got="$(sha256sum "$PKG" | cut -d' ' -f1)"
@@ -70,6 +89,7 @@ n="$(lsusb | grep -c 'ID 0955:')"
 cat <<WARN
 
 Будет прошит ЗАГРУЗЧИК платы $JETSON пакетом L4T $L4T.
+Плата по манифесту пакета: $board_line
 $( [ "$BOOTLOADER_PACKAGE" = full ] && echo "Пакет полный: во внутреннюю eMMC запишется и rootfs (войти в неё нечем — учётки нет)." )
 НЕОБРАТИМО. Во время заливки нельзя: выдёргивать кабель, снимать питание, жать Ctrl+C.
 WARN
