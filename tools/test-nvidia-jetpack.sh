@@ -96,6 +96,13 @@ check   "пакет загрузчика до образа"   bash -c "$(declare
 refuses "импорта в bisquite нет"        bash -c "$(declare -f p09); S='$S'; p09 | grep -q 'import'"
 refuses "без профиля — отказ"           bash -c "unset WORK; DRY_RUN=1 bash '$S/09-build-jetson-base.sh'"
 check   "OUT_QCOW2 вне OUT_DIR — отказ"  bash -c "export OUT_QCOW2=/elsewhere/x.qcow2; . '$S/profile.sh' && load_profile agx-xavier 35.6.5 && out=\"\$(DRY_RUN=1 bash '$S/09-build-jetson-base.sh')\"; [ \$? -ne 0 ] && grep -q 'ОТКАЗ: OUT_QCOW2=/elsewhere' <<<\"\$out\""
+p09n() { ( . "$S/profile.sh" && load_profile nano 32.7.4 && DRY_RUN=1 bash "$S/09-build-jetson-base.sh" "$@" ); }
+check   "nano: BSP → пакет → образ вендора → манифесты" bash -c "$(declare -f p09n); S='$S'; [ \"\$(p09n | tr '\n' ' ')\" = '01-fetch-l4t.sh 03-prepare-bsp.sh 11-package-bootloader.sh vendor:fetch vendor:qcow2 manifest:internal manifest:outer ' ]"
+refuses "nano: ни камер, ни 04, ни creator'а"      bash -c "$(declare -f p09n); S='$S'; p09n | grep -qE '^(02|04|08)-'"
+check   "--fresh сносит raw образа вендора"          bash -c "$(declare -f p09n); S='$S'; p09n --fresh | grep -qx 'сносится: /srv/l4t/nano@32.7.4/vendor-image.raw'"
+check   "--fresh сносит недописанный qcow2.tmp"      bash -c "$(declare -f p09n); S='$S'; p09n --fresh | grep -q '^сносится: .*/system.qcow2.tmp$'"
+refuses "--fresh не трогает кеш загрузок"            bash -c "$(declare -f p09n); S='$S'; p09n --fresh | grep -q downloads"
+refuses "неизвестный ROOTFS_SOURCE — отказ"          bash -c ". '$S/profile.sh' && load_profile nano 32.7.4 && ROOTFS_SOURCE=nope DRY_RUN=1 bash '$S/09-build-jetson-base.sh'"
 
 echo "== шаг 14: сверка пакета перед прошивкой =="
 ft="$(mktemp -d)"
@@ -162,6 +169,69 @@ mk14n BBB; refuses "nano: подменённый cboot.bin — отказ" r14n
            refuses "…после отказа распакованное убрано" test -e "$ft/nout/.flash"
 mk14n AAA extra
            refuses "nano: файл, которого нет в манифесте, — отказ" r14n
+
+echo "== образ вендора: vendor-image.sh =="
+vi="$(mktemp -d)"; mkdir -p "$vi/bin" "$vi/out"
+head -c 65536 /dev/urandom > "$vi/src.img"; truncate -s 8M "$vi/src.img"
+xz -k -T1 "$vi/src.img"
+printf 'aaa  ./cboot.bin\n' > "$vi/out/bootloader-files.sha256"
+cat > "$vi/bin/df" <<'EOF'
+#!/bin/bash
+# Stub: FAKE_AVAIL pretends the disk has that many free bytes.
+if [ -n "${FAKE_AVAIL:-}" ]; then printf 'Avail\n%s\n' "$FAKE_AVAIL"; else exec /usr/bin/df "$@"; fi
+EOF
+cat > "$vi/bin/qemu-img" <<'EOF'
+#!/bin/bash
+# Stub: records how sparse the raw is, then "converts" by copying.
+src="${*: -2:1}"; dst="${*: -1}"
+stat -c '%s %b %B' "$src" > "$VI_LOG/raw.stat"
+if [ "${QEMU_FAIL:-0}" = 1 ]; then : > "$dst"; exit 1; fi
+cp -- "$src" "$dst"
+EOF
+cat > "$vi/bin/guestfish" <<'EOF'
+#!/bin/bash
+# Stub: records the arguments and keeps a copy of the uploaded file.
+echo "$*" > "$VI_LOG/guestfish.args"
+prev=""
+for a in "$@"; do [ "$prev" = upload ] && cp -- "$a" "$VI_LOG/uploaded.json"; prev="$a"; done
+exit "${GF_RC:-0}"
+EOF
+chmod +x "$vi/bin/"*
+# rvi <function> [VAR=value …] — the nano profile pointed at the test image.
+rvi() { local fn="$1"; shift
+  ( . "$S/profile.sh" && load_profile nano 32.7.4 || exit 1
+    export PATH="$vi/bin:$PATH" VI_LOG="$vi" WORK="$vi/w" OUT_DIR="$vi/out" \
+           VENDOR_IMG_URL="file://$vi/src.img.xz" VENDOR_IMG_SIZE="$(stat -c %s "$vi/src.img.xz")" \
+           VENDOR_IMG_SHA256="$(sha256sum "$vi/src.img.xz" | cut -d' ' -f1)"
+    [ $# -eq 0 ] || export "$@"
+    . "$S/vendor-image.sh" && "$fn" ); }
+check   "fetch: скачал в кеш и сверил sha256"          rvi vendor_fetch
+check   "…файл в \$WORK/downloads"                     test -f "$vi/w/downloads/src.img.xz"
+check   "fetch: из кеша, без сети"                      rvi vendor_fetch VENDOR_IMG_URL="file://$vi/nope/src.img.xz"
+refuses "fetch: sha256 не сошлась — отказ"             rvi vendor_fetch VENDOR_IMG_SHA256=0000000000000000000000000000000000000000000000000000000000000000
+refuses "…и файл удалён"                               test -e "$vi/w/downloads/src.img.xz"
+refuses "fetch: места под скачивание нет — отказ"      rvi vendor_fetch FAKE_AVAIL=1
+refuses "…и ничего не скачано"                         test -e "$vi/w/downloads/src.img.xz"
+check   "fetch: скачал после отказа"                    rvi vendor_fetch
+refuses "qcow2: места под несжатый образ нет — отказ"  rvi vendor_to_qcow2 FAKE_AVAIL=1048576
+refuses "…raw не остался"                              test -e "$vi/w/vendor-image.raw"
+refuses "qcow2: qemu-img упал — отказ"                 rvi vendor_to_qcow2 QEMU_FAIL=1
+refuses "…raw убран ловушкой"                          test -e "$vi/w/vendor-image.raw"
+refuses "…недописанный qcow2.tmp убран"                test -e "$vi/out/system.qcow2.tmp"
+refuses "…system.qcow2 не появился"                    test -e "$vi/out/system.qcow2"
+check   "qcow2: raw разреженный"                        awk '{ exit !($2 * $3 < $1) }' "$vi/raw.stat"
+check   "qcow2: собран qcow2.tmp"                       rvi vendor_to_qcow2
+check   "…содержимое — распакованный образ"             cmp -s "$vi/src.img" "$vi/out/system.qcow2.tmp"
+refuses "…raw после успеха убран"                      test -e "$vi/w/vendor-image.raw"
+refuses "…до манифеста system.qcow2 не появился"       test -e "$vi/out/system.qcow2"
+refuses "манифест: guestfish упал — отказ"             rvi vendor_put_manifest GF_RC=1
+refuses "…qcow2.tmp убран"                             test -e "$vi/out/system.qcow2.tmp"
+refuses "…system.qcow2 не появился"                    test -e "$vi/out/system.qcow2"
+check   "qcow2 заново"                                   rvi vendor_to_qcow2
+check   "манифест: положен"                             rvi vendor_put_manifest
+check   "…system.qcow2 на месте, qcow2.tmp нет"         bash -c "test -f '$vi/out/system.qcow2' && ! test -e '$vi/out/system.qcow2.tmp'"
+check   "…guestfish: инспекция, каталог, файл"          grep -qE -- '^--rw --format=qcow2 -a .*/system\.qcow2\.tmp -i mkdir-p /opt/l4t-boot-firmware : upload .* /opt/l4t-boot-firmware/manifest\.json : chmod 0644 /opt/l4t-boot-firmware/manifest\.json$' "$vi/guestfish.args"
+check   "…внутри — rootfs образа вендора и пара 32.7.4, без артефактов" python3 -c "import json;m=json.load(open('$vi/uploaded.json'));assert m['rootfs']['source']=='vendor-image' and m['rootfs']['l4t']=='32.6.1' and m['pair']['l4t']=='32.7.4' and 'artifacts' not in m"
 
 echo "== шаг 07: rootfs по ssh =="
 st="$(mktemp -d)"; mkdir -p "$st/bin" "$st/w/Linux_for_Tegra/tools/kernel_flash/images/external"
