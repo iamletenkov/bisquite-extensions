@@ -21,10 +21,10 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} selkies: $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-SELKIES_VERSION="2.0.0rc0"
+SELKIES_VERSION="2.0.0rc1"
 declare -A APPIMAGE_SHA256=(
-    [x86_64]="ed875d63fb93c17b79f2044104be1304413d4ee7f6c379e8080822e8f868071a"
-    [aarch64]="a1abb4658c3117188afa6881eaab93a24c172a5db5c0cbb18889c43c60e59043"
+    [x86_64]="648ffb1d96b19f0f7b56f1cbc9ef2a2ffa5bde321fd65d259ad29215d8ca75ac"
+    [aarch64]="6cc15e207c0d55a1ad1956faabc09a60dd8c54308bf4ca680e0fd3221fbedd82"
 )
 PREFIX="/opt/selkies/${SELKIES_VERSION}"
 

@@ -1,14 +1,15 @@
 name: pixelflux-tegra
-version: 1.0.0
+version: 2.0.0
 layout: 2
 family: deb
 # Только arm64: бэкенд кодирует через вендорскую libnvv4l2.so, которая есть
 # только в L4T. install.sh вдобавок отказывает на образе без
-# /etc/nv_tegra_release и на AppImage с питоном не cp312.
+# /etc/nv_tegra_release.
 arch: [arm64]
-# build     — install.sh подменяет pixelflux внутри AppImage расширения selkies
-#             официальным колесом апстрима и приводит питон и клиент Selkies
-#             2.0.0rc0 к новому формату кадра;
+# build     — install.sh подкладывает системную libxcb (и шим gbm на focal)
+#             в юнит selkies@ drop-in'ом: сессия запускается мимо AppRun, где
+#             апстрим починил это сам (selkies#396). Колесо больше не подменяет:
+#             Selkies 2.0.0rc1 несёт pixelflux 2.1.0rc1 с бэкендом Tegra.
 # firstboot — configure.sh проверяет на живом железе, что бэкенд виден
 #             (в appliance сборки устройств кодера нет).
 phase: [build, firstboot]

@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
 # Аппаратное кодирование H.264 в Selkies на плате, чей кодер выставлен
-# стандартным V4L2 M2M: подменяет pixelflux внутри AppImage, поставленного
-# расширением selkies, официальным колесом апстрима с бэкендом v4l2m2m.
+# стандартным V4L2 M2M (Raspberry Pi 3/4/CM4 — bcm2835-codec).
 #
-# ЗАЧЕМ. На Raspberry Pi 4 кодер в кремнии есть (bcm2835-codec, H.264), но
-# выставлен он через ядерный M2M, куда pixelflux не ходил: его лестница знала
-# NVENC, VA-API и вендорский V4L2 Tegra, а VA-API-драйвера для bcm2835 не
-# существует. Замер на живом рабочем столе 1080p, одна сессия, разница только
+# С Selkies 2.0.0rc1 подменять уже нечего: релиз несёт pixelflux 2.1.0rc1,
+# а в нём есть бэкенд v4l2m2m, и лестчница сама падает с VA-API на M2M. Роль
+# расширения свелась к двум вещам:
+#   * на сборке — убедиться, что базовый pixelflux действительно несёт бэкенд
+#     v4l2m2m (если апстрим его однажды уронит, сборка должна встать, а не
+#     тихо уехать в софт);
+#   * на первой загрузке — служба verify проверяет на живом железе, что сессия
+#     идёт на V4L2M2M, а не свалилась в софт (configure.sh).
+#
+# ЗАЧЕМ вообще. Замер на живом рабочем столе 1080p, одна сессия, разница только
 # в use_cpu: 0.378 ядра против 1.128 на x264 — втрое меньше.
 #
-# ПОЧЕМУ ОТДЕЛЬНОЕ РАСШИРЕНИЕ, А НЕ ПРАВКА selkies. Ровно по той же причине,
-# что и у pixelflux-tegra: расширение selkies общее с amd64, где всё работает
-# и без подмены, а подмена чужого артефакта должна быть видна строкой в VMFILE.
-#
-# ЧТО ЗДЕСЬ ВРЕМЕННОЕ. Всё. lib/rc0-compat.py нужен, пока последний релиз
-# Selkies (2.0.0rc0) старше pixelflux в main: мейнтейнер в selkies#395 сказал
-# прямо, что наборы двигаются вместе и API между версиями несовместим. Когда
-# выйдет rc1 с парным pixelflux, расширение схлопывается до одной строки
-# `pip install pixelflux==<версия>` либо исчезает целиком.
+# ПОЧЕМУ ОТДЕЛЬНОЕ РАСШИРЕНИЕ, А НЕ ПРАВКА selkies. Расширение selkies общее
+# с amd64 и Jetson; «проверить именно M2M» осмысленно только на плате с таким
+# кодером, и требование этой проверки должно быть видно строкой в VMFILE.
 set -euo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -27,29 +26,18 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} pixelflux-v4l2m2m: $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Колесо апстрима: предрелиз, который CI публикует на каждый коммит main.
-# Тег — не «последний», а конкретный: «последний» менялся бы под ногами, а
-# sha256 сторожит содержимое. Здесь закреплён первый коммит, в котором есть и
-# бэкенд v4l2m2m (#35), и правка сборки под musl (#36) — без второй колёса
-# musllinux не собирались вовсе.
-WHEEL_TAG="1b9b0c7"
-WHEEL_FILE="pixelflux-2.1.0-cp312-cp312-manylinux_2_28_aarch64.whl"
-WHEEL_SHA256="bec6d4edf65e48440424d2bbc941e9bab9da7dcde0d059451f23d5876eda1960"
-PIXELFLUX_VERSION="2.1.0"
-WHEEL_ABI="cp312"
-
 # --- преграды -----------------------------------------------------------------
 
 case "$(dpkg --print-architecture)" in
     arm64) ;;
-    *) log_error "закреплённое колесо собрано под arm64, а образ — $(dpkg --print-architecture)"; exit 1 ;;
+    *) log_error "M2M-платы в нашем парке (Pi 3/4/CM4) — arm64, а образ — $(dpkg --print-architecture)"; exit 1 ;;
 esac
 
 # Устройства внутри virt-customize не пробрасываются, поэтому проверить наличие
 # M2M-узла на фазе сборки НЕЛЬЗЯ, и гейта по железу здесь нет: расширение
 # ставится там, где его указали в VMFILE. Решение «железо или софт» принимает
 # сам бэкенд в рантайме, а живую проверку берёт на себя configure.sh.
-for f in configure.sh verify-pixelflux-v4l2m2m.service lib/rc0-compat.py; do
+for f in configure.sh verify-pixelflux-v4l2m2m.service; do
     [[ -f "$SCRIPT_DIR/$f" ]] || { log_error "рядом нет $f — расширение доставлено не целиком"; exit 1; }
 done
 
@@ -64,73 +52,31 @@ if [[ -z "$PREFIX" || ! -x "$SELKIES_PY" ]]; then
 fi
 log_info "AppImage Selkies: $PREFIX"
 
-ABI="$("$SELKIES_PY" -c 'import sys; print(f"cp{sys.version_info.major}{sys.version_info.minor}")')"
-if [[ "$ABI" != "$WHEEL_ABI" ]]; then
-    log_error "питон AppImage — $ABI, а закреплённое колесо собрано под $WHEEL_ABI"
-    log_error "поднялась версия Selkies: нужно новое колесо под этот ABI (или релиз, и тогда расширение почти не нужно)"
-    exit 1
-fi
-SITE="$("$SELKIES_PY" -c 'import site; print(site.getsitepackages()[0])')"
-[[ -d "$SITE/selkies" ]] || { log_error "в $SITE нет пакета selkies — раскладка AppImage сменилась"; exit 1; }
-
 # --- отпечаток ----------------------------------------------------------------
+# PREFIX у selkies — /opt/selkies/${SELKIES_VERSION}, то есть подъём версии
+# AppImage даёт НОВЫЙ каталог, и служба verify туда не встанет без переустановки.
 STAMP="$PREFIX/.bisquite-pixelflux-v4l2m2m"
-STAMP_NOW="wheel=$WHEEL_TAG sha256=$WHEEL_SHA256 abi=$ABI version=$PIXELFLUX_VERSION compat=rc0"
+STAMP_NOW="verify-only prefix=$PREFIX"
 if [[ -f "$STAMP" ]] && [[ "$(cat "$STAMP")" == "$STAMP_NOW" ]]; then
     log_info "уже установлено (отпечаток совпал) — ничего не делаю"
     exit 0
 fi
 
-# --- колесо -------------------------------------------------------------------
-
-WORK="$(mktemp -d /var/tmp/pixelflux-v4l2m2m.XXXXXX)"
-trap 'rm -rf "$WORK"' EXIT
-
-command -v curl >/dev/null 2>&1 || { apt-get update -q && apt-get install -y -q curl ca-certificates; } || exit 1
-
-URL="https://github.com/selkies-project/pixelflux/releases/download/$WHEEL_TAG/$WHEEL_FILE"
-log_info "скачиваю $URL"
-curl -fL --retry 5 --retry-delay 5 --connect-timeout 30 \
-     --speed-limit 10240 --speed-time 60 --no-progress-meter \
-     -o "$WORK/$WHEEL_FILE" "$URL" \
-    || { log_error "колесо не скачалось: $URL"; exit 1; }
-
-if ! echo "$WHEEL_SHA256  $WORK/$WHEEL_FILE" | sha256sum -c --quiet -; then
-    log_error "sha256 колеса не совпал с закреплённым"
-    exit 1
-fi
-
-log_info "ставлю колесо питоном AppImage"
-"$SELKIES_PY" -m pip install --no-deps --force-reinstall --no-index \
-    --root-user-action=ignore "$WORK/$WHEEL_FILE" >/dev/null \
-    || { log_error "pip не поставил колесо"; exit 1; }
-
-# --- совместимость Selkies 2.0.0rc0 с новым pixelflux -------------------------
-# Девять правок в двух группах: переименования питоньего API и смена формата
-# кадра на проводе. Пропустить вторую половину — получить сессию, которая
-# кодирует, и клиента, который бесконечно просит ключевой кадр.
-"$SELKIES_PY" "$SCRIPT_DIR/lib/rc0-compat.py" --site "$SITE" \
-    || { log_error "правки совместимости не легли — см. отказы выше"; exit 1; }
-
-# --- проверки фазы build ------------------------------------------------------
+# --- проверка фазы build ------------------------------------------------------
 # Живой проверки «Encoder: V4L2M2M» здесь быть не может: virt-customize не
-# пробрасывает устройства, в appliance нет ни /dev/video*, ни X.
-GOT="$("$SELKIES_PY" -c 'import importlib.metadata as m; print(m.version("pixelflux"))' 2>/dev/null || true)"
-if [[ "$GOT" != "$PIXELFLUX_VERSION" ]]; then
-    log_error "после установки pixelflux сообщает версию '$GOT', ожидалась $PIXELFLUX_VERSION"
-    exit 1
-fi
-"$SELKIES_PY" -c 'import pixelflux; pixelflux.CaptureSettings().codec' \
-    || { log_error "модуль не импортируется или у CaptureSettings нет поля codec"; exit 1; }
-MODULE_SO="$SITE/pixelflux.cpython-312-aarch64-linux-gnu.so"
+# пробрасывает устройства, в appliance нет ни /dev/video*, ни X. Но что базовый
+# pixelflux НЕСЁТ бэкенд v4l2m2m — проверяемо и здесь: если апстрим его уронит
+# при следующем подъёме Selkies, сборка обязана встать.
+MODULE_SO="$("$SELKIES_PY" -c 'import pixelflux; print(pixelflux.__file__)' 2>/dev/null || true)"
+[[ -f "$MODULE_SO" ]] || { log_error "не удалось найти модуль pixelflux в AppImage"; exit 1; }
 # grep читает двоичный файл сам (-a): конвейер `strings | grep -q` под
 # `set -o pipefail` возвращает ошибку именно при УСПЕХЕ.
 if ! grep -qa "V4L2 M2M encoder on" "$MODULE_SO"; then
-    log_error "в модуле нет бэкенда v4l2m2m — колесо собрано без него"
+    log_error "в базовом pixelflux нет бэкенда v4l2m2m — Selkies собран без него"
+    log_error "модуль: $MODULE_SO"
     exit 1
 fi
-"$SELKIES_PY" "$SCRIPT_DIR/lib/rc0-compat.py" --site "$SITE" --check >/dev/null \
-    || { log_error "перепроверка правок не прошла"; exit 1; }
+log_info "базовый pixelflux несёт бэкенд v4l2m2m"
 
 # --- первая загрузка ----------------------------------------------------------
 install -m 0644 "$SCRIPT_DIR/verify-pixelflux-v4l2m2m.service" \
@@ -142,4 +88,4 @@ ln -sf /etc/systemd/system/verify-pixelflux-v4l2m2m.service \
 
 printf '%s' "$STAMP_NOW" > "$STAMP"
 chmod 0644 "$STAMP"
-log_info "pixelflux $PIXELFLUX_VERSION с бэкендом v4l2m2m установлен в $PREFIX"
+log_info "проверка v4l2m2m включена; служба verify подтвердит железо на первой загрузке"

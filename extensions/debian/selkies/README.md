@@ -52,8 +52,8 @@ EXTENSION selkies SELKIES_PORT=8090 SELKIES_FRAMERATE=60,8-60 SELKIES_FILE_TRANS
 
 ## Что внутри
 
-- **AppImage** Selkies 2.0.0rc0 с GitHub, sha256 закреплён на архитектуру,
-  распакован на сборке в `/opt/selkies/2.0.0rc0` (**+1.7 ГБ**, 6 с;
+- **AppImage** Selkies 2.0.0rc1 с GitHub, sha256 закреплён на архитектуру,
+  распакован на сборке в `/opt/selkies/2.0.0rc1` (**+1.7 ГБ**, 6 с;
   `/opt/selkies/current` — ссылка). Пакеты Selkies собраны под Ubuntu 26.04
   и Debian trixie; AppImage несёт своё окружение и на Ubuntu 22.04
   (Jetson L4T 36.4) работает. Распакован, чтобы не зависеть от FUSE.
