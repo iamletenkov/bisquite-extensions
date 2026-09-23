@@ -5,8 +5,8 @@
 # ПОЧЕМУ AppImage. Пакеты Selkies 2.0 собраны под Ubuntu 26.04 и Debian
 # trixie, а AppImage несёт своё окружение (conda, pixelflux, pcmflux) и на
 # Ubuntu 22.04 запустился без правок (AGX Orin, 2026-09-14). Версия и sha256
-# закреплены на архитектуру: релиз-кандидат, и «последний» менялся бы под
-# ногами.
+# закреплены на архитектуру: «последний» менялся бы под ногами, а образ обязан
+# собираться одинаково и через месяц.
 #
 # ПОЧЕМУ РАСПАКОВАН. Смонтированный AppImage требует FUSE в госте и
 # распаковывает squashfs на каждом старте; распакованный (6 с на сборке,
@@ -21,10 +21,10 @@ log_error(){ >&2 echo -e "${RED}[ERROR]${NC} selkies: $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-SELKIES_VERSION="2.0.0rc1"
+SELKIES_VERSION="2.0.0"
 declare -A APPIMAGE_SHA256=(
-    [x86_64]="648ffb1d96b19f0f7b56f1cbc9ef2a2ffa5bde321fd65d259ad29215d8ca75ac"
-    [aarch64]="6cc15e207c0d55a1ad1956faabc09a60dd8c54308bf4ca680e0fd3221fbedd82"
+    [x86_64]="8dcdbe239dc8930545819aae510c45283cf25922250b6b7348ff2fd790c41ed8"
+    [aarch64]="01ef981ff31279807705107dbe23a35e20ec68b246376c1efc5cce0ddc7a23d8"
 )
 PREFIX="/opt/selkies/${SELKIES_VERSION}"
 
