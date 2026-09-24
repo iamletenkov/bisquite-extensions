@@ -24,6 +24,9 @@ echo "== test-nvidia-jetpack =="
 echo "== test-sensing-gmsl2-camera =="
 "$HERE/test-sensing-gmsl2-camera.sh" || rc=1
 
+echo "== test-l4t-kernel-kvm =="
+"$HERE/test-l4t-kernel-kvm.sh" || rc=1
+
 echo
 if (( rc )); then
     echo "проверки не прошли" >&2

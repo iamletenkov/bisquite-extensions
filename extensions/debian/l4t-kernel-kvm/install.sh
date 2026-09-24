@@ -22,6 +22,17 @@ log_info(){ >&2 echo -e "${GREEN}[INFO]${NC} l4t-kernel-kvm: $*"; }
 log_warn(){ >&2 echo -e "${YELLOW}[WARN]${NC} l4t-kernel-kvm: $*"; }
 log_error(){ >&2 echo -e "${RED}[ERROR]${NC} l4t-kernel-kvm: $*"; }
 
+# Помощник лежит рядом и подключается относительно САМОГО скрипта:
+# сборка копирует каталог расширения в гостя (/opt/bisquite/l4t-kernel-kvm/)
+# и запускает install.sh по абсолютному пути, рабочий каталог при этом не наш.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ ! -f "$HERE/extlinux-root.sh" ]]; then
+    log_error "рядом с install.sh нет extlinux-root.sh ($HERE)"
+    exit 1
+fi
+# shellcheck source=extlinux-root.sh
+. "$HERE/extlinux-root.sh"
+
 JOBS="${L4T_KERNEL_JOBS:-2}"
 LOCALVERSION="${L4T_KERNEL_LOCALVERSION:--tegra-kvm}"
 KEEP_SOURCES="${L4T_KERNEL_KEEP_SOURCES:-no}"
@@ -158,6 +169,27 @@ if [[ "$SOC" != t210 ]]; then
     exit 1
 fi
 log_info "SoC t210 (определено по: $SOC_SRC)"
+
+# --- 1в. Корень по PARTUUID: проверка до сборки ------------------------------
+# Шаг 7 переписывает `root=` во ВСЕХ строках APPEND на `root=PARTUUID=<P>`
+# раздела, на котором лежит /. Отказать он может — чужой PARTUUID, UUID=,
+# LABEL=, два root= в строке, нет root= вовсе, — и всё это видно по файлу
+# уже сейчас. Довод тот же, что у 1б: отказ, найденный в шаге 7, стоит
+# `apt-get`, скачивания исходников и двух-трёх часов сборки.
+#
+# Здесь только проверка, файл не меняется: переписывание — деструктивная
+# правка и идёт в шаге 7 после бэкапа, как все остальные.
+if ! ROOT_INFO="$(kvm_root_partition)"; then
+    log_error "не определился раздел корня — PARTUUID для root= брать неоткуда"
+    exit 1
+fi
+read -r ROOT_DEV ROOT_PARTNUM ROOT_PARTUUID <<<"$ROOT_INFO"
+log_info "корень: $ROOT_DEV (раздел $ROOT_PARTNUM), PARTUUID=$ROOT_PARTUUID"
+if ! kvm_check_extlinux_roots "$EXTLINUX" "$ROOT_PARTUUID" "$ROOT_PARTNUM"; then
+    log_error "root= в $EXTLINUX не переписать на PARTUUID=$ROOT_PARTUUID (причины выше)"
+    log_error "отказ до сборки ядра, чтобы не терять на нём часы"
+    exit 1
+fi
 
 # --- 2. Исходники ------------------------------------------------------------
 # Адрес собран по версии, а не прибит: на R32.7 он тот же с другими числами.
@@ -460,9 +492,15 @@ else
 fi
 
 # --- 7. extlinux.conf --------------------------------------------------------
-# APPEND КОПИРУЕТСЯ, а не пишется. В нём root=PARTUUID=…, свой у каждого
-# носителя; константа дала бы образ, грузящийся только на той плате, где
-# его собрали.
+# APPEND КОПИРУЕТСЯ ИЗ ЗАПИСИ ВЕНДОРА, а `root=` в нём ПЕРЕПИСЫВАЕТСЯ.
+# Прочие параметры ядра (`rootwait`, `rootfstype=`, консоль, `${cbootargs}`)
+# — вендора, и писать их константой незачем. А `root=` у базы Q-engineering —
+# `/dev/mmcblk0p1`, имя устройства: образ с ним грузится только с SD, на
+# USB-SSD тот же раздел называется /dev/sda1. Поэтому после бэкапа корень
+# переписывается на `root=PARTUUID=<P>` раздела, на котором лежит / (шаг 1в),
+# — во ВСЕХ записях, запасная `primary` тоже: с именем устройства она на SSD
+# бесполезна ровно тогда, когда нужна. Запись kvm берёт APPEND уже из
+# переписанного файла, так что источник правды один.
 APPEND_LINE="$(sed -n 's/^\s*APPEND\s\+//p' "$EXTLINUX" | head -1)"
 if [[ -z "$APPEND_LINE" ]]; then
     log_error "в $EXTLINUX нет ни одной строки APPEND — брать нечего"
@@ -481,6 +519,18 @@ fi
 #     именно то, с чего начали: на плате без монитора этот файл — весь
 #     запас отката, который есть.
 cp -a "$EXTLINUX" "${EXTLINUX}.before-kvm"
+
+# Корень по PARTUUID — первая деструктивная правка, сразу после бэкапа.
+# Те же входы шаг 1в уже проверил, поэтому отказ здесь значит, что файл
+# изменился за время сборки; он громкий, а бэкап выше и есть исходный файл.
+if ! kvm_rewrite_root "$EXTLINUX" "$ROOT_PARTUUID"; then
+    log_error "root= в $EXTLINUX не переписан (причины выше); исходный файл — ${EXTLINUX}.before-kvm"
+    exit 1
+fi
+# APPEND перечитывается: запись kvm обязана взять уже переписанный root=,
+# а не строку, прочитанную до правки.
+APPEND_LINE="$(sed -n 's/^\s*APPEND\s\+//p' "$EXTLINUX" | head -1)"
+log_info "APPEND записи kvm: $APPEND_LINE"
 
 # ЗАПИСЬ КОНЧАЕТСЯ СЛЕДУЮЩИМ `LABEL `, А НЕ ПУСТОЙ СТРОКОЙ.
 #
