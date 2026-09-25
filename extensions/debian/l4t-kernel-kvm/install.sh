@@ -388,15 +388,22 @@ set_cfg() {
 }
 set_cfg CONFIG_KVM y
 set_cfg CONFIG_VHOST_NET m
+# Squashfs с lzo. tegra_defconfig включает только XZ, а снапы, собранные с
+# `compression: lzo`, тогда не монтируются: snapd скачивает новую ревизию,
+# падает на mount и повторяет это при каждом плановом обновлении — минута
+# ядра и сотни мегабайт сети несколько раз в сутки (Nano А, 2026-09-25:
+# gnome-3-38-2004 и gtk-common-themes). Встроено, а не модулем: snapd монтирует
+# на ранней загрузке, и модуля в initrd может не оказаться.
+set_cfg CONFIG_SQUASHFS_LZO y
 make O="$TEGRA_KERNEL_OUT" CC="$CC_BIN" olddefconfig || exit 1
 
-for key in CONFIG_KVM CONFIG_VHOST_NET; do
+for key in CONFIG_KVM CONFIG_VHOST_NET CONFIG_SQUASHFS_LZO; do
     grep -qE "^${key}=[ym]" "$CFG" || {
         log_error "${key} не включился после olddefconfig — зависимости не выполнены"
         exit 1
     }
 done
-log_info "CONFIG_KVM и CONFIG_VHOST_NET включены"
+log_info "CONFIG_KVM, CONFIG_VHOST_NET и CONFIG_SQUASHFS_LZO включены"
 
 # --- 5. Сборка ---------------------------------------------------------------
 log_info "собираю ядро (-j${JOBS}); на Nano это часы"

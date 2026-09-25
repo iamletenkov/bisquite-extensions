@@ -41,8 +41,12 @@
    «Ограничения». Замер 2026-09-03 для R32.6.1: 161 774 820 байт, ровно тот
    же файл, что лежит в рабочем дереве на живой машине.
 5. Накладывает патч GIC на `tegra210-soc-base.dtsi`.
-6. Включает `CONFIG_KVM=y` и `CONFIG_VHOST_NET=m`, ставит
-   `LOCALVERSION=-tegra-kvm`.
+6. Включает `CONFIG_KVM=y`, `CONFIG_VHOST_NET=m` и `CONFIG_SQUASHFS_LZO=y`,
+   ставит `LOCALVERSION=-tegra-kvm`. Squashfs с lzo нужен снапам:
+   `tegra_defconfig` включает только XZ, и снап, собранный с
+   `compression: lzo`, не монтируется — snapd тогда скачивает ревизию,
+   падает на `mount` и повторяет это при каждом плановом обновлении
+   (Nano А, 2026-09-25: `gnome-3-38-2004`, `gtk-common-themes`).
 7. Собирает `Image`, DTB и модули.
 8. Кладёт `/boot/Image.kvm`, модули (`modules_install` в `/`) и **все**
    собранные деревья как `/boot/<имя>-kvm.dtb` — см. «Плата здесь

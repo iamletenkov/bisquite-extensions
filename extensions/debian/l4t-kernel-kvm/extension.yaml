@@ -1,6 +1,7 @@
 name: l4t-kernel-kvm
-version: 1.3.0
+version: 1.4.0
 layout: 2
+# 1.4.0: CONFIG_SQUASHFS_LZO=y — снапы с lzo монтируются, snapd не крутит обновление.
 # 1.3.0: root=PARTUUID во всех записях extlinux, проверки до сборки ядра.
 # 1.2.0: L4T_KERNEL_JOBS ограничен ядрами и памятью appliance, урезание вслух.
 family: deb

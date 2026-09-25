@@ -192,6 +192,15 @@ check   "14. APPEND перечитывается после переписыва
 check   "14. heredoc записи kvm — после переписывания" \
         test "$(line '^[^#]*kvm_rewrite_root ')" -lt "$(line '^cat >> "\$EXTLINUX" <<EXTEOF')"
 
+echo "== конфиг ядра: squashfs lzo (сканер) =="
+# Снапы, собранные с `compression: lzo`, без CONFIG_SQUASHFS_LZO не монтируются,
+# и snapd повторяет обновление по кругу (Nano А, 2026-09-25). Сканер, а не
+# проверка поведения: включился ли ключ, доказывает только /proc/config.gz на плате.
+check   "15. CONFIG_SQUASHFS_LZO=y ставится до olddefconfig" \
+        test "$(line '^set_cfg CONFIG_SQUASHFS_LZO y')" -lt "$(line 'olddefconfig \|\| exit 1')"
+check   "15. CONFIG_SQUASHFS_LZO сверяется после olddefconfig" \
+        grep -qE '^for key in .*CONFIG_SQUASHFS_LZO' "$I"
+
 if command -v shellcheck >/dev/null 2>&1; then
     check "shellcheck -S warning" shellcheck -S warning -x "$X/install.sh" "$X/extlinux-root.sh" "$0"
 else
