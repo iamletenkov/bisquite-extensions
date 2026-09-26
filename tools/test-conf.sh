@@ -626,6 +626,176 @@ check_not "render отказывает на правке руками с кав�
 eq "права config teleport 0600" 600 "$(stat -c %a "$(cfg teleport)")"
 unset BISQUITE_TELEPORT_ROOT
 
+echo "== домен teleport: join bound_keypair и путь token =="
+# Full join on a scratch root: no systemd (BISQUITE_TELEPORT_ROOT), the proxy
+# unreachable (fake curl), the agent binary a fake that prints a version.
+new_root; stage teleport-agent
+export BISQUITE_TELEPORT_ROOT="$ROOT"
+bash -c 'set -euo pipefail; source "$1/lib/bisquite-conf"; conf_init teleport "$1/knobs"' _ "$STAGED"
+printf '#!/bin/sh\nexit 7\n' > "$ROOT/bin/curl"; chmod +x "$ROOT/bin/curl"
+fake_teleport(){ printf '#!/bin/sh\necho "Teleport v%s git: go1.25"\n' "$1" > "$ROOT/bin/teleport"; chmod +x "$ROOT/bin/teleport"; }
+fake_teleport 18.10.0
+tpj(){ PATH="$ROOT/bin:$PATH" TELEPORT_BIN="$ROOT/bin/teleport" bash "$STAGED/bisquite-teleport" "$@"; }
+SECRET_FILE="$ROOT/var/lib/bisquite/teleport/registration-secret"
+BK_SECRET='s3cr3t-Registration-9f2c'
+
+eq "метод по умолчанию — token" token "$(lib conf_get teleport TELEPORT_JOIN_METHOD)"
+msg="$(tp set TELEPORT_JOIN_METHOD=bound_keypair 2>&1)"; rc=$?
+check "set TELEPORT_JOIN_METHOD — отказ (только join)" test "$rc" -ne 0
+check "отказ set метода — текст про join" grep -q 'только через bisquite-teleport join' <<< "$msg"
+
+# token: the path of 2.3.0, nothing new in the YAML.
+check "join token" tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_TOKEN=abcdefgh1 TELEPORT_NODENAME=robot-1 TELEPORT_ENV=dst 2>/dev/null
+eq "join token — метод token в config" token "$(lib conf_get teleport TELEPORT_JOIN_METHOD)"
+eq "join_params token — те же три строки, что до bound_keypair" \
+    $'  join_params:\n    token_name: "abcdefgh1"\n    method: token' \
+    "$(grep -A2 '^  join_params:' "$ROOT/etc/teleport.yaml")"
+check_not "token — блока bound_keypair нет" grep -q bound_keypair "$ROOT/etc/teleport.yaml"
+check_not "token — файла секрета регистрации нет" test -e "$SECRET_FILE"
+mkdir -p "$ROOT/var/lib/teleport"; echo 11111111-2222 > "$ROOT/var/lib/teleport/host_uuid"
+check "scrub-token после регистрации (token)" tp scrub-token 2>/dev/null
+eq "token стёрт из config" "" "$(lib conf_get teleport TELEPORT_TOKEN)"
+check_not "token — join_params ушли из teleport.yaml" grep -q join_params "$ROOT/etc/teleport.yaml"
+msg="$(tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_TOKEN=abcdefgh1 \
+    TELEPORT_REGISTRATION_SECRET=abcdefgh12 2>&1)"; rc=$?
+check "секрет регистрации при методе token — отказ" test "$rc" -ne 0
+check "отказ называет bound_keypair" grep -q bound_keypair <<< "$msg"
+check_not "метод вне перечня — отказ схемы" \
+    tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_TOKEN=abcdefgh1 TELEPORT_JOIN_METHOD=iam 2>/dev/null
+check "leave (token)" tp leave 2>/dev/null
+
+# bound_keypair: refusals before anything is touched.
+msg="$(tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_JOIN_METHOD=bound_keypair \
+    TELEPORT_TOKEN=robot-orin-01 2>&1)"; rc=$?
+check "bound_keypair без секрета регистрации — отказ" test "$rc" -ne 0
+check "отказ называет TELEPORT_REGISTRATION_SECRET" grep -q TELEPORT_REGISTRATION_SECRET <<< "$msg"
+check_not "bound_keypair: секрет с пробелом — отказ" \
+    tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_JOIN_METHOD=bound_keypair \
+    TELEPORT_TOKEN=robot-orin-01 'TELEPORT_REGISTRATION_SECRET=two words here' 2>/dev/null
+check_not "bound_keypair: секрет короче 8 — отказ" \
+    tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_JOIN_METHOD=bound_keypair \
+    TELEPORT_TOKEN=robot-orin-01 TELEPORT_REGISTRATION_SECRET=short 2>/dev/null
+check_not "два значения со stdin — отказ" \
+    tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_JOIN_METHOD=bound_keypair \
+    TELEPORT_TOKEN=- TELEPORT_REGISTRATION_SECRET=- <<< "x" 2>/dev/null
+check_not "секрет и файл секрета вместе — отказ" \
+    tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_JOIN_METHOD=bound_keypair \
+    TELEPORT_TOKEN=robot-orin-01 TELEPORT_REGISTRATION_SECRET=abcdefgh12 \
+    TELEPORT_REGISTRATION_SECRET_FILE=/nonexistent 2>/dev/null
+fake_teleport 18.6.8
+msg="$(tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_JOIN_METHOD=bound_keypair \
+    TELEPORT_TOKEN=robot-orin-01 TELEPORT_REGISTRATION_SECRET=- <<< "$BK_SECRET" 2>&1)"; rc=$?
+check "bound_keypair на агенте 18.6.8 — отказ" test "$rc" -ne 0
+check "отказ называет 18.8.0" grep -q '18\.8\.0' <<< "$msg"
+check_not "после отказов секрет не записан" test -e "$SECRET_FILE"
+eq "после отказов метод прежний" token "$(lib conf_get teleport TELEPORT_JOIN_METHOD)"
+fake_teleport 18.10.0
+
+# bound_keypair: the secret from stdin, never echoed.
+msg="$(tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_JOIN_METHOD=bound_keypair \
+    TELEPORT_TOKEN=robot-orin-01 TELEPORT_REGISTRATION_SECRET=- TELEPORT_NODENAME=robot-1 \
+    TELEPORT_ENV=dst <<< "$BK_SECRET" 2>&1)"; rc=$?
+eq "join bound_keypair — успех" 0 "$rc"
+check_not "секрет не попал в вывод join" grep -qF "$BK_SECRET" <<< "$msg"
+eq "метод в config" bound_keypair "$(lib conf_get teleport TELEPORT_JOIN_METHOD)"
+eq "имя токена в config" robot-orin-01 "$(lib conf_get teleport TELEPORT_TOKEN)"
+check_not "секрета нет в config" grep -qF "$BK_SECRET" "$(cfg teleport)"
+check_not "секрета нет в teleport.yaml" grep -qF "$BK_SECRET" "$ROOT/etc/teleport.yaml"
+eq "секрет — в файле состояния" "$BK_SECRET" "$(cat "$SECRET_FILE")"
+eq "файл секрета 0600" 600 "$(stat -c %a "$SECRET_FILE")"
+eq "каталог состояния 0700" 700 "$(stat -c %a "$(dirname "$SECRET_FILE")")"
+eq "join_params bound_keypair — блок целиком" \
+    $'  join_params:\n    token_name: "robot-orin-01"\n    method: bound_keypair\n    bound_keypair:\n      registration_secret_path: "/var/lib/bisquite/teleport/registration-secret"' \
+    "$(grep -A4 '^  join_params:' "$ROOT/etc/teleport.yaml")"
+check "YAML bound_keypair разбирается, join_params — в teleport" python3 -c '
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+want = {"token_name": "robot-orin-01", "method": "bound_keypair",
+        "bound_keypair": {"registration_secret_path": "/var/lib/bisquite/teleport/registration-secret"}}
+sys.exit(d["teleport"]["join_params"] != want or d["teleport"]["data_dir"] != "/var/lib/teleport")' "$ROOT/etc/teleport.yaml"
+msg="$(tp status 2>&1)"
+check "status называет метод" grep -q 'bound_keypair' <<< "$msg"
+check "status: секрет регистрации задан" grep -q 'Секрет регистрации: задан' <<< "$msg"
+check_not "status не печатает секрет" grep -qF "$BK_SECRET" <<< "$msg"
+
+# Registered: the secret is inert and goes; token name and method stay — the
+# agent re-authenticates with the bound key from its data_dir.
+mkdir -p "$ROOT/var/lib/teleport/proc"
+echo 33333333-4444 > "$ROOT/var/lib/teleport/host_uuid"
+echo keypair > "$ROOT/var/lib/teleport/proc/sqlite.db"
+check "scrub-token после регистрации (bound_keypair)" tp scrub-token 2>/dev/null
+check_not "секрет регистрации стёрт" test -e "$SECRET_FILE"
+eq "имя токена осталось" robot-orin-01 "$(lib conf_get teleport TELEPORT_TOKEN)"
+eq "после стирания — join_params без секрета" \
+    $'  join_params:\n    token_name: "robot-orin-01"\n    method: bound_keypair' \
+    "$(grep -A2 '^  join_params:' "$ROOT/etc/teleport.yaml")"
+check_not "после стирания — блока bound_keypair нет" grep -q '^    bound_keypair:' "$ROOT/etc/teleport.yaml"
+check "scrub-token повторно — без ошибки" tp scrub-token 2>/dev/null
+
+# A rerun of firstboot with the stale secret keeps the bound key.
+msg="$(tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_JOIN_METHOD=bound_keypair \
+    TELEPORT_TOKEN=robot-orin-01 TELEPORT_REGISTRATION_SECRET=- <<< "$BK_SECRET" 2>&1)"; rc=$?
+eq "повтор join — успех" 0 "$rc"
+check "повтор join — переподключение не нужно" grep -q 'уже зарегистрирован' <<< "$msg"
+eq "ключ в data_dir цел" keypair "$(cat "$ROOT/var/lib/teleport/proc/sqlite.db")"
+check_not "повтор join не пишет секрет заново" test -e "$SECRET_FILE"
+
+# From here the machine is registered: a re-join needs the proxy reachable
+# (fake /webapi/find), or join refuses to touch the working registration.
+fake_proxy(){ printf '#!/bin/sh\necho %s\n' "'{\"server_version\":\"$1\"}'" > "$ROOT/bin/curl"; chmod +x "$ROOT/bin/curl"; }
+fake_proxy 18.6.8
+msg="$(tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_JOIN_METHOD=bound_keypair \
+    TELEPORT_TOKEN=robot-orin-02 TELEPORT_REGISTRATION_SECRET=abcdefgh12 TELEPORT_FORCE=1 2>&1)"; rc=$?
+check "bound_keypair к кластеру 18.6.8 — отказ (агент 18.10.0 новее)" test "$rc" -ne 0
+check "отказ называет версии агента и кластера" grep -q 'агент 18\.10\.0 новее кластера 18\.6\.8' <<< "$msg"
+eq "отказ по кластеру — ключ в data_dir цел" keypair "$(cat "$ROOT/var/lib/teleport/proc/sqlite.db")"
+fake_proxy 18.10.0
+
+# The secret from a file (cloud-init write_files).
+echo "  $BK_SECRET  " > "$ROOT/secret.in"
+check "join bound_keypair с TELEPORT_FORCE и файлом секрета" \
+    tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_JOIN_METHOD=bound_keypair \
+    TELEPORT_TOKEN=robot-orin-02 TELEPORT_REGISTRATION_SECRET_FILE="$ROOT/secret.in" TELEPORT_FORCE=1 2>/dev/null
+eq "секрет из файла без пробелов по краям" "$BK_SECRET" "$(cat "$SECRET_FILE")"
+eq "новое имя токена" robot-orin-02 "$(lib conf_get teleport TELEPORT_TOKEN)"
+check_not "FORCE — прежний ключ снят с data_dir" test -e "$ROOT/var/lib/teleport/proc/sqlite.db"
+check_not "файл секрета не читается — отказ" \
+    tpj join TELEPORT_PROXY=teleport.example.org TELEPORT_JOIN_METHOD=bound_keypair \
+    TELEPORT_TOKEN=robot-orin-02 TELEPORT_REGISTRATION_SECRET_FILE="$ROOT/nope" TELEPORT_FORCE=1 2>/dev/null
+
+# Back to token: the method follows the join, not the history.
+check "join token после bound_keypair" tpj join TELEPORT_PROXY=teleport.example.org \
+    TELEPORT_TOKEN=abcdefgh1 TELEPORT_FORCE=1 2>/dev/null
+eq "метод снова token" token "$(lib conf_get teleport TELEPORT_JOIN_METHOD)"
+check_not "join token стирает секрет регистрации" test -e "$SECRET_FILE"
+check_not "token — блока bound_keypair нет" grep -q bound_keypair "$ROOT/etc/teleport.yaml"
+check "join bound_keypair перед leave" tpj join TELEPORT_PROXY=teleport.example.org \
+    TELEPORT_JOIN_METHOD=bound_keypair TELEPORT_TOKEN=robot-orin-03 \
+    TELEPORT_REGISTRATION_SECRET=abcdefgh12 TELEPORT_FORCE=1 2>/dev/null
+check "leave (bound_keypair)" tp leave 2>/dev/null
+check_not "leave стирает секрет регистрации" test -e "$SECRET_FILE"
+eq "leave возвращает метод token" token "$(lib conf_get teleport TELEPORT_JOIN_METHOD)"
+unset BISQUITE_TELEPORT_ROOT
+
+echo "== teleport-agent install.sh: источник tarball =="
+# The pure part of install.sh (sourced, nothing installed): architecture and URL.
+new_root; stage teleport-agent
+tpi(){ bash -c 'source "$1"; shift; "$@"' _ "$STAGED/install.sh" "$@"; }
+eq "версия по умолчанию — 18.10.0" 18.10.0 "$(tpi teleport_default_version)"
+eq "dpkg amd64 → amd64" amd64 "$(tpi teleport_arch amd64)"
+eq "dpkg arm64 (JetPack, Raspberry Pi OS 64) → arm64" arm64 "$(tpi teleport_arch arm64)"
+check_not "armhf — отказ" tpi teleport_arch armhf
+check_not "i386 — отказ" tpi teleport_arch i386
+eq "CDN amd64" https://cdn.teleport.dev/teleport-v18.10.0-linux-amd64-bin.tar.gz \
+    "$(tpi teleport_url 18.10.0 amd64 '')"
+eq "CDN arm64" https://cdn.teleport.dev/teleport-v18.10.0-linux-arm64-bin.tar.gz \
+    "$(tpi teleport_url 18.10.0 arm64 '')"
+eq "зеркало: раскладка binaries/teleport/<версия>/" \
+    https://binaries.example.org/binaries/teleport/18.10.0/teleport-v18.10.0-linux-arm64-bin.tar.gz \
+    "$(tpi teleport_url 18.10.0 arm64 https://binaries.example.org/)"
+eq "sha256 всегда с CDN" https://cdn.teleport.dev/teleport-v18.10.0-linux-arm64-bin.tar.gz.sha256 \
+    "$(tpi teleport_sha256_url 18.10.0 arm64)"
+
 echo "== домен desktop: схема из lib, хук находит CLI того же lib =="
 new_root; stage gnome
 check "conf_init desktop через каталог расширения" env DESKTOP_AUTOLOGIN=1 \
