@@ -517,6 +517,72 @@ check "render" tp render
 check "teleport.yaml собран" grep -q 'proxy_server: "teleport.example.org:443"' "$ROOT/etc/teleport.yaml"
 check "метка env в teleport.yaml" grep -q '"env": "prod"' "$ROOT/etc/teleport.yaml"
 
+# Динамическая метка os_logins: включена по умолчанию, выключается ручкой,
+# задать её оператор не может. Команда сама — на подменённом passwd.
+check "метка os_logins в teleport.yaml по умолчанию" \
+    grep -qx '    - name: "os_logins"' "$ROOT/etc/teleport.yaml"
+check "команда метки — bisquite-teleport os-logins" \
+    grep -qxF '      command: ["/usr/local/sbin/bisquite-teleport", "os-logins"]' "$ROOT/etc/teleport.yaml"
+check "период метки — 5 минут" grep -qx '      period: 5m0s' "$ROOT/etc/teleport.yaml"
+check "YAML разбирается, commands — в ssh_service" python3 -c '
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+want = [{"name": "os_logins", "period": "5m0s",
+         "command": ["/usr/local/sbin/bisquite-teleport", "os-logins"]}]
+sys.exit(d["ssh_service"]["commands"] != want)' "$ROOT/etc/teleport.yaml"
+check "set TELEPORT_OS_LOGINS=0" tp set TELEPORT_OS_LOGINS=0 2>/dev/null
+check "render без метки os_logins" tp render
+check_not "TELEPORT_OS_LOGINS=0 — метки os_logins нет" grep -q os_logins "$ROOT/etc/teleport.yaml"
+check_not "TELEPORT_OS_LOGINS=0 — секции commands нет" grep -q 'commands:' "$ROOT/etc/teleport.yaml"
+check_not "TELEPORT_OS_LOGINS=yes — отказ схемы" tp set TELEPORT_OS_LOGINS=yes 2>/dev/null
+check "set TELEPORT_OS_LOGINS=1" tp set TELEPORT_OS_LOGINS=1 2>/dev/null
+check "render с меткой снова" tp render
+check "метка os_logins вернулась" grep -qx '    - name: "os_logins"' "$ROOT/etc/teleport.yaml"
+msg="$(tp set TELEPORT_LABELS=site=lab,os_logins=root 2>&1)"; rc=$?
+check "set TELEPORT_LABELS=os_logins=… — отказ" test "$rc" -ne 0
+check "отказ называет ключ os_logins" grep -q "ключ 'os_logins' зарезервирован" <<< "$msg"
+msg="$(env TELEPORT_BIN=/nonexistent bash "$STAGED/bisquite-teleport" join \
+    TELEPORT_PROXY=teleport.example.org TELEPORT_TOKEN=abcdefgh1 TELEPORT_LABELS=os_logins=root 2>&1)"; rc=$?
+check "join с TELEPORT_LABELS=os_logins=… — отказ" test "$rc" -ne 0
+check "join: отказ по ключу метки, до сети" grep -q "ключ 'os_logins' зарезервирован" <<< "$msg"
+lib conf_set teleport TELEPORT_LABELS=os_logins=root
+check_not "render отказывает на os_logins в TELEPORT_LABELS руками" tp render 2>/dev/null
+lib conf_set teleport TELEPORT_LABELS=
+check "render после сброса меток" tp render
+
+mkdir -p "$ROOT/etc"
+cat > "$ROOT/etc/passwd" <<'EOF'
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+postgres:x:110:118:PostgreSQL:/var/lib/postgresql:/bin/bash
+robot:x:1000:1000:Robot,,,:/home/robot:/bin/bash
+alice:x:1001:1001::/home/alice:/usr/sbin/nologin
+bob:x:1002:1002::/home/bob:/bin/false
+zed:x:1003:1003::/home/zed:/usr/bin/zsh
+ad$:x:1004:1004::/home/ad:/bin/bash
+emma:x:1005:1005::/home/emma:
+nobody:x:65534:65534:nobody:/nonexistent:/bin/sh
+robot:x:1000:1000:Robot from NSS:/home/robot:/bin/bash
+EOF
+out="$(tp os-logins)"; rc=$?
+eq "os-logins: код 0" 0 "$rc"
+eq "os-logins: root и пользователи с shell, uid ≥ 1000, сортировка байтовая (LC_ALL=C), без дублей" \
+    "emma,robot,root,zed" "$out"
+{
+    echo 'root:x:0:0:root:/root:/bin/bash'
+    for i in $(seq -w 1 100); do echo "user0$i:x:$((1000 + 10#$i)):100::/home/u:/bin/bash"; done
+} > "$ROOT/etc/passwd"
+out="$(tp os-logins)"
+check "переполнение: не длиннее 255" test "${#out}" -le 255
+check "переполнение: хвост ,..." test "${out: -4}" == ",..."
+check "переполнение: целые имена до хвоста" grep -qE '^root(,user0[0-9]{3})+,\.\.\.$' <<< "$out"
+check "переполнение: алфавит метки" grep -qE '^[A-Za-z0-9._,-]+$' <<< "$out"
+rm -f "$ROOT/etc/passwd"
+out="$(tp os-logins 2>/dev/null)"; rc=$?
+eq "passwd не прочитан — код 0 (иначе Teleport кладёт в метку текст ошибки)" 0 "$rc"
+eq "passwd не прочитан — пустое значение" "" "$out"
+
 # Иконки приложений: ICON= в объявлении расширения и ручка оператора.
 # Объявление кладём сами — так же, как его положил бы teleport-app.sh.
 app_decl(){
