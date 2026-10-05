@@ -10,6 +10,7 @@
 extensions/
 ├── debian/                  # для Debian/Ubuntu (install.sh + configure)
 │   ├── docker/
+│   ├── teleport-agent/      # обёртка: Teleport + пакет bisquite-teleport-agent
 │   ├── code-server/
 │   ├── chromium-kiosk/  kiosk/
 │   ├── gnome/  xfce4/  lxde/
@@ -27,6 +28,13 @@ docs/extensions.md           # конвенция целиком: манифес
 ```
 
 Ubuntu-образы используют расширения из `debian/` (Ubuntu — Debian-совместима).
+
+**Агент Teleport переехал.** С `teleport-agent` 3.0.0 CLI `bisquite-teleport`,
+юниты и схема домена `teleport` — отдельный открытый проект
+[bisquite-teleport-agent](https://github.com/iamletenkov/bisquite-teleport-agent),
+выпускаемый пакетом `.deb`. Расширение `teleport-agent` здесь — тонкая
+обёртка: кладёт бинарь Teleport и ставит пакет агента по версии и sha256.
+Контракт `apps.d` и пути `/etc/bisquite/teleport` не изменились.
 
 **Каталог группировки — удобство автора, а не контракт резолвера.** Расширение
 ищется по полю `name` манифеста, а не по имени каталога: bisquite обходит кеш
@@ -295,3 +303,8 @@ before_script:
 
 Полная таблица «кто что даёт и из какого кода это выведено» —
 в `docs/extensions.md`.
+
+## Лицензия
+
+[PolyForm Noncommercial 1.0.0](LICENSE), см. [NOTICE](NOTICE). Коммерческое
+использование — по отдельной лицензии правообладателя.

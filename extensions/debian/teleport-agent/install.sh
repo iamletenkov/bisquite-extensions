@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Teleport agent for a Teleport cluster: SSH node + web apps, no inbound ports.
 #
+# A thin wrapper since 3.0.0: the agent (CLI bisquite-teleport, units, schema
+# of the `teleport` domain) is the package bisquite-teleport-agent from its
+# own repository (agent.sh: version, sha256 pin, source). This script lays
+# down the Teleport binary, as before, and installs that package.
+#
 # Build phase only lays down the binary and the tooling. The image stays
 # neutral to the cluster: proxy address, env, CA pin and token are given on
 # the device by `bisquite-teleport join`, so one image serves robots of
@@ -10,8 +15,7 @@
 # Parameters (environment, from VMFILE):
 #   TELEPORT_VERSION  18.10.0      must not be newer than the cluster;
 #                                  bound_keypair join needs >= 18.8.0
-#   TELEPORT_MIRROR   (empty)      base URL of a binaries mirror with the
-#                                  teleport-keycloak-ldap layout
+#   TELEPORT_MIRROR   (empty)      base URL of a binaries mirror laid out as
 #                                  <base>/binaries/teleport/<ver>/<tarball>,
 #                                  e.g. https://binaries.example.org;
 #                                  empty — cdn.teleport.dev
@@ -20,12 +24,10 @@
 #                                  channel when the tarball comes from a
 #                                  mirror). A rebuilt fork differs from the
 #                                  vanilla tarball: pin its hash here.
+#   AGENT_VERSION, AGENT_SHA256[_<ARCH>], AGENT_MIRROR, AGENT_URL, AGENT_DEB
+#                                  the agent package — see agent.sh
 #
-# The same script updates the extension on a running robot: update.sh lays
-# the archive out and calls it with TELEPORT_VERSION = the installed agent,
-# so the binary of the running agent is not replaced, and with
-# BISQUITE_TELEPORT_UPDATE=1 (a registration in /var/lib/teleport is
-# expected there). BISQUITE_TELEPORT_ROOT — a scratch root for the tests.
+# BISQUITE_TELEPORT_ROOT — a scratch root for the tests.
 
 # Download source — pure functions; tools/test-conf.sh sources this file and
 # calls them, nothing below the guard runs then.
@@ -59,10 +61,9 @@ log_info(){ >&2 echo -e "${GREEN}[INFO]${NC} teleport-agent: $*"; }
 log_error(){ >&2 echo -e "${RED}[ERROR]${NC} teleport-agent: $*"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${BISQUITE_TELEPORT_ROOT:-}"
-export BISQUITE_CONF_ROOT="${BISQUITE_CONF_ROOT:-$ROOT}"
-[[ -f "$SCRIPT_DIR/lib/bisquite-conf" ]] || { log_error "рядом нет lib/bisquite-conf — сборка не доставила lib/ источника"; exit 1; }
+[[ -f "$SCRIPT_DIR/agent.sh" ]] || { log_error "рядом нет agent.sh"; exit 1; }
 # shellcheck source=/dev/null
-source "$SCRIPT_DIR/lib/bisquite-conf"
+source "$SCRIPT_DIR/agent.sh"
 
 TELEPORT_VERSION="${TELEPORT_VERSION:-$(teleport_default_version)}"
 TELEPORT_MIRROR="${TELEPORT_MIRROR:-}"
@@ -74,17 +75,17 @@ TELEPORT_SHA256="${TELEPORT_SHA256:-}"
 
 DPKG_ARCH="$(dpkg --print-architecture)"
 ARCH="$(teleport_arch "$DPKG_ARCH")" || { log_error "архитектура $DPKG_ARCH не поддерживается"; exit 1; }
-
-UNITS=(teleport.service bisquite-teleport-apps.path bisquite-teleport-apps.service
-       bisquite-teleport-token.path bisquite-teleport-token.service
-       bisquite-teleport-labels.service bisquite-teleport-labels.timer)
-for f in bisquite-teleport knobs knobs.apply "${UNITS[@]}"; do
-    [[ -f "$SCRIPT_DIR/$f" ]] || { log_error "рядом нет $f"; exit 1; }
-done
+# The agent pin is checked before anything is downloaded.
+version="${AGENT_VERSION:-$(agent_default_version)}"
+[[ -n "$(agent_sha256 "$version" "$DPKG_ARCH")" ]] \
+    || { log_error "нет sha256 для пакета агента $version — задайте AGENT_SHA256"; exit 1; }
 
 if ! command -v curl >/dev/null 2>&1; then
     apt-get update -q && apt-get install -y -q --no-install-recommends curl ca-certificates
 fi
+
+WORK="$(mktemp -d /var/tmp/teleport-agent.XXXXXX)"
+trap 'rm -r -f -- "$WORK"' EXIT
 
 FILE="$(teleport_tarball "$TELEPORT_VERSION" "$ARCH")"
 URL="$(teleport_url "$TELEPORT_VERSION" "$ARCH" "$TELEPORT_MIRROR")"
@@ -92,15 +93,9 @@ SHA256_URL="$(teleport_sha256_url "$TELEPORT_VERSION" "$ARCH")"
 SHA256_FROM_CDN=0
 
 BIN="$ROOT/usr/local/bin/teleport"
-if [[ "${BISQUITE_TELEPORT_UPDATE:-}" == 1 && -x "$BIN" ]]; then
-    # Updating a running robot: its agent may be a fork with a version suffix
-    # (v18.10.0-oidc) that no version string here matches — never replace it.
-    log_info "обновление расширения: агент $("$BIN" version 2>/dev/null | head -1) не трогаю"
-elif [[ -x "$BIN" ]] && "$BIN" version 2>/dev/null | grep -q "v${TELEPORT_VERSION} "; then
+if [[ -x "$BIN" ]] && "$BIN" version 2>/dev/null | grep -q "v${TELEPORT_VERSION} "; then
     log_info "Teleport ${TELEPORT_VERSION} уже установлен"
 else
-    WORK="$(mktemp -d /var/tmp/teleport-agent.XXXXXX)"
-    trap 'rm -r -f -- "$WORK"' EXIT
     if [[ -z "$TELEPORT_SHA256" ]]; then
         TELEPORT_SHA256="$(curl -fsSL --retry 5 --retry-delay 3 "$SHA256_URL" | awk '{print $1}')" || true
         [[ "$TELEPORT_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
@@ -132,34 +127,18 @@ else
     log_info "установлен $("$BIN" version | head -1)"
 fi
 
-# A link, not a copy: the CLI finds lib/bisquite-conf next to itself through
-# `readlink -f`, i.e. always the library of the build that installed it.
-chmod +x "$SCRIPT_DIR/bisquite-teleport"
-install -d -m 0755 "$ROOT/usr/local/sbin" "$ROOT/etc/systemd/system"
-ln -sfn "$SCRIPT_DIR/bisquite-teleport" "$ROOT/usr/local/sbin/bisquite-teleport"
-for u in "${UNITS[@]}"; do
-    install -m 0644 "$SCRIPT_DIR/$u" "$ROOT/etc/systemd/system/$u"
-done
-# Path units always on (cheap, no-ops until joined); the agent itself is
-# enabled by `join`, the labels timer by `labels-enable` (or update.sh).
-# Links, not `systemctl enable`: no systemd in the build.
-install -d "$ROOT/etc/systemd/system/paths.target.wants"
-ln -sf /etc/systemd/system/bisquite-teleport-apps.path "$ROOT/etc/systemd/system/paths.target.wants/"
-ln -sf /etc/systemd/system/bisquite-teleport-token.path "$ROOT/etc/systemd/system/paths.target.wants/"
+# The agent package: CLI, units, schema; its postinst creates
+# /etc/bisquite/teleport/config once and enables the path units — no
+# systemd needed, nothing is started.
+deb="$(agent_fetch "$WORK" "$DPKG_ARCH")" || exit 1
+agent_install "$deb" || exit 1
+log_info "пакет $(basename "$deb") установлен"
 
-# Settings file through the library: created once, never rewritten — a
-# rebuild on top of an image keeps what `join`/`set` wrote. No --env: the image
-# stays neutral to the cluster, env and apps are given on the device.
-install -d -m 0755 "$ROOT/etc/bisquite/teleport/apps.d"
-conf_init teleport "$SCRIPT_DIR/knobs" || { log_error "/etc/bisquite/teleport/config не записан"; exit 1; }
-install -d -m 0750 "$ROOT/var/lib/teleport"
-
-# In a build a registration would make every copy of the image one node; on a
-# running robot (update.sh) it is the robot's own.
-if [[ -s "$ROOT/var/lib/teleport/host_uuid" && "${BISQUITE_TELEPORT_UPDATE:-}" != 1 ]] \
+# In a build a registration would make every copy of the image one node.
+if [[ -s "$ROOT/var/lib/teleport/host_uuid" ]] \
    && [[ -n "$ROOT" || ! -d /run/systemd/system ]]; then
     log_error "в /var/lib/teleport уже есть регистрация — образ стал бы одной нодой на все копии"
     exit 1
 fi
 
-log_info "готово: подключение — sudo bisquite-teleport join TELEPORT_PROXY=… TELEPORT_TOKEN=… TELEPORT_ENV=…"
+log_info "готово: подключение — echo '<токен>' | sudo bisquite-teleport join TELEPORT_PROXY=… TELEPORT_TOKEN=- TELEPORT_ENV=…"

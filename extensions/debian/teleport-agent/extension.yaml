@@ -1,6 +1,14 @@
 name: teleport-agent
-version: 2.5.0
+version: 3.0.0
 layout: 2
+# 3.0.0: агент — отдельный проект bisquite-teleport-agent (пакет .deb,
+#        https://github.com/iamletenkov/bisquite-teleport-agent); расширение —
+#        обёртка: Teleport как прежде (TELEPORT_VERSION/MIRROR/SHA256) плюс
+#        пакет агента по AGENT_VERSION и sha256 (AGENT_SHA256[_<ARCH>],
+#        AGENT_MIRROR, AGENT_URL). CLI — /usr/sbin/bisquite-teleport, юниты —
+#        /usr/lib/systemd/system; пути /etc/bisquite/teleport, apps.d, ключи
+#        join и метка managed_by не изменились. update.sh ставит тот же .deb
+#        на работающем роботе, postinst пакета переводит роботов с 2.x.
 # 2.5.0: метки space и env с портала. `set-managed` сливает space в
 #        TELEPORT_LABELS и пишет TELEPORT_ENV одним перезапуском агента (не HUP:
 #        SSH и приложения переезжают вместе); `pull` — тик таймера

@@ -18,8 +18,8 @@ echo
 echo "== test-conf =="
 "$HERE/test-conf.sh" || rc=1
 
-echo "== test-teleport-labels =="
-"$HERE/test-teleport-labels.sh" || rc=1
+echo "== test-teleport-agent =="
+"$HERE/test-teleport-agent.sh" || rc=1
 
 echo "== test-nvidia-jetpack =="
 "$HERE/test-nvidia-jetpack.sh" || rc=1

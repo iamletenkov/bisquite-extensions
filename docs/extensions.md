@@ -308,7 +308,7 @@ echo 'пароль' | sudo bisquite-conf set x11vnc X11VNC_PASSWORD=-   # сек
 | `selkies` | `/etc/bisquite/selkies/config` (0600) | `selkies` | `EnvironmentFile` юнита `selkies@.service` | объявление для Teleport + перезапуск `selkies@*` |
 | `vino` | `/etc/bisquite/vino/config` | `vino-vnc` | `configure.sh` → dconf пользователя | перезапуск `configure-vino-vnc` (сервер берёт порт и адрес при старте сессии) |
 | `sensing-camera` | `/etc/bisquite/sensing-camera/config` | `sensing-gmsl2-camera` | `bisquite-sensing-camera-ctl` в юнитах камер | перезапуск `bisquite-sensing-camera@*`, `bisquite-sensing-clock` |
-| `teleport` | `/etc/bisquite/teleport/config` (0600) | `teleport-agent` | `bisquite-teleport render` на старте агента | `render` + reload агента; кластер — только `bisquite-teleport join` |
+| `teleport` | `/etc/bisquite/teleport/config` (0600) | пакет `bisquite-teleport-agent` (ставит `teleport-agent`; схема — `/usr/lib/bisquite-teleport/knobs`) | `bisquite-teleport render` на старте агента | `render` + reload агента; кластер — только `bisquite-teleport join` |
 | `code-server` | `/etc/bisquite/code-server/config` (0600) | `code-server` | `configure.sh` → `~/.config/code-server/config.yaml` | перезапуск `configure-code-server` |
 | `kiosk` | `/etc/bisquite/kiosk/config` | `kiosk` | `configure.sh`, `run-kiosk.sh` | перезапуск `configure-kiosk` |
 | `chromium-kiosk` | `/etc/bisquite/chromium-kiosk/config` | `chromium-kiosk` | `configure.sh` → `/etc/chromium-kiosk/config.yml` | перезапуск `configure-chromium-kiosk` |
