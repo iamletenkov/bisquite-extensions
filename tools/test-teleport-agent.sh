@@ -26,7 +26,7 @@ check_not(){ local what="$1"; shift; if "$@"; then bad "$what"; else ok; fi; }
 eq(){ local what="$1" want="$2" got="$3"; if [[ "$want" == "$got" ]]; then ok; else bad "$what: ждали [$want], получили [$got]"; fi; }
 
 GH=https://github.com/iamletenkov/bisquite-teleport-agent/releases/download
-DEB=bisquite-teleport-agent_3.0.0_all.deb
+DEB=bisquite-teleport-agent_3.0.1_all.deb
 
 # ---------------------------------------------------------------------------
 # FAKE: logs and switches of the fakes.
@@ -108,15 +108,15 @@ pure(){ bash -c 'source "$1"; shift; "$@"' _ "$EXT/agent.sh" "$@"; }
 
 # ===========================================================================
 echo "== agent.sh: источник и пин =="
-eq "версия по умолчанию" 3.0.0 "$(pure agent_default_version)"
+eq "версия по умолчанию" 3.0.1 "$(pure agent_default_version)"
 check "пин по умолчанию — 64 hex" grep -qE '^[0-9a-f]{64}$' <<< "$(pure agent_default_sha256)"
-eq "имя файла" "$DEB" "$(pure agent_deb_name 3.0.0)"
-eq "по умолчанию — релиз GitHub" "$GH/v3.0.0/$DEB" "$(pure agent_url 3.0.0 '' '')"
-eq "зеркало" "https://portal.example.org/dist/teleport/$DEB" "$(pure agent_url 3.0.0 '' https://portal.example.org/dist/teleport/)"
-eq "AGENT_URL сильнее зеркала" https://x.example.org/a.deb "$(pure agent_url 3.0.0 https://x.example.org/a.deb https://portal.example.org/)"
-eq "сумма версии по умолчанию — пин" "$(pure agent_default_sha256)" "$(pure agent_sha256 3.0.0 amd64)"
-eq "другая версия без суммы — пусто" "" "$(pure agent_sha256 3.0.1 amd64)"
-eq "AGENT_SHA256" "$(printf 'a%.0s' {1..64})" "$(AGENT_SHA256="$(printf 'a%.0s' {1..64})" pure agent_sha256 3.0.1 amd64)"
+eq "имя файла" "$DEB" "$(pure agent_deb_name 3.0.1)"
+eq "по умолчанию — релиз GitHub" "$GH/v3.0.1/$DEB" "$(pure agent_url 3.0.1 '' '')"
+eq "зеркало" "https://portal.example.org/dist/teleport/$DEB" "$(pure agent_url 3.0.1 '' https://portal.example.org/dist/teleport/)"
+eq "AGENT_URL сильнее зеркала" https://x.example.org/a.deb "$(pure agent_url 3.0.1 https://x.example.org/a.deb https://portal.example.org/)"
+eq "сумма версии по умолчанию — пин" "$(pure agent_default_sha256)" "$(pure agent_sha256 3.0.1 amd64)"
+eq "другая версия без суммы — пусто" "" "$(pure agent_sha256 3.0.2 amd64)"
+eq "AGENT_SHA256" "$(printf 'a%.0s' {1..64})" "$(AGENT_SHA256="$(printf 'a%.0s' {1..64})" pure agent_sha256 3.0.2 amd64)"
 eq "AGENT_SHA256_ARM64 сильнее AGENT_SHA256 на arm64" "$(printf 'b%.0s' {1..64})" \
     "$(AGENT_SHA256="$(printf 'a%.0s' {1..64})" AGENT_SHA256_ARM64="$(printf 'b%.0s' {1..64})" pure agent_sha256 3.0.0 arm64)"
 eq "AGENT_SHA256_ARM64 не действует на amd64" "$(printf 'a%.0s' {1..64})" \
@@ -127,7 +127,7 @@ echo "== install.sh: сборка образа =="
 new_root; fake_teleport 18.10.0
 out="$(AGENT_SHA256="$DEB_SHA" install_sh 2>&1)"; rc=$?
 eq "Teleport уже стоит, пакет по пину — код 0" 0 "$rc"
-eq "скачан только пакет, с GitHub" "$GH/v3.0.0/$DEB" "$(urls)"
+eq "скачан только пакет, с GitHub" "$GH/v3.0.1/$DEB" "$(urls)"
 eq "dpkg -i — тот самый файл" "$DEB $DEB_SHA" "$(installed)"
 check_not "apt-get не звался" test -e "$FAKE/apt.log"
 check "подсказка про join" grep -q 'bisquite-teleport join' <<< "$out"
@@ -139,7 +139,7 @@ check "пин по умолчанию — текст про sha256" grep -q 'sha
 eq "пин не совпал — dpkg не звался" "" "$(installed)"
 
 new_root; fake_teleport 18.10.0
-out="$(AGENT_VERSION=3.0.1 install_sh 2>&1)"; rc=$?
+out="$(AGENT_VERSION=3.0.2 install_sh 2>&1)"; rc=$?
 check "другая версия без суммы — отказ" test "$rc" -ne 0
 check "другая версия без суммы — текст" grep -q 'задайте AGENT_SHA256' <<< "$out"
 eq "другая версия без суммы — сеть не трогалась" "" "$(urls)"
@@ -183,7 +183,7 @@ eq "Teleport с CDN и пакет — код 0" 0 "$rc"
 eq "Teleport с CDN: сумма, tarball, пакет" \
     "https://cdn.teleport.dev/teleport-v18.10.0-linux-amd64-bin.tar.gz.sha256
 https://cdn.teleport.dev/teleport-v18.10.0-linux-amd64-bin.tar.gz
-$GH/v3.0.0/$DEB" "$(urls)"
+$GH/v3.0.1/$DEB" "$(urls)"
 check "бинарь teleport установлен" grep -q 'v18.10.0' <<< "$("$ROOT/usr/local/bin/teleport" version)"
 eq "пакет установлен после Teleport" "$DEB $DEB_SHA" "$(installed)"
 
@@ -191,7 +191,7 @@ new_root; fake_tarball 18.10.0
 TELEPORT_SHA256="$TB_SHA" TELEPORT_MIRROR=https://binaries.example.org AGENT_SHA256="$DEB_SHA" install_sh >/dev/null 2>&1
 eq "Teleport с зеркала по пину — без .sha256 с CDN" \
     "https://binaries.example.org/binaries/teleport/18.10.0/teleport-v18.10.0-linux-amd64-bin.tar.gz
-$GH/v3.0.0/$DEB" "$(urls)"
+$GH/v3.0.1/$DEB" "$(urls)"
 
 new_root; fake_tarball 18.10.0
 out="$(TELEPORT_SHA256="$(printf '0%.0s' {1..64})" AGENT_SHA256="$DEB_SHA" install_sh 2>&1)"; rc=$?
@@ -216,7 +216,7 @@ old_robot(){
 old_robot
 out="$(AGENT_SHA256="$DEB_SHA" update_sh 2>&1)"; rc=$?
 eq "update.sh — код 0" 0 "$rc"
-eq "update.sh: только пакет, Teleport не скачивался" "$GH/v3.0.0/$DEB" "$(urls)"
+eq "update.sh: только пакет, Teleport не скачивался" "$GH/v3.0.1/$DEB" "$(urls)"
 eq "update.sh: dpkg -i пакета" "$DEB $DEB_SHA" "$(installed)"
 check "update.sh: агент 18.6.8 не тронут" grep -q 'v18.6.8' <<< "$("$ROOT/usr/local/bin/teleport" version)"
 check "update.sh: сказано, что было расширение 2.x" grep -q 'было: расширение 2.x' <<< "$out"

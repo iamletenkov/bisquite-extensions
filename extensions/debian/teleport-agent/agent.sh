@@ -6,7 +6,7 @@
 # https://github.com/iamletenkov/bisquite-teleport-agent
 #
 # Parameters (environment):
-#   AGENT_VERSION        3.0.0     package version
+#   AGENT_VERSION        3.0.1     package version
 #   AGENT_SHA256         (pinned)  sha256 of the .deb; the pin below covers
 #                                  the default version, any other needs it
 #   AGENT_SHA256_<ARCH>  (empty)   per dpkg architecture (AMD64, ARM64),
@@ -21,9 +21,9 @@
 agent_log_info(){ >&2 echo "teleport-agent: $*"; }
 agent_log_error(){ >&2 echo "teleport-agent: ОШИБКА: $*"; }
 
-agent_default_version(){ echo 3.0.0; }
-# sha256 of bisquite-teleport-agent_3.0.0_all.deb (reproducible build).
-agent_default_sha256(){ echo 16f8579d87bb0e6482f7230e8001721cbec0da53913bdaf13ea9e74f0142af6e; }
+agent_default_version(){ echo 3.0.1; }
+# sha256 of bisquite-teleport-agent_3.0.1_all.deb (GitHub release v3.0.1).
+agent_default_sha256(){ echo 7e53e5bba94b1d4d2316fceeeea504c62c7b4414c0e519890150d833d9124124; }
 agent_deb_name(){ echo "bisquite-teleport-agent_$1_all.deb"; }
 # agent_url <version> <url> <mirror>
 agent_url(){

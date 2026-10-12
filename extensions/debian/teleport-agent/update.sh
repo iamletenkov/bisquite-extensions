@@ -10,7 +10,7 @@
 #
 #   sudo bash <dir>/update.sh                          from the GitHub release
 #   sudo AGENT_MIRROR=https://<portal>/dist/teleport bash <dir>/update.sh
-#   sudo AGENT_DEB=./bisquite-teleport-agent_3.0.0_all.deb bash <dir>/update.sh
+#   sudo AGENT_DEB=./bisquite-teleport-agent_3.0.1_all.deb bash <dir>/update.sh
 #
 # A robot of teleport-agent 2.x moves onto the package here (its postinst:
 # unit copies out of /etc/systemd/system, enablement kept, the CLI link
