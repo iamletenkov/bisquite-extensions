@@ -132,7 +132,7 @@ sources:
   - name: core
     type: git
     url: https://github.com/iamletenkov/bisquite-extensions.git
-    ref: v1.1.0
+    ref: v2.0.0
   - name: lab
     type: path
     path: /srv/lab-extensions

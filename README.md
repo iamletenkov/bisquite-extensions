@@ -218,7 +218,7 @@ sources:
   - name: core
     type: git
     url: https://github.com/iamletenkov/bisquite-extensions.git
-    ref: v1.1.0                  # ветка, тег или коммит
+    ref: v2.0.0                  # ветка, тег или коммит
   - name: lab
     type: path
     path: /srv/lab-extensions    # только абсолютный путь
@@ -256,7 +256,7 @@ bs extension new my-ext  # каркас нового расширения (вн�
 ```yaml
 variables:
   EXT_REPO: https://github.com/iamletenkov/bisquite-extensions.git
-  EXT_VERSION: v1.1.0
+  EXT_VERSION: v2.0.0
 before_script:
   - rm -rf bisquite-extensions
   - git clone --depth 1 --branch "$EXT_VERSION" "$EXT_REPO"
