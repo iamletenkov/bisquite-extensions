@@ -1,6 +1,12 @@
-name: Check
+name: CI and Release
 
-# Единственный job репозитория: он гоняет tools/check.sh — валидацию
+# Выпуск — release-please, как в bisquite: на main после проверок он ведёт
+# PR «release X.Y.Z» (CHANGELOG.md); слияние этого PR создаёт тег vX.Y.Z и
+# опубликованный релиз с заметками. Файлов к релизу нет: версия набора
+# расширений — сам тег, его пинят `ref` источника и EXT_VERSION. Теги руками
+# не ставят.
+#
+# Job проверок гоняет tools/check.sh — валидацию
 # манифестов extension.yaml (сверки копий lib/ больше нет: копий нет, lib/
 # доставляет в гостя сама сборка).
 #
@@ -23,25 +29,28 @@ on:
       - "**"
   workflow_dispatch:
 
+# По умолчанию — только чтение; запись — только у job'а release-please.
 permissions:
   contents: read
 
+# Отменять устаревший прогон можно только на PR: на main отмена посреди
+# release-please оставила бы релиз недоделанным.
 concurrency:
-  group: check-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
     name: check.sh
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       # PyYAML на образе раннера присутствует, но это деталь образа, а не
       # контракт: ставим явно, чтобы обновление образа не выключило половину
       # проверки молча (validate-extensions.py на отсутствие yaml отвечает
       # кодом 2 и внятным сообщением, но проверять он в этом случае перестаёт).
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
@@ -53,3 +62,20 @@ jobs:
       # если первая упала, — в логе видны все ошибки, а не первая.
       - name: Run repository checks
         run: tools/check.sh
+
+  release-please:
+    name: Release Please
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Release Please
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          config-file: .github/release_please/release-please-config.json
+          manifest-file: .github/release_please/.release-please-manifest.json
+          token: ${{ secrets.GITHUB_TOKEN }}

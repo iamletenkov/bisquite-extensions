@@ -23,7 +23,7 @@ extensions/
 lib/                         # общий код; сборка доставляет его в гостя (контракт)
                              #   bisquite-conf — библиотека и CLI настроек, knobs/ — общие схемы
 tools/                       # check.sh, validate-extensions.py, test-conf.sh, new-extension.sh
-.github/workflows/check.yml  # CI: гоняет tools/check.sh на push и pull request
+.github/workflows/ci-release.yml  # CI: tools/check.sh на push и PR, выпуск — release-please
 docs/extensions.md           # конвенция целиком: манифест, фазы, способности
 ```
 
@@ -154,7 +154,7 @@ tools/new-extension.sh <имя>  # каркас нового расширени�
 предоставляется, что в графе нет циклов и что `conflicts` симметричны.
 
 **Проверки автоматические.** `tools/check.sh` гоняет GitHub Actions на каждый
-push и pull request — `.github/workflows/check.yml`. Локально перед пушем это
+push и pull request — `.github/workflows/ci-release.yml`. Локально перед пушем это
 та же одна команда, и запускать её руками полезно ровно затем, чтобы не узнать
 об ошибке из красного CI:
 
@@ -266,7 +266,21 @@ before_script:
 
 Версия набора расширений — git-тег этого репозитория. Через `EXTENSION` его
 пинит поле `ref` источника в `extensions.yaml`, файлы OpenWrt через `UPLOAD` —
-тег чекаута (`EXT_VERSION`). Тегай по semver.
+тег чекаута (`EXT_VERSION`). Теги — semver, их ставит release-please, руками
+не тегают.
+
+### Как выпустить версию
+
+Workflow `CI and Release`, конфиг — `.github/release_please/`:
+
+1. Сливаешь в `main` коммиты по [Conventional Commits](https://www.conventionalcommits.org/ru/):
+   `fix:` поднимает patch, `feat:` — minor, `!` или `BREAKING CHANGE:` — major;
+   `docs:`, `ci:`, `chore:` версию не трогают.
+2. После проверок на `main` release-please открывает (и дальше обновляет)
+   PR «chore(main): release X.Y.Z» с секцией `CHANGELOG.md`.
+3. Владелец сливает этот PR — release-please создаёт тег `vX.Y.Z` и
+   опубликованный релиз с заметками. Файлов к релизу нет: потребителю нужен
+   только тег.
 
 `ref: main` неподвижной точкой не является: ветка мутабельна, а git-тег
 переставляется `git tag -f`. Что фактически легло в кеш, записывает
