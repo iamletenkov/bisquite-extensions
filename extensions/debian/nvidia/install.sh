@@ -1,262 +1,343 @@
 #!/usr/bin/env bash
-# Скрипт установки драйверов NVIDIA для Debian 12/13 и Ubuntu 20.04/22.04/24.04
-
+# NVIDIA driver of a pinned branch for the kernel(s) OF THE IMAGE.
+#
+# Runs inside virt-customize, i.e. inside the libguestfs appliance: `uname -r`
+# is the appliance kernel, not the image kernel. Every kernel-specific step —
+# headers, prebuilt modules, DKMS, initramfs, the final modinfo check — takes
+# its kernel from /lib/modules + /boot of the image, never from uname.
+#
+# Parameters (environment, passed by EXTENSION as is):
+#   NVIDIA_DRIVER_VERSION   driver branch, default 580
+#   NVIDIA_KERNEL_MODULES   open | proprietary, default open
+#                           (Blackwell — RTX 50xx — works ONLY with open)
+#   NVIDIA_SOURCE           Ubuntu: archive | ppa, default archive;
+#                           Debian: archive only (= NVIDIA CUDA repository)
+#
+# Sources, measured 2026-10-14:
+#   Ubuntu 22.04/24.04  archive (restricted): nvidia-driver-<br>[-open] plus,
+#                       when they match the image kernel, Canonical's prebuilt
+#                       signed linux-modules-nvidia-<br>[-open]-<kernel>;
+#                       otherwise DKMS against linux-headers-<kernel>.
+#   Debian 12/13        NVIDIA CUDA repository (debian12 / debian13): Debian's
+#                       own non-free carries only 535 (bookworm) and 550
+#                       (trixie). The CUDA repository has 580 for debian12;
+#                       debian13 starts at 590. A branch the repository does
+#                       not publish is a loud error, never a fallback.
+#
+# No `ubuntu-drivers autoinstall` and no silent fallback to older branches:
+# the image either gets exactly the requested branch or the build fails.
 set -euo pipefail
 
-# Цвета для вывода
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+log_info(){ >&2 echo -e "${GREEN}[INFO]${NC} $*"; }
+log_warn(){ >&2 echo -e "${YELLOW}[WARN]${NC} $*"; }
+log_error(){ >&2 echo -e "${RED}[ERROR]${NC} $*"; }
+die(){ log_error "$*"; exit 1; }
 
-# Функция логирования (всегда пишем в stderr, чтобы не засорять stdout при пайпинге)
-log_info() {
-    >&2 echo -e "${GREEN}[INFO]${NC} $*"
-}
-
-log_warn() {
-    >&2 echo -e "${YELLOW}[WARN]${NC} $*"
-}
-
-log_error() {
-    >&2 echo -e "${RED}[ERROR]${NC} $*"
-}
-
-# Функция для выполнения apt команд с retry логикой
-apt_retry() {
-    local max=5
-    local n=1
+apt_retry(){
+    local max=5 n=1 d
     while true; do
-        if "$@"; then
-            return 0
-        fi
-        if (( n >= max )); then
-            return 1
-        fi
-        local delay=$((n * 2))
-        log_warn "apt command failed, retry in ${delay}s... ($n/$max)"
-        sleep "$delay"
-        n=$((n + 1))
+        if "$@"; then return 0; fi
+        if (( n >= max )); then return 1; fi
+        d=$(( n * 2 )); log_warn "apt не отработал, повтор через ${d}s ($n/$max)"
+        sleep "$d"; n=$(( n + 1 ))
     done
 }
 
-# Определение ОС
-detect_os() {
-    if ! command -v lsb_release >/dev/null 2>&1; then
-        log_info "lsb_release not found, installing lsb-release..."
-        apt_retry apt-get update
-        apt_retry apt-get install -y --no-install-recommends lsb-release
+export DEBIAN_FRONTEND=noninteractive
+APT_OPTS=(-q -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+
+# --- parameters ---------------------------------------------------------------
+# Local names on purpose: defaults are never assigned to the exported ones.
+BRANCH="${NVIDIA_DRIVER_VERSION:-580}"
+MODULES="${NVIDIA_KERNEL_MODULES:-open}"
+SOURCE="${NVIDIA_SOURCE:-archive}"
+
+[[ "$BRANCH" =~ ^[0-9]{3,4}$ ]] \
+    || die "NVIDIA_DRIVER_VERSION=$BRANCH: ожидается номер ветки драйвера (например, 580), а не полная версия"
+case "$MODULES" in
+    open) ;;
+    proprietary)
+        log_warn "NVIDIA_KERNEL_MODULES=proprietary: карты Blackwell (RTX 50xx, в т.ч. RTX 5060) и новее"
+        log_warn "с закрытыми модулями НЕ работают — для них нужен open" ;;
+    *) die "NVIDIA_KERNEL_MODULES=$MODULES: допустимо open или proprietary" ;;
+esac
+case "$SOURCE" in
+    archive|ppa) ;;
+    *) die "NVIDIA_SOURCE=$SOURCE: допустимо archive или ppa" ;;
+esac
+
+# --- system -------------------------------------------------------------------
+# shellcheck disable=SC1091
+. /etc/os-release
+DISTRO_ID="${ID:-}"
+DISTRO_VERSION="${VERSION_ID:-}"
+ARCH="$(dpkg --print-architecture)"
+[[ "$ARCH" == amd64 ]] || die "расширение nvidia рассчитано на amd64, а образ — $ARCH"
+
+# --- kernels of the image -----------------------------------------------------
+# A kernel counts when both its modules directory and its image are present:
+# a bare /lib/modules/<v> (leftover of a removed kernel) cannot boot.
+KERNELS=()
+for d in /lib/modules/*/; do
+    [[ -d "$d" ]] || continue
+    k="${d%/}"; k="${k##*/}"
+    [[ -e "/boot/vmlinuz-$k" || -e "/lib/modules/$k/vmlinuz" ]] || continue
+    KERNELS+=("$k")
+done
+(( ${#KERNELS[@]} )) || die "в образе не найдено ядро: нет пары /lib/modules/<версия> + /boot/vmlinuz-<версия>"
+log_info "система $DISTRO_ID $DISTRO_VERSION; ядро(а) образа: ${KERNELS[*]} (ядро appliance $(uname -r) не используется)"
+log_info "ветка $BRANCH, модули $MODULES, источник $SOURCE"
+
+ensure_tools(){
+    local missing=()
+    command -v curl >/dev/null 2>&1 || missing+=(curl)
+    command -v gpg  >/dev/null 2>&1 || missing+=(gpg)
+    [[ -e /etc/ssl/certs/ca-certificates.crt ]] || missing+=(ca-certificates)
+    if (( ${#missing[@]} )); then
+        apt_retry apt-get "${APT_OPTS[@]}" install --no-install-recommends "${missing[@]}"
     fi
-
-    OS_ID=$(lsb_release -si)
-    OS_VERSION=$(lsb_release -sr)
-    OS_CODENAME=$(lsb_release -sc)
-
-    log_info "Detected OS: $OS_ID $OS_VERSION ($OS_CODENAME)"
+    install -d -m 0755 /etc/apt/keyrings
 }
 
-# Добавление репозиториев для Ubuntu
-setup_ubuntu_repos() {
-    local version="$1"
-    local codename=""
+# fetch_key URL FINGERPRINT DEST — the key is trusted only if its primary
+# fingerprint is the one pinned here.
+fetch_key(){
+    local url="$1" fpr="$2" dest="$3" tmp got
+    tmp="$(mktemp)"
+    curl -fsSL --retry 5 --retry-delay 2 "$url" -o "$tmp" || { rm -f "$tmp"; die "ключ не скачался: $url"; }
+    got="$(gpg --show-keys --with-colons "$tmp" 2>/dev/null | awk -F: '$1=="fpr" && !f {print $10; f=1}')"
+    if [[ "$got" != "$fpr" ]]; then
+        rm -f "$tmp"
+        die "отпечаток ключа $url — [$got], ожидался [$fpr]"
+    fi
+    install -m 0644 "$tmp" "$dest"
+    rm -f "$tmp"
+}
 
-    case "$version" in
-        20.04) codename="focal" ;;
-        22.04) codename="jammy" ;;
-        24.04) codename="noble" ;;
-        *) log_error "Unsupported Ubuntu version: $version"; exit 1 ;;
+# source_present ERE — a non-commented one-line or deb822 entry already
+# points at this repository. Adding a second entry with another Signed-By
+# makes apt refuse the WHOLE source list (lesson of the docker extension).
+source_present(){
+    grep -rqsE "^[[:space:]]*deb[[:space:]].*$1" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null \
+        || grep -rqsE "^[[:space:]]*URIs:.*$1" /etc/apt/sources.list.d/ 2>/dev/null
+}
+
+candidate(){ apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/ && !f {print $2; f=1}'; }
+have_pkg(){ local c; c="$(candidate "$1")"; [[ -n "$c" && "$c" != "(none)" ]]; }
+
+headers_for_kernels(){
+    local k
+    HEADERS=()
+    for k in "${KERNELS[@]}"; do
+        have_pkg "linux-headers-$k" || die "нет пакета linux-headers-$k — DKMS не соберёт модуль под ядро образа"
+        HEADERS+=("linux-headers-$k")
+    done
+}
+
+# --- Ubuntu -------------------------------------------------------------------
+PPA_FPR=2388FF3BE10A76F638F80723FCAE110B1118213C
+
+setup_ppa(){
+    local suite="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
+    if source_present 'ppa\.launchpad(content)?\.net/graphics-drivers/ppa'; then
+        log_info "PPA graphics-drivers уже подключён в образе — свой не добавляю"
+        return 0
+    fi
+    ensure_tools
+    fetch_key "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x$PPA_FPR" \
+        "$PPA_FPR" /etc/apt/keyrings/graphics-drivers-ppa.asc
+    cat > /etc/apt/sources.list.d/graphics-drivers-ppa.sources <<EOF
+Types: deb
+URIs: https://ppa.launchpadcontent.net/graphics-drivers/ppa/ubuntu
+Suites: $suite
+Components: main
+Signed-By: /etc/apt/keyrings/graphics-drivers-ppa.asc
+EOF
+    apt_retry apt-get "${APT_OPTS[@]}" update
+}
+
+# The prebuilt route is taken only when apt can install it WITHOUT pulling a
+# new kernel or DKMS: the flavour meta (linux-modules-nvidia-<br>-generic) is
+# what satisfies the driver's dependency on nvidia-dkms-*, and it follows the
+# newest kernel of the archive. If the image kernel is older, the meta would
+# drag a second kernel in — then DKMS against the image kernel is the honest
+# choice.
+ubuntu_prebuilt_set(){
+    local sfx="$1" k flavour pkgs=() metas=() sim
+    for k in "${KERNELS[@]}"; do
+        if ! apt-cache show "linux-modules-nvidia-${BRANCH}${sfx}-$k" >/dev/null 2>&1; then
+            log_info "предсобранного модуля под $k в архиве нет"
+            return 1
+        fi
+        pkgs+=("linux-modules-nvidia-${BRANCH}${sfx}-$k")
+        flavour="$(sed -E 's/^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+-//' <<<"$k")"
+        [[ " ${metas[*]} " == *" linux-modules-nvidia-${BRANCH}${sfx}-$flavour "* ]] \
+            || metas+=("linux-modules-nvidia-${BRANCH}${sfx}-$flavour")
+    done
+    if ! sim="$(apt-get install -s -q "nvidia-driver-${BRANCH}${sfx}" "${pkgs[@]}" "${metas[@]}" 2>&1)"; then
+        log_info "предсобранные модули не сходятся с драйвером по версии"
+        return 1
+    fi
+    if grep -qE '^Inst (linux-image-|dkms |nvidia-dkms-)' <<<"$sim"; then
+        log_info "предсобранный путь потянул бы новое ядро или DKMS: ядро образа не последнее в архиве"
+        return 1
+    fi
+    PREBUILT=("${pkgs[@]}" "${metas[@]}")
+}
+
+install_ubuntu(){
+    case "$DISTRO_VERSION" in
+        22.04|24.04) ;;
+        *) die "Ubuntu $DISTRO_VERSION не поддерживается: только 22.04 и 24.04" ;;
     esac
+    local sfx="" driver
+    [[ "$MODULES" == open ]] && sfx="-open"
+    driver="nvidia-driver-${BRANCH}${sfx}"
 
-    log_info "Setting up repositories for Ubuntu $version ($codename)"
+    apt_retry apt-get "${APT_OPTS[@]}" update
+    if [[ "$SOURCE" == ppa ]]; then setup_ppa; fi
 
-    # Проверяем, не добавлен ли уже репозиторий
-    if grep -q "graphics-drivers/ppa" /etc/apt/sources.list.d/*.list 2>/dev/null; then
-        log_info "Graphics-drivers PPA repository already configured"
+    if ! have_pkg "$driver"; then
+        if [[ "$SOURCE" == archive ]]; then
+            die "в архиве Ubuntu $DISTRO_VERSION нет пакета $driver (нужен компонент restricted). Ветка из PPA graphics-drivers: NVIDIA_SOURCE=ppa"
+        fi
+        die "пакета $driver нет ни в архиве Ubuntu $DISTRO_VERSION, ни в PPA graphics-drivers"
+    fi
+    log_info "$driver: кандидат $(candidate "$driver")"
+
+    PREBUILT=()
+    if [[ "$SOURCE" == archive ]] && ubuntu_prebuilt_set "$sfx"; then
+        log_info "ставлю предсобранные подписанные модули Canonical: ${PREBUILT[*]}"
+        apt_retry apt-get "${APT_OPTS[@]}" install "${PREBUILT[@]}" "$driver"
         return 0
     fi
 
-    log_info "Adding graphics-drivers PPA repository for Ubuntu $version"
-    cat > /etc/apt/sources.list.d/graphics-drivers-ppa-${codename}.list <<EOF
-deb http://ppa.launchpad.net/graphics-drivers/ppa/ubuntu ${codename} main
-EOF
-
-    # Добавляем ключ репозитория (современный способ)
-    log_info "Adding PPA GPG key..."
-    if command -v curl >/dev/null 2>&1 && command -v gpg >/dev/null 2>&1; then
-        # Скачиваем ключ напрямую и добавляем в trusted.gpg.d
-        if curl -fsSL https://keyserver.ubuntu.com/pks/lookup?op=get\&search=0x1118213C | gpg --dearmor > /etc/apt/trusted.gpg.d/graphics-drivers-ppa.gpg 2>/dev/null; then
-            chmod 644 /etc/apt/trusted.gpg.d/graphics-drivers-ppa.gpg
-            log_info "GPG key added successfully"
-        else
-            log_warn "Could not add GPG key via curl, apt will try to fetch it automatically"
-        fi
-    else
-        log_warn "curl or gpg not found, apt will try to fetch GPG key automatically"
-    fi
+    headers_for_kernels
+    log_info "DKMS: модуль собирается под ${KERNELS[*]}"
+    # Headers first: the DKMS postinst builds for every kernel that has them.
+    apt_retry apt-get "${APT_OPTS[@]}" install "${HEADERS[@]}"
+    apt_retry apt-get "${APT_OPTS[@]}" install "nvidia-dkms-${BRANCH}${sfx}" "$driver"
 }
 
-# Добавление репозиториев для Debian
-setup_debian_repos() {
-    local version="$1"
-    local codename=""
+# --- Debian -------------------------------------------------------------------
+# Each CUDA repository has its own signing key (measured 2026-10-14 against
+# Release.gpg): debian12 — 3bf863cc.pub, debian13 — 8793F200.pub.
+CUDA_KEY_DEBIAN12=(3bf863cc.pub EB693B3035CD5710E231E123A4B469963BF863CC)
+CUDA_KEY_DEBIAN13=(8793F200.pub 02182E60104FCDC26EAE1B8597A5D4CB8793F200)
 
-    case "$version" in
-        12) codename="bookworm" ;;
-        13) codename="trixie" ;;
-        *) log_error "Unsupported Debian version: $version"; exit 1 ;;
+install_debian(){
+    [[ "$SOURCE" == archive ]] \
+        || die "NVIDIA_SOURCE=$SOURCE: PPA бывает только у Ubuntu; на Debian источник — репозиторий CUDA NVIDIA (archive)"
+    local repo meta pin cand avail key=()
+    case "$DISTRO_VERSION" in
+        12) repo=debian12; key=("${CUDA_KEY_DEBIAN12[@]}") ;;
+        13) repo=debian13; key=("${CUDA_KEY_DEBIAN13[@]}") ;;
+        *) die "Debian $DISTRO_VERSION не поддерживается: только 12 и 13" ;;
     esac
+    local base="https://developer.download.nvidia.com/compute/cuda/repos/$repo/x86_64"
 
-    log_info "Setting up repositories for Debian $version ($codename)"
-
-    # Проверяем, добавлены ли уже contrib и non-free
-    if grep -qE "(contrib|non-free)" /etc/apt/sources.list 2>/dev/null; then
-        if grep -qE "contrib.*non-free.*non-free-firmware" /etc/apt/sources.list 2>/dev/null; then
-            log_info "Contrib and non-free repositories already configured"
-            return 0
-        fi
-    fi
-
-    log_info "Adding contrib and non-free repositories for Debian $version"
-
-    # Обновляем существующие строки в sources.list
-    # Обрабатываем разные форматы строк (с http:// или https://, с комментариями и без)
-    sed -i "s|deb\(-src\)\? http\(s\)\?://deb.debian.org/debian/ ${codename} main|& contrib non-free non-free-firmware|g" /etc/apt/sources.list
-    sed -i "s|deb\(-src\)\? http\(s\)\?://deb.debian.org/debian/ ${codename}-updates main|& contrib non-free non-free-firmware|g" /etc/apt/sources.list
-    sed -i "s|deb\(-src\)\? http\(s\)\?://security.debian.org/debian-security ${codename}-security main|& contrib non-free non-free-firmware|g" /etc/apt/sources.list
-
-    # Если sed не нашёл строки (возможно другой формат), добавляем вручную
-    if ! grep -qE "contrib.*non-free" /etc/apt/sources.list 2>/dev/null; then
-        log_warn "Could not modify existing sources.list, adding new entries"
-        {
-            echo "deb http://deb.debian.org/debian ${codename} main contrib non-free non-free-firmware"
-            echo "deb http://deb.debian.org/debian ${codename}-updates main contrib non-free non-free-firmware"
-            echo "deb http://security.debian.org/debian-security ${codename}-security main contrib non-free non-free-firmware"
-        } >> /etc/apt/sources.list
-    fi
-}
-
-# Установка драйверов для Ubuntu
-install_ubuntu_drivers() {
-    local version="$1"
-    log_info "Installing NVIDIA drivers for Ubuntu $version"
-
-    # Проверяем наличие команды ubuntu-drivers и устанавливаем пакет, если команда отсутствует
-    if ! command -v ubuntu-drivers >/dev/null 2>&1; then
-        log_info "Command 'ubuntu-drivers' not found. Installing 'ubuntu-drivers-common'..."
-        apt_retry apt-get install -y ubuntu-drivers-common
-    fi
-
-    log_info "Auto-detecting and installing recommended NVIDIA drivers..."
-    DEBIAN_FRONTEND=noninteractive ubuntu-drivers autoinstall || {
-        log_warn "ubuntu-drivers autoinstall failed, trying manual installation"
-        apt_retry apt-get install -y nvidia-driver-535 || apt_retry apt-get install -y nvidia-driver-525 || apt_retry apt-get install -y nvidia-driver-470
-    }
-}
-
-# Установка драйверов для Debian
-install_debian_drivers() {
-    local version="$1"
-    log_info "Installing NVIDIA drivers for Debian $version"
-
-    # Пытаемся установить nvidia-detect для определения подходящего драйвера (опционально)
-    if apt_retry apt-get install -y nvidia-detect 2>/dev/null; then
-        log_info "Detecting recommended NVIDIA driver..."
-        if command -v nvidia-detect >/dev/null 2>&1; then
-            nvidia-detect || true
-        fi
+    apt_retry apt-get "${APT_OPTS[@]}" update
+    if source_present "developer\.download\.nvidia\.com/compute/cuda/repos/$repo/x86_64"; then
+        log_info "репозиторий CUDA NVIDIA ($repo) уже подключён в образе — свой не добавляю"
     else
-        log_warn "nvidia-detect not available, proceeding with default nvidia-driver installation"
+        ensure_tools
+        fetch_key "$base/${key[0]}" "${key[1]}" /etc/apt/keyrings/nvidia-cuda.asc
+        cat > /etc/apt/sources.list.d/nvidia-cuda.sources <<EOF
+Types: deb
+URIs: $base/
+Suites: /
+Signed-By: /etc/apt/keyrings/nvidia-cuda.asc
+EOF
     fi
+    apt_retry apt-get "${APT_OPTS[@]}" update
 
-    # Установка рекомендованных драйверов и необходимых пакетов для Debian
-    log_info "Installing NVIDIA driver and required packages..."
+    pin="nvidia-driver-pinning-$BRANCH"
+    if ! apt-cache show "$pin" >/dev/null 2>&1; then
+        avail="$(apt-cache pkgnames nvidia-driver-pinning- 2>/dev/null | grep -E '^nvidia-driver-pinning-[0-9]+$' \
+                 | sed 's/^nvidia-driver-pinning-//' | sort -n | tr '\n' ' ' || true)"
+        die "ветки $BRANCH нет в репозитории CUDA NVIDIA для $repo; есть ветки: ${avail:-никаких}"
+    fi
+    # The pinning package is NVIDIA's own way to hold every driver package on
+    # one branch (Pin-Priority 1000 on "<br>*"), for this install and for
+    # every later apt upgrade on the device.
+    apt_retry apt-get "${APT_OPTS[@]}" install "$pin"
 
-    # В chroot окружении uname -r может вернуть ядро хоста (Proxmox),
-    # поэтому используем метапакет linux-headers-amd64, который автоматически
-    # установит заголовки для ядра гостевой системы
-    log_info "Using linux-headers-amd64 meta-package for kernel headers"
+    if [[ "$MODULES" == open ]]; then meta=nvidia-open; else meta=cuda-drivers; fi
+    cand="$(candidate "$meta")"
+    [[ "$cand" == "$BRANCH".* ]] || die "$meta после закрепления ветки $BRANCH: кандидат [$cand]"
+    log_info "$meta: кандидат $cand"
 
-    DEBIAN_FRONTEND=noninteractive apt_retry apt-get install -y \
-        nvidia-driver \
-        linux-headers-amd64 \
-        build-essential \
-        dkms
+    headers_for_kernels
+    apt_retry apt-get "${APT_OPTS[@]}" install "${HEADERS[@]}"
+    apt_retry apt-get "${APT_OPTS[@]}" install "$meta"
 }
 
-# Блокировка nouveau и обновление initramfs
-blacklist_nouveau() {
-    log_info "Blacklisting nouveau driver..."
+# --- run ----------------------------------------------------------------------
+case "$DISTRO_ID" in
+    ubuntu) install_ubuntu ;;
+    debian) install_debian ;;
+    *) die "расширение nvidia рассчитано на ubuntu и debian, а здесь ID=$DISTRO_ID" ;;
+esac
 
-    # Создаем файл блокировки nouveau
-    cat > /etc/modprobe.d/blacklist-nouveau.conf <<'EOF'
+# The DKMS postinst builds for the kernels it finds, and in the appliance it
+# also tries `uname -r`, which has no headers. Build for each image kernel
+# explicitly; a no-op when the module is already built.
+if command -v dkms >/dev/null 2>&1 && [[ "$(dkms status 2>/dev/null)" == *nvidia* ]]; then
+    for k in "${KERNELS[@]}"; do
+        dkms autoinstall -k "$k" || die "dkms не собрал модуль под $k"
+    done
+fi
+
+# --- nouveau ------------------------------------------------------------------
+log_info "блокирую nouveau"
+cat > /etc/modprobe.d/blacklist-nouveau.conf <<'EOF'
+# bisquite nvidia: nouveau and the NVIDIA driver cannot share a GPU
 blacklist nouveau
 options nouveau modeset=0
 EOF
 
-    # Также добавляем в blacklist.conf если он существует
-    if [[ -f /etc/modprobe.d/blacklist.conf ]]; then
-        if ! grep -q "blacklist nouveau" /etc/modprobe.d/blacklist.conf; then
-            echo "blacklist nouveau" >> /etc/modprobe.d/blacklist.conf
-        fi
-    fi
-
-    # Обновляем initramfs для применения блокировки
-    log_info "Updating initramfs to apply nouveau blacklist..."
-    if command -v update-initramfs >/dev/null 2>&1; then
-        update-initramfs -u -k all || {
-            log_warn "Failed to update initramfs, but continuing..."
-        }
-    elif command -v dracut >/dev/null 2>&1; then
-        dracut --force || {
-            log_warn "Failed to update initramfs with dracut, but continuing..."
-        }
+command -v update-initramfs >/dev/null 2>&1 || die "нет update-initramfs: blacklist nouveau не попадёт в initramfs"
+for k in "${KERNELS[@]}"; do
+    if [[ -e "/boot/initrd.img-$k" ]]; then
+        update-initramfs -u -k "$k" || die "update-initramfs -u -k $k не отработал"
     else
-        log_warn "No initramfs update tool found, nouveau may still load"
+        update-initramfs -c -k "$k" || die "update-initramfs -c -k $k не отработал"
     fi
+done
 
-    log_info "Nouveau driver blacklisted successfully"
-}
-
-# Основная функция
-main() {
-    log_info "Starting NVIDIA drivers installation..."
-
-    detect_os
-
-    # Обновляем списки пакетов
-    log_info "Updating package lists..."
-    apt_retry apt-get update
-
-    # Настройка репозиториев и установка драйверов в зависимости от ОС
-    if [[ "$OS_ID" == "Ubuntu" ]]; then
-        if [[ "$OS_VERSION" == "20.04" || "$OS_VERSION" == "22.04" || "$OS_VERSION" == "24.04" ]]; then
-            setup_ubuntu_repos "$OS_VERSION"
-            apt_retry apt-get update
-            install_ubuntu_drivers "$OS_VERSION"
-        else
-            log_error "Supported Ubuntu versions: 20.04, 22.04, 24.04. Detected: $OS_VERSION"
-            exit 1
+# The initramfs trigger of the driver packages runs `update-initramfs -u`,
+# which resolves the kernel by `uname -r` — the appliance — and leaves an
+# initrd for a kernel the image does not have (measured: 23 MB in
+# /boot/initrd.img-<appliance>). Drop it, but only when that kernel is truly
+# absent from the image.
+APPLIANCE_K="$(uname -r)"
+if [[ ! -e "/boot/vmlinuz-$APPLIANCE_K" && ! -d "/lib/modules/$APPLIANCE_K" ]]; then
+    for f in "/boot/initrd.img-$APPLIANCE_K" "/var/lib/initramfs-tools/$APPLIANCE_K"; do
+        if [[ -f "$f" ]]; then
+            log_info "убираю $f: initramfs ядра appliance, не образа"
+            rm -f -- "$f"
         fi
-    elif [[ "$OS_ID" == "Debian" ]]; then
-        if [[ "$OS_VERSION" == "12" || "$OS_VERSION" == "13" ]]; then
-            setup_debian_repos "$OS_VERSION"
-            log_info "Updating package lists after repository configuration..."
-            apt_retry apt-get update
-            install_debian_drivers "$OS_VERSION"
-        else
-            log_error "Supported Debian versions: 12, 13. Detected: $OS_VERSION"
-            exit 1
-        fi
-    else
-        log_error "Unsupported OS: $OS_ID $OS_VERSION"
-        exit 1
-    fi
+    done
+fi
 
-    # Блокируем nouveau после установки драйверов
-    blacklist_nouveau
+# --- verification -------------------------------------------------------------
+# The userspace library and the kernel module must be one version, or
+# nvidia-smi answers "Driver/library version mismatch".
+LIB="$(find /usr/lib/x86_64-linux-gnu /usr/lib64 -maxdepth 1 -name 'libnvidia-ml.so.*.*' 2>/dev/null | head -n1 || true)"
+[[ -n "$LIB" ]] || die "libnvidia-ml.so.<версия> не найдена: пользовательская часть драйвера не установилась"
+USER_VER="${LIB##*/libnvidia-ml.so.}"
+[[ "$USER_VER" == "$BRANCH".* ]] || die "пользовательская часть драйвера $USER_VER, а запрошена ветка $BRANCH"
 
-    log_info "NVIDIA drivers installation completed successfully"
-    log_warn "Reboot required to apply changes and load NVIDIA drivers"
-}
+if [[ "$MODULES" == open ]]; then WANT_LICENSE="Dual MIT/GPL"; else WANT_LICENSE="NVIDIA"; fi
+for k in "${KERNELS[@]}"; do
+    depmod -a "$k"
+    mod_ver="$(modinfo -k "$k" -F version nvidia 2>/dev/null || true)"
+    [[ -n "$mod_ver" ]] || die "модуля nvidia под ядро образа $k нет (modinfo -k $k nvidia)"
+    [[ "$mod_ver" == "$USER_VER" ]] || die "модуль nvidia под $k — $mod_ver, пользовательская часть — $USER_VER"
+    lic="$(modinfo -k "$k" -F license nvidia)"
+    [[ "$lic" == "$WANT_LICENSE" ]] || die "модуль nvidia под $k — лицензия [$lic], для $MODULES ожидалась [$WANT_LICENSE]"
+    log_info "ядро $k: nvidia $mod_ver ($MODULES) — $(modinfo -k "$k" -n nvidia)"
+done
 
-main "$@"
+log_info "драйвер NVIDIA $USER_VER установлен; nvidia-smi ответит после загрузки машины"

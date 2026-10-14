@@ -1,13 +1,13 @@
 name: nvidia
-version: 1.1.0
+version: 2.0.0
 layout: 2
 family: deb
-# Ветка Debian прибивает метапакет linux-headers-amd64 (install.sh,
-# install_debian_drivers); ветка Ubuntu идёт в graphics-drivers PPA, где
-# arm64 не публикуется.
+# Ubuntu: модули Canonical и PPA graphics-drivers публикуются для amd64;
+# Debian: репозиторий CUDA NVIDIA — каталог x86_64 (install.sh). arm64-серверы
+# (SBSA) не проверялись, Jetson обслуживает nvidia-jetpack.
 arch: [amd64]
-# Только build: configure.sh у расширения нет, ничего на первой загрузке
-# не донастраивается (нужна лишь перезагрузка после установки драйвера).
+# Только build: configure.sh у расширения нет, модуль собирается под ядро
+# образа при сборке; на машине нужна лишь загрузка.
 phase: build
 provides: [gpu-driver-nvidia]
 requires: []
