@@ -120,8 +120,11 @@ apt_retry apt-get "${APT_OPTS[@]}" install "${PKGS[@]}"
 
 # --- Docker runtime -----------------------------------------------------------
 DAEMON_JSON=/etc/docker/daemon.json
+# No daemon.json and a daemon.json without the key are the same thing for
+# dockerd — runc — so both read as "not set": nvidia-ctk creating the file
+# on a fresh image is not a change of the default runtime.
 default_runtime(){
-    [[ -f "$DAEMON_JSON" ]] || { echo "<нет файла>"; return 0; }
+    [[ -f "$DAEMON_JSON" ]] || { echo "<не задан>"; return 0; }
     local v
     v="$(grep -oE '"default-runtime"[[:space:]]*:[[:space:]]*"[^"]*"' "$DAEMON_JSON" | sed -E 's/.*"([^"]*)"$/\1/' || true)"
     echo "${v:-<не задан>}"
