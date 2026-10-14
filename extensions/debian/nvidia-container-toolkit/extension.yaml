@@ -1,0 +1,18 @@
+name: nvidia-container-toolkit
+version: 1.0.0
+layout: 2
+family: deb
+# Репозиторий nvidia.github.io публикует и arm64, но драйвер под этот
+# тулкит — расширение nvidia — только amd64; на Jetson тулкит ставит
+# расширение docker из репозитория L4T. Объявлять arm64 значило бы обещать
+# непроверенное.
+arch: [amd64]
+# Только build: install.sh правит /etc/docker/daemon.json, демон подхватит
+# runtime при первом старте; на первой загрузке донастраивать нечего.
+phase: build
+provides: [nvidia-container-runtime]
+# container-runtime — Docker (расширение docker): install.sh отказывает без
+# dockerd и правит его daemon.json. gpu-driver-nvidia — драйвер (расширение
+# nvidia): install.sh отказывает без libnvidia-ml.so.1.
+requires: [container-runtime, gpu-driver-nvidia]
+conflicts: []
