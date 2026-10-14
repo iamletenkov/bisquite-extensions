@@ -43,7 +43,7 @@ tmp_key="$(mktemp)"
 # gpg needs a home directory; a chroot during the build has no ~/.gnupg and
 # gpg exits 2 with "Fatal: /root/.gnupg: directory does not exist".
 gpg_home="$(mktemp -d)"
-trap 'rm -f "$tmp_key"; rm -r -f -- "$gpg_home"' EXIT
+trap 'gpgconf --homedir "$gpg_home" --kill all >/dev/null 2>&1 || true; rm -f "$tmp_key" "$tmp_key.export"; rm -r -f -- "$gpg_home"' EXIT
 for attempt in 1 2 3 4 5; do
     if curl -fsSL --max-time 60 "$MOZILLA_KEY_URL" -o "$tmp_key"; then
         break
@@ -52,13 +52,28 @@ for attempt in 1 2 3 4 5; do
     sleep $(( attempt * 2 ))
 done
 
-actual_fpr="$(gpg --homedir "$gpg_home" --show-keys --with-colons "$tmp_key" \
-    | awk -F: '$1 == "fpr" { print $10; exit }')"
+# Trust exactly the pinned key: the file must hold ONE primary key with the
+# pinned fingerprint, and the keyring gets `gpg --export` of that key, not
+# the downloaded file — a second key in the same file would otherwise become
+# trusted by apt for this source too.
+if ! gpg --homedir "$gpg_home" --batch --quiet --import "$tmp_key" >/dev/null 2>&1; then
+    log_error "ключ $MOZILLA_KEY_URL не импортируется gpg"
+    exit 1
+fi
+primary_keys="$(gpg --homedir "$gpg_home" --batch --with-colons --list-keys 2>/dev/null | awk -F: '$1 == "pub"' | wc -l)"
+actual_fpr="$(gpg --homedir "$gpg_home" --batch --with-colons --list-keys 2>/dev/null \
+    | awk -F: '$1 == "pub" { p = 1; next } p && $1 == "fpr" { print $10; exit }')"
+if [[ "$primary_keys" != 1 ]]; then
+    log_error "в файле ключа $MOZILLA_KEY_URL — $primary_keys основных ключей, ожидался ровно один ($MOZILLA_KEY_FPR)"
+    exit 1
+fi
 if [[ "$actual_fpr" != "$MOZILLA_KEY_FPR" ]]; then
     log_error "отпечаток ключа '$actual_fpr' не совпал с ожидаемым $MOZILLA_KEY_FPR"
     exit 1
 fi
-install -m 0644 "$tmp_key" "$KEYRING"
+gpg --homedir "$gpg_home" --batch --armor --export "$MOZILLA_KEY_FPR" > "$tmp_key.export"
+[[ -s "$tmp_key.export" ]] || { log_error "не удалось экспортировать ключ $MOZILLA_KEY_FPR"; exit 1; }
+install -m 0644 "$tmp_key.export" "$KEYRING"
 
 echo "deb [signed-by=$KEYRING] https://packages.mozilla.org/apt mozilla main" \
     > /etc/apt/sources.list.d/mozilla.list
