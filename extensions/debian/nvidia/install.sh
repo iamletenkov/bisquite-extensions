@@ -100,19 +100,35 @@ ensure_tools(){
     install -d -m 0755 /etc/apt/keyrings
 }
 
-# fetch_key URL FINGERPRINT DEST — the key is trusted only if its primary
-# fingerprint is the one pinned here.
+# fetch_key URL FINGERPRINT DEST — the key is trusted only if the downloaded
+# file holds exactly ONE primary key and its fingerprint is the one pinned
+# here. DEST receives `gpg --export` of that key from a throwaway GNUPGHOME,
+# never the downloaded file: a second key smuggled into the same file would
+# otherwise become trusted by apt along with the pinned one.
 fetch_key(){
-    local url="$1" fpr="$2" dest="$3" tmp got
-    tmp="$(mktemp)"
-    curl -fsSL --retry 5 --retry-delay 2 "$url" -o "$tmp" || { rm -f "$tmp"; die "ключ не скачался: $url"; }
-    got="$(gpg --show-keys --with-colons "$tmp" 2>/dev/null | awk -F: '$1=="fpr" && !f {print $10; f=1}')"
-    if [[ "$got" != "$fpr" ]]; then
-        rm -f "$tmp"
-        die "отпечаток ключа $url — [$got], ожидался [$fpr]"
+    local url="$1" fpr="$2" dest="$3" tmp gh out pubs got
+    tmp="$(mktemp)"; out="$(mktemp)"; gh="$(mktemp -d)"
+    _fk_clean(){ GNUPGHOME="$gh" gpgconf --kill all >/dev/null 2>&1 || true; rm -f "$tmp" "$out"; rm -r -f -- "$gh"; }
+    if ! curl -fsSL --retry 5 --retry-delay 2 "$url" -o "$tmp"; then
+        _fk_clean; die "ключ не скачался: $url"
     fi
-    install -m 0644 "$tmp" "$dest"
-    rm -f "$tmp"
+    if ! GNUPGHOME="$gh" gpg --batch --quiet --import "$tmp" >/dev/null 2>&1; then
+        _fk_clean; die "ключ $url не импортируется gpg"
+    fi
+    pubs="$(GNUPGHOME="$gh" gpg --batch --with-colons --list-keys 2>/dev/null | awk -F: '$1=="pub"' | wc -l)"
+    got="$(GNUPGHOME="$gh" gpg --batch --with-colons --list-keys 2>/dev/null \
+        | awk -F: '$1=="pub" {p=1; next} p && $1=="fpr" {print $10; exit}')"
+    if [[ "$pubs" != 1 ]]; then
+        _fk_clean; die "в файле ключа $url — $pubs основных ключей, ожидался ровно один ($fpr)"
+    fi
+    if [[ "$got" != "$fpr" ]]; then
+        _fk_clean; die "отпечаток ключа $url — [$got], ожидался [$fpr]"
+    fi
+    if ! GNUPGHOME="$gh" gpg --batch --armor --export "$fpr" > "$out" 2>/dev/null || [[ ! -s "$out" ]]; then
+        _fk_clean; die "не удалось экспортировать ключ $fpr"
+    fi
+    install -m 0644 "$out" "$dest"
+    _fk_clean
 }
 
 # source_present ERE — a non-commented one-line or deb822 entry already

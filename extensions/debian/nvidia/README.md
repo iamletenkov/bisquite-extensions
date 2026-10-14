@@ -17,8 +17,9 @@
 | Ubuntu 22.04, 24.04 | PPA `graphics-drivers` — `NVIDIA_SOURCE=ppa` | то же | всегда DKMS |
 | Debian 12, 13 | репозиторий CUDA NVIDIA (`developer.download.nvidia.com/compute/cuda/repos/debian12` / `debian13`) | `nvidia-driver-pinning-<ветка>`, затем `nvidia-open` (open) или `cuda-drivers` (proprietary) | DKMS: `nvidia-kernel-open-dkms` / `nvidia-kernel-dkms` + `linux-headers-<ядро>` |
 
-Ключи репозиториев скачиваются и принимаются **только при совпадении
-отпечатка**, прибитого в `install.sh`; источники пишутся в формате deb822
+Ключи репозиториев скачиваются и принимаются, **только если в файле ровно
+один основной ключ с отпечатком**, прибитым в `install.sh`; в keyring
+кладётся экспорт этого ключа, а не скачанный файл; источники пишутся в формате deb822
 с `Signed-By`. Если образ уже несёт запись на тот же репозиторий, своя не
 добавляется (иначе apt отказывает на всём списке источников — урок
 расширения `docker`).

@@ -72,12 +72,27 @@ else
         apt_retry apt-get "${APT_OPTS[@]}" install --no-install-recommends "${missing[@]}"
     fi
     install -d -m 0755 /etc/apt/keyrings
-    tmp="$(mktemp)"
-    curl -fsSL --retry 5 --retry-delay 2 "$CTK_BASE/gpgkey" -o "$tmp" || die "ключ не скачался: $CTK_BASE/gpgkey"
-    got="$(gpg --show-keys --with-colons "$tmp" 2>/dev/null | awk -F: '$1=="fpr" && !f {print $10; f=1}')"
-    [[ "$got" == "$CTK_FPR" ]] || { rm -f "$tmp"; die "отпечаток ключа $CTK_BASE/gpgkey — [$got], ожидался [$CTK_FPR]"; }
-    install -m 0644 "$tmp" /etc/apt/keyrings/nvidia-container-toolkit.asc
-    rm -f "$tmp"
+    # Trust exactly the pinned key: the file must hold ONE primary key with
+    # the pinned fingerprint, and the keyring gets `gpg --export` of that key
+    # from a throwaway GNUPGHOME, not the downloaded file — a second key in
+    # the same file would otherwise become trusted by apt too.
+    tmp="$(mktemp)"; out="$(mktemp)"; gh="$(mktemp -d)"
+    ctk_clean(){ GNUPGHOME="$gh" gpgconf --kill all >/dev/null 2>&1 || true; rm -f "$tmp" "$out"; rm -r -f -- "$gh"; }
+    curl -fsSL --retry 5 --retry-delay 2 "$CTK_BASE/gpgkey" -o "$tmp" \
+        || { ctk_clean; die "ключ не скачался: $CTK_BASE/gpgkey"; }
+    GNUPGHOME="$gh" gpg --batch --quiet --import "$tmp" >/dev/null 2>&1 \
+        || { ctk_clean; die "ключ $CTK_BASE/gpgkey не импортируется gpg"; }
+    pubs="$(GNUPGHOME="$gh" gpg --batch --with-colons --list-keys 2>/dev/null | awk -F: '$1=="pub"' | wc -l)"
+    got="$(GNUPGHOME="$gh" gpg --batch --with-colons --list-keys 2>/dev/null \
+        | awk -F: '$1=="pub" {p=1; next} p && $1=="fpr" {print $10; exit}')"
+    [[ "$pubs" == 1 ]] \
+        || { ctk_clean; die "в файле ключа $CTK_BASE/gpgkey — $pubs основных ключей, ожидался ровно один ($CTK_FPR)"; }
+    [[ "$got" == "$CTK_FPR" ]] \
+        || { ctk_clean; die "отпечаток ключа $CTK_BASE/gpgkey — [$got], ожидался [$CTK_FPR]"; }
+    { GNUPGHOME="$gh" gpg --batch --armor --export "$CTK_FPR" > "$out" 2>/dev/null && [[ -s "$out" ]]; } \
+        || { ctk_clean; die "не удалось экспортировать ключ $CTK_FPR"; }
+    install -m 0644 "$out" /etc/apt/keyrings/nvidia-container-toolkit.asc
+    ctk_clean
     cat > /etc/apt/sources.list.d/nvidia-container-toolkit.sources <<EOF
 Types: deb
 URIs: $CTK_BASE/stable/deb/$ARCH/

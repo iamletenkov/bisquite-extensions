@@ -8,8 +8,10 @@ GPU получают только те, кого об этом попросил�
 ## Что ставится
 
 - ключ `https://nvidia.github.io/libnvidia-container/gpgkey` в
-  `/etc/apt/keyrings/nvidia-container-toolkit.asc` — принимается только при
-  совпадении отпечатка `C95B321B61E88C1809C4F759DDCAE044F796ECB0`;
+  `/etc/apt/keyrings/nvidia-container-toolkit.asc` — принимается, только если
+  в файле ровно один основной ключ с отпечатком
+  `C95B321B61E88C1809C4F759DDCAE044F796ECB0`; в keyring кладётся экспорт
+  этого ключа, а не скачанный файл (лишний ключ в нём доверия apt не получит);
 - источник `/etc/apt/sources.list.d/nvidia-container-toolkit.sources`
   (deb822, `stable/deb/amd64`); если образ уже несёт запись на этот
   репозиторий, своя не добавляется — две записи с разным `Signed-By` apt
