@@ -21,9 +21,9 @@
 agent_log_info(){ >&2 echo "teleport-agent: $*"; }
 agent_log_error(){ >&2 echo "teleport-agent: ОШИБКА: $*"; }
 
-agent_default_version(){ echo 3.0.1; }
-# sha256 of bisquite-teleport-agent_3.0.1_all.deb (GitHub release v3.0.1).
-agent_default_sha256(){ echo 7e53e5bba94b1d4d2316fceeeea504c62c7b4414c0e519890150d833d9124124; }
+agent_default_version(){ echo 3.1.0; }
+# sha256 of bisquite-teleport-agent_3.1.0_all.deb (GitHub release v3.1.0).
+agent_default_sha256(){ echo 475c19497413a54ab56000cd39529fb5702348cdad30e8208c25a19a64e698c1; }
 agent_deb_name(){ echo "bisquite-teleport-agent_$1_all.deb"; }
 # agent_url <version> <url> <mirror>
 agent_url(){

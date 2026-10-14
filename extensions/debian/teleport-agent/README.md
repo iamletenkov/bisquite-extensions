@@ -32,7 +32,7 @@ EXTENSION teleport-agent TELEPORT_VERSION=18.10.0 \
 | `TELEPORT_VERSION` | `18.10.0` | версия Teleport; **не новее кластера**, не старше на мажор; для `bound_keypair` — не ниже 18.8.0 |
 | `TELEPORT_MIRROR` | пусто | зеркало бинарей: `<база>/binaries/teleport/<версия>/teleport-v<версия>-linux-<arch>-bin.tar.gz`; пусто — `cdn.teleport.dev` |
 | `TELEPORT_SHA256` | пусто | хеш tarball; пусто — `.sha256` с `cdn.teleport.dev` (второй канал, если tarball с зеркала) |
-| `AGENT_VERSION` | `3.0.1` | версия пакета `bisquite-teleport-agent` |
+| `AGENT_VERSION` | `3.1.0` | версия пакета `bisquite-teleport-agent` |
 | `AGENT_SHA256` | пин версии по умолчанию | sha256 `.deb`; для другой версии обязателен — без суммы пакет не скачивается |
 | `AGENT_SHA256_<ARCH>` | пусто | сумма для архитектуры (`AMD64`, `ARM64`), сильнее `AGENT_SHA256`; пакет сейчас `_all`, сумма одна |
 | `AGENT_MIRROR` | пусто | база зеркала: `<база>/bisquite-teleport-agent_<версия>_all.deb` (например, `/dist/teleport/` портала) |
