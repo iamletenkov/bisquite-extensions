@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Apply hook of the `firewall` domain: rebuild the table from the new settings.
+# Non-blocking: `bisquite-conf set` may run inside cloud-final.
+set -uo pipefail
+systemctl --no-block restart bisquite-firewall.service \
+    && >&2 echo "firewall: перезапуск bisquite-firewall поставлен в очередь (journalctl -u bisquite-firewall)"

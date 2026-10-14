@@ -1,0 +1,6 @@
+# Настройки файрвола — /etc/bisquite/firewall/config. Читает configure.sh
+# (ExecStart bisquite-firewall.service) на каждой загрузке. Сами правила —
+# файлы *.nft в /etc/bisquite/firewall/rules.d/, не ключи этого файла.
+#
+# ключ              тип     умолчание  описание
+FIREWALL_ENABLE     bool    1          1 — таблица inet bisquite применяется (входящее, кроме разрешённого, отбрасывается); 0 — таблица снимается, входящее не фильтруется

@@ -1,0 +1,27 @@
+[Unit]
+Description=bisquite host firewall (nftables table inet bisquite)
+Documentation=file:/opt/bisquite/firewall/README.md
+# Before the network comes up, so there is no window with open input.
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target
+After=local-fs.target
+# nftables.service (if someone enables it) runs `flush ruleset` from
+# /etc/nftables.conf: our table must be built after it, not wiped by it.
+After=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# One nft transaction replaces the table: `systemctl restart` (and reload)
+# never leaves the host open in between. No ExecStop on purpose — a stop in
+# the middle of a restart would be exactly such a window. Turning the
+# firewall off is FIREWALL_ENABLE=0 or `bisquite-firewall off`.
+ExecStart=/bin/bash /opt/bisquite/firewall/configure.sh apply
+ExecReload=/bin/bash /opt/bisquite/firewall/configure.sh apply
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bisquite-firewall
+
+[Install]
+WantedBy=sysinit.target
