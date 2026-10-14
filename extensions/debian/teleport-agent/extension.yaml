@@ -1,6 +1,8 @@
 name: teleport-agent
-version: 3.0.1
+version: 3.1.0
 layout: 2
+# 3.1.0: пин пакета bisquite-teleport-agent 3.1.0 — join ждёт сеть на первой
+#        загрузке и повторяет регистрацию, пока не получится.
 # 3.0.1: пин пакета bisquite-teleport-agent 3.0.1 (метка bisquite_agent_version).
 # 3.0.0: агент — отдельный проект bisquite-teleport-agent (пакет .deb,
 #        https://github.com/iamletenkov/bisquite-teleport-agent); расширение —
