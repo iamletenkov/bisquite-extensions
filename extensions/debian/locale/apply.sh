@@ -129,7 +129,9 @@ for i in "${!layouts[@]}"; do
     id="${layouts[$i]}${variants[$i]:++${variants[$i]}}"
     sources+="${sources:+, }('xkb', '$id')"
 done
-options="[]"
+# An empty GVariant array needs its type: dconf cannot infer it from `[]`
+# and `dconf update` rejects the whole keyfile.
+options="@as []"
 [[ -n "$KEYBOARD_TOGGLE" ]] && options="['$KEYBOARD_TOGGLE']"
 keyfile="$(cat <<EOF
 # Written by the bisquite extension locale: defaults (not locks) of GNOME
