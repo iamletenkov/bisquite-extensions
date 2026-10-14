@@ -1,0 +1,21 @@
+name: rustdesk
+version: 1.0.0
+layout: 2
+family: deb
+# Закреплены sha256 только x86_64-пакета (rustdesk-<версия>-x86_64.deb) и
+# проверен только он. Релиз публикует и aarch64, но его сумма не закреплена
+# и запуск не проверялся.
+arch: [amd64]
+# build     — install.sh ставит .deb по версии и sha256, кладёт юнит rustdesk
+#             (postinst пакета делает это только под systemd) и включает его;
+#             чистит RustDesk.toml, чтобы ID у каждого устройства был свой;
+# firstboot — configure.sh на КАЖДОЙ загрузке пишет адреса своего сервера
+#             из /etc/bisquite/rustdesk/config в RustDesk2.toml root и
+#             пользователей с UID ≥ 1000.
+phase: [build, firstboot]
+# remote-support — rustdesk.service (--service от root), клиент RustDesk.
+# Рабочий стол не требуется для установки: зависимости пакета (GTK, X11-библиотеки)
+# приезжают apt'ом; показать экран без X-сессии он, конечно, не сможет.
+provides: [remote-support]
+requires: []
+conflicts: []

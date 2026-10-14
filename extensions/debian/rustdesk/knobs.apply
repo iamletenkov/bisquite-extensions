@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Apply hook of the `rustdesk` domain: rerun the renderer, which restarts
+# rustdesk.service if a file changed. Non-blocking: `bisquite-conf set` may
+# run inside cloud-final.
+set -uo pipefail
+systemctl --no-block restart configure-rustdesk.service \
+    && >&2 echo "rustdesk: перезапуск configure-rustdesk поставлен в очередь (journalctl -u configure-rustdesk)"

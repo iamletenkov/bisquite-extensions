@@ -312,6 +312,10 @@ echo 'пароль' | sudo bisquite-conf set x11vnc X11VNC_PASSWORD=-   # сек
 | `code-server` | `/etc/bisquite/code-server/config` (0600) | `code-server` | `configure.sh` → `~/.config/code-server/config.yaml` | перезапуск `configure-code-server` |
 | `kiosk` | `/etc/bisquite/kiosk/config` | `kiosk` | `configure.sh`, `run-kiosk.sh` | перезапуск `configure-kiosk` |
 | `chromium-kiosk` | `/etc/bisquite/chromium-kiosk/config` | `chromium-kiosk` | `configure.sh` → `/etc/chromium-kiosk/config.yml` | перезапуск `configure-chromium-kiosk` |
+| `can` | `/etc/bisquite/can/config` | `can` | `render-modules-load.sh` → `/etc/modules-load.d/can.conf` | переписать `can.conf` + перезапуск `systemd-modules-load` |
+| `firewall` | `/etc/bisquite/firewall/config` (правила — `rules.d/*.nft` рядом) | `firewall` | `bisquite-firewall.service` на каждой загрузке | перезапуск `bisquite-firewall` (одна транзакция nft) |
+| `locale` | `/etc/bisquite/locale/config` | `locale` | `apply.sh` → `/etc/default/{locale,keyboard}`, X11, dconf | `apply.sh` (без `systemctl`) |
+| `rustdesk` | `/etc/bisquite/rustdesk/config` | `rustdesk` | `configure-rustdesk.service` на каждой загрузке → `RustDesk2.toml` root и UID ≥ 1000 | перезапуск `configure-rustdesk` (тот перезапускает `rustdesk`, если файлы изменились) |
 
 Остальные расширения действующих настроек не имеют: они однократно
 настраивают систему, и повторить это можно только повторным прогоном
@@ -693,9 +697,11 @@ Raspberry Pi OS отвечает `<distro>debian</distro>`, потому что 
   архитектуры, для которых релиз опубликован (так у `code-server`: ссылка
   на mkcert собирается из `dpkg --print-architecture`, и это сняло прежнее
   ограничение `amd64`);
-- расширение прибивает метапакет (`linux-headers-amd64` в `nvidia`) или идёт
-  в репозиторий, где нет второй архитектуры (там же, PPA `graphics-drivers`)
-  → только `amd64`.
+- расширение опирается на источники, опубликованные только для одной
+  архитектуры → только она. Так у `nvidia`: готовые подписанные модули
+  Canonical (`linux-modules-nvidia-*`) и PPA `graphics-drivers` проверены
+  только на `amd64`, а на Debian install.sh берёт репозиторий CUDA из каталога
+  `x86_64` → `amd64`.
 
 Объявить архитектуру — значит пообещать, что она работает. Поэтому `armhf`
 нет ни у одного расширения, хотя релизы под него существуют: 32-битные цели
@@ -769,7 +775,12 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `kiosk-browser` | `kiosk`, `chromium-kiosk` | обе реализации автостартом забирают экран |
 | `remote-desktop` | `x11vnc`, `vino-vnc` | `x11vnc@.service` на `rfbport` из `X11VNC_PORT`; у `vino-vnc` — `gsettings` `org.gnome.Vino` и автозапуск XDG (умолчание у обоих 5900) |
 | `web-ide` | `code-server` | code-server на порту `CODE_SERVER_PORT` домена `code-server` (умолчание 9001) |
-| `gpu-driver-nvidia` | `nvidia` | проприетарный драйвер + blacklist nouveau |
+| `gpu-driver-nvidia` | `nvidia` | драйвер NVIDIA под ядро образа (2.0.0: `NVIDIA_DRIVER_VERSION`, `NVIDIA_KERNEL_MODULES=open\|proprietary`, `NVIDIA_SOURCE=archive\|ppa`) + blacklist nouveau |
+| `nvidia-container-runtime` | `nvidia-container-toolkit` | `nvidia-container-toolkit` из `nvidia.github.io/libnvidia-container`, `nvidia-ctk runtime configure --runtime=docker` без смены `default-runtime` |
+| `can-bus` | `can` | `can-utils`, `iproute2`; модули `can can_raw can_dev vcan slcan gs_usb peak_usb` проверены `modinfo -k <ядро образа>`; `/etc/modules-load.d/can.conf` |
+| `host-firewall` | `firewall` | таблица nftables `inet bisquite` (input — `policy drop`), `bisquite-firewall.service` на каждой загрузке; цепочки Docker не трогает |
+| `system-locale` | `locale` | `locale-gen`, `/etc/default/locale`, `/etc/default/keyboard`, `xorg.conf.d/00-keyboard.conf`, умолчания GNOME input-sources (dconf) |
+| `remote-support` | `rustdesk` | `.deb` RustDesk по версии и sha256, включённый `rustdesk.service`; адреса сервера — `RustDesk2.toml` из домена `rustdesk` |
 | `nocloud-cidata-seed` | `nocloud-cidata` | `/etc/cloud/cloud.cfg.d/zz-bisquite-nocloud.cfg` с `fs_label: cidata` |
 | `network-manager` | `network-manager` | пакеты `network-manager` и `wpasupplicant`, включённый `NetworkManager.service` |
 | `jetson-monitor` | `jetson-stats` | `jtop` из PyPI плюс `jtop.service`; данные идут из `tegrastats` и sysfs Tegra, а не из NVML |
@@ -796,6 +807,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `selkies` | `x11-server`, `display-manager` | `run-selkies.sh` снимает экран существующего X-дисплея и ждёт сессию пользователя; без автологина показывать нечего |
 | `l4t-pytorch` | `cuda` | `install.sh` отказывает без `/usr/local/cuda/bin/nvcc`: им собирается torchvision с `FORCE_CUDA=1`; сам torch грузит `libcublas`, `libcufft` и прочие библиотеки тулкита. На R32 (Nano) не проверяется: torch и CUDA 10.2 уже в образе |
 | `l4t-tensorflow` | `cuda` | `install.sh` отказывает без `/usr/local/cuda/lib64`: TF грузит библиотеки тулкита |
+| `nvidia-container-toolkit` | `gpu-driver-nvidia`, `container-runtime` | `nvidia-ctk runtime configure --runtime=docker` правит `/etc/docker/daemon.json`; без драйвера среда `nvidia` бесполезна |
 | остальные | — | ничего не требуют по коду |
 
 Конфликты:

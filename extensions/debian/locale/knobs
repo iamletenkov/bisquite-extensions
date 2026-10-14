@@ -1,0 +1,7 @@
+# Настройки локали и раскладок — /etc/bisquite/locale/config. Читает apply.sh
+# (install.sh и хук knobs.apply) и пишет из них системные файлы.
+#
+# ключ              тип                                                                 умолчание    описание
+LOCALE              "re:^[a-z]{2,3}_[A-Z]{2}\.UTF-8(@[a-z]+)?$"                         en_US.UTF-8  системная локаль (LANG в /etc/default/locale); только UTF-8
+KEYBOARD_LAYOUTS    "re:^[a-z]{2,8}(\([a-z0-9_]+\))?(,[a-z]{2,8}(\([a-z0-9_]+\))?)*$"   us,ru        раскладки XKB через запятую, вариант в скобках: us,ru(phonetic); первая — основная
+KEYBOARD_TOGGLE     "re:^grp:[a-z0-9_]+$"                                               —            переключение раскладок (опция XKB), например grp:alt_shift_toggle; пусто — без опции (в GNOME — Super+Пробел)

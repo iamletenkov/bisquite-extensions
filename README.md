@@ -16,7 +16,8 @@ extensions/
 │   ├── gnome/  xfce4/  lxde/
 │   ├── x11vnc/  vino-vnc/
 │   ├── network-manager/  nocloud-cidata/  cloud-growroot/
-│   └── nvidia/  jetson-stats/
+│   ├── nvidia/  nvidia-container-toolkit/  jetson-stats/
+│   └── can/  firewall/  locale/  rustdesk/   # рабочая машина робота
 └── openwrt/                 # для OpenWrt (конфиги, UPLOAD) — не расширения, см. docs/
     ├── uci-defaults/
     └── wrt_cloudinit/
@@ -310,6 +311,17 @@ Workflow `CI and Release`, конфиг — `.github/release_please/`:
 - `jetson-stats` даёт `jetson-monitor` и объявляет только `arm64`: Jetson
   бывает только aarch64, и вдобавок расширение отказывает на образе без
   `/etc/nv_tegra_release`;
+- `nvidia` 2.0.0 даёт `gpu-driver-nvidia`: драйвер строго под ядро образа,
+  настройки `NVIDIA_DRIVER_VERSION` (580), `NVIDIA_KERNEL_MODULES`
+  (`open`|`proprietary`), `NVIDIA_SOURCE` (`archive`|`ppa`);
+  `nvidia-container-toolkit` 1.0.0 (`NVIDIA_CTK_VERSION`) требует
+  `gpu-driver-nvidia` и `container-runtime`, регистрирует среду `nvidia`
+  в Docker без смены `default-runtime`;
+- рабочая машина робота: `can` (модули CAN под ядро образа, `can-bus`),
+  `firewall` (своя таблица nftables `inet bisquite`, Docker не задевает,
+  `host-firewall`), `locale` (локаль и раскладки, `system-locale`), `rustdesk`
+  (`.deb` по sha256, адреса своего сервера — на устройстве, `remote-support`);
+  ничего не требуют и ни с чем не конфликтуют;
 - `docker` даёт `container-runtime` и ни с чем не конфликтует: расширения
   слиты 2026-09-03, когда замер показал, что `get.docker.com` ставит из того
   же `download.docker.com` и вдобавок ломает сборку на bionic. Разбор —

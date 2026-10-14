@@ -1,0 +1,21 @@
+[Unit]
+Description=Render RustDesk server settings from /etc/bisquite/rustdesk
+Documentation=file:/opt/bisquite/rustdesk/README.md
+# Users of the image are created by cloud-init on the first boot: the
+# renderer must see them. cloud-init-network.service is the name since
+# cloud-init 24.3, cloud-init.service before it.
+After=local-fs.target cloud-init.service cloud-init-network.service systemd-user-sessions.service
+# The service reads the files at start: render first.
+Before=rustdesk.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash /opt/bisquite/rustdesk/configure.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=configure-rustdesk
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

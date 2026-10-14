@@ -1,0 +1,30 @@
+# Правила по умолчанию расширения firewall (bisquite).
+#
+# Файлы *.nft этого каталога включаются по алфавиту в ОДНУ транзакцию nft
+# после того, как таблица inet bisquite создана заново:
+#   chain input  — hook input,  policy drop   (входящее на саму машину)
+#   chain output — hook output, policy accept (исходящее)
+# Ошибка в любом файле — не применяется ничего из каталога, машина остаётся
+# закрытой (lo и established), служба bisquite-firewall — failed.
+#
+# Свои правила — отдельным файлом рядом (например 50-ssh.nft), этот можно
+# править: повторная установка расширения его не перезаписывает.
+# Применить: sudo systemctl restart bisquite-firewall
+
+# Петля: всё, что машина говорит сама себе (в т.ч. проброшенные Docker порты
+# через docker-proxy на 127.0.0.1).
+add rule inet bisquite input iif lo accept
+
+# Ответы на исходящие соединения.
+add rule inet bisquite input ct state established,related accept
+add rule inet bisquite input ct state invalid drop
+
+# UDP 7400–32000 на 127.0.0.1 (DDS/ROS 2 на петле) — требование образа
+# рабочей машины; на lo он уже открыт строкой выше, правило оставлено явным.
+add rule inet bisquite input ip daddr 127.0.0.1 udp dport 7400-32000 accept
+
+# IPv6 без обнаружения соседей не работает вовсе (и исходящее тоже):
+# NS/NA/RA приходят не ответом на соединение, conntrack их не видит.
+add rule inet bisquite input icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert } ip6 hoplimit 255 accept
+
+# Всё остальное входящее отбрасывается политикой цепочки (policy drop).

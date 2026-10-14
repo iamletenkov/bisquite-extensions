@@ -1,0 +1,19 @@
+name: firewall
+version: 1.0.0
+layout: 2
+family: deb
+# Только apt-пакет nftables и скрипты: архитектура не участвует. Проверено
+# в контейнерах ubuntu:24.04 и debian:12 (amd64); arm64 — тот же nftables
+# из архива, но на нём не запускалось.
+arch: [amd64, arm64]
+# build     — install.sh ставит nftables, правила по умолчанию в
+#             /etc/bisquite/firewall/rules.d/ и включает bisquite-firewall.service;
+# firstboot — configure.sh (ExecStart службы) собирает и применяет правила
+#             на КАЖДОЙ загрузке и по `systemctl restart bisquite-firewall`.
+phase: [build, firstboot]
+# host-firewall — своя таблица `inet bisquite` с цепочкой input (policy drop).
+# Docker не задевается: его цепочки iptables-nft живут в других таблицах,
+# проброс портов идёт через forward, а не input.
+provides: [host-firewall]
+requires: []
+conflicts: []

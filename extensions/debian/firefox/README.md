@@ -31,7 +31,7 @@ EXTENSION firefox FIREFOX_LANGPACK=ru
 
 | Путь | Что |
 |---|---|
-| `/etc/apt/keyrings/packages.mozilla.org.asc` | ключ репозитория; отпечаток `35BAA0B33E9EB396F59CA838C0BA5CE6DC6315A3` сверяется до записи |
+| `/etc/apt/keyrings/packages.mozilla.org.asc` | ключ репозитория; в файле должен быть ровно один основной ключ с отпечатком `35BAA0B33E9EB396F59CA838C0BA5CE6DC6315A3`; записывается экспорт этого ключа, не скачанный файл |
 | `/etc/apt/sources.list.d/mozilla.list` | `deb https://packages.mozilla.org/apt mozilla main` |
 | `/etc/apt/preferences.d/mozilla` | `Pin-Priority: 1000` для `firefox*` с этого источника |
 | `/usr/lib/firefox/` | сам браузер; `x-www-browser` указывает на него |

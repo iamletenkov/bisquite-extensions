@@ -1,0 +1,5 @@
+# Настройки CAN — /etc/bisquite/can/config. Читает render-modules-load.sh
+# (install.sh и хук knobs.apply): из него пишется /etc/modules-load.d/can.conf.
+#
+# ключ             тип                                      умолчание          описание
+CAN_MODULES_LOAD   "re:^[a-z0-9_-]+( [a-z0-9_-]+)*$?"       "can can_raw vcan" модули для автозагрузки через пробел; пусто — /etc/modules-load.d/can.conf удаляется

@@ -1,0 +1,17 @@
+name: can
+version: 1.0.0
+layout: 2
+family: deb
+# Пакеты can-utils и iproute2 есть в обоих архивах, но модули ядра проверены
+# только на amd64 (linux-modules-extra Ubuntu 24.04, linux-image Debian 12):
+# объявить arm64 значило бы пообещать модули ядра, которых никто не искал.
+arch: [amd64]
+# Только build: модули и автозагрузка кладутся в образ. Правка списка
+# автозагрузки на устройстве — хук knobs.apply домена `can`, а не служба
+# первой загрузки.
+phase: build
+# can-bus — модули can, can_raw, can_dev, vcan, slcan, gs_usb, peak_usb есть
+# для ядра образа (install.sh проверяет modinfo -k), утилиты candump/cansend.
+provides: [can-bus]
+requires: []
+conflicts: []

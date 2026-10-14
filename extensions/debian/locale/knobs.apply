@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Apply hook of the `locale` domain: regenerate the locale and rewrite the
+# keyboard files. Runs no systemctl at all — nothing to block on.
+set -uo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+"$HERE/apply.sh" || exit 1
+>&2 echo "locale: локаль — со следующего входа в сессию; консоль — sudo setupcon или перезагрузка; экран входа — после перезапуска gdm3 или перезагрузки"

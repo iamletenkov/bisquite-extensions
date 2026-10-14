@@ -1,0 +1,3 @@
+Каталог правил расширения firewall: файлы *.nft включаются по алфавиту в одну
+транзакцию nft (файлы с другим расширением не читаются). Примеры — в
+/opt/bisquite/firewall/README.md. Применить: sudo systemctl restart bisquite-firewall

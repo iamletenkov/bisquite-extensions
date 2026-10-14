@@ -1,0 +1,11 @@
+# Адреса своего сервера RustDesk — /etc/bisquite/rustdesk/config. Читает
+# configure.sh (configure-rustdesk.service) на каждой загрузке и пишет их в
+# [options] RustDesk2.toml: /root/.config/rustdesk и ~/.config/rustdesk
+# пользователей с UID ≥ 1000. Пустое значение — ключ не трогается (а если его
+# ставил этот скрипт — убирается: RustDesk берёт публичное умолчание).
+#
+# ключ                    тип                                                                  умолчание  описание
+RUSTDESK_ID_SERVER        "re:^[A-Za-z0-9.-]+(:[0-9]{1,5})?$"                                  —          ID-сервер (custom-rendezvous-server): хост[:порт], например rustdesk.example.com
+RUSTDESK_RELAY_SERVER     "re:^[A-Za-z0-9.-]+(:[0-9]{1,5})?$"                                  —          relay-сервер (relay-server): хост[:порт], например rustdesk.example.com:21117
+RUSTDESK_API_SERVER       "re:^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$"    —          API-сервер (api-server): URL, например http://rustdesk.example.com:21114
+RUSTDESK_KEY              "re:^[A-Za-z0-9+/]+=*$"                                              —          публичный ключ сервера (key, base64 из id_ed25519.pub сервера)
