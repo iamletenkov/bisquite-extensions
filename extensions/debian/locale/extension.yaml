@@ -1,0 +1,16 @@
+name: locale
+version: 1.0.0
+layout: 2
+family: deb
+# Только apt-пакеты (locales, keyboard-configuration, console-setup) и файлы.
+# Проверено в контейнерах ubuntu:24.04 и debian:12 (amd64); на arm64 те же
+# пакеты, но не запускалось.
+arch: [amd64, arm64]
+# Только build: локаль и раскладки запекаются в образ. Правка на устройстве —
+# хук knobs.apply домена `locale` (те же файлы, тот же скрипт apply.sh).
+phase: build
+# system-locale — /etc/default/locale, /etc/default/keyboard, X11 InputClass
+# и умолчания GNOME input-sources (системная база dconf).
+provides: [system-locale]
+requires: []
+conflicts: []
