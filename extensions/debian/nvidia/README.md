@@ -157,4 +157,10 @@ dmesg | grep -iE 'nvidia|nouveau|NVRM'
   `nvidia-smi` ответит «No devices were found».
 - Драйвер с зависимостями (а с DKMS — ещё компилятор и заголовки) заметно
   увеличивают образ: закладывайте место под сборку с запасом.
+- **DKMS собирается в appliance libguestfs, а ему bisquite по умолчанию даёт
+  2 ГБ** (`virt-customize --memsize 2048`). Ветке 590 под ядро Debian 13
+  (6.12) этого мало — компилятор убивает OOM (замер 2026-10-14), install.sh
+  тогда так и пишет. Собирайте с запасом: `bs image build --memsize 6144
+  --smp 4 …` (`--smp` заодно ускоряет компиляцию). Debian 12 с 580 и Ubuntu
+  с готовыми модулями Canonical укладываются в умолчание.
 

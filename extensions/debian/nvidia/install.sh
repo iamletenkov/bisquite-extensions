@@ -139,6 +139,19 @@ source_present(){
         || grep -rqsE "^[[:space:]]*URIs:.*$1" /etc/apt/sources.list.d/ 2>/dev/null
 }
 
+# dkms_install PKG... — install packages whose postinst builds the DKMS module.
+# The compiler runs inside the libguestfs appliance, and bisquite starts it
+# with 2 GB by default (virt-customize --memsize 2048): measured 2026-10-14,
+# 590 for Debian 13's 6.12 kernel got cc1 OOM-killed there. Say so instead of
+# a bare dpkg error.
+dkms_install(){
+    apt_retry apt-get "${APT_OPTS[@]}" install "$@" && return 0
+    if dmesg 2>/dev/null | grep -q 'invoked oom-killer'; then
+        die "сборку DKMS-модуля убил OOM в appliance сборки: дайте ему больше памяти — bs image build --memsize 6144 (по умолчанию 2048)"
+    fi
+    die "пакеты драйвера не установились: $* (журнал DKMS — /var/lib/dkms/nvidia/*/build/make.log)"
+}
+
 candidate(){ apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/ && !f {print $2; f=1}'; }
 have_pkg(){ local c; c="$(candidate "$1")"; [[ -n "$c" && "$c" != "(none)" ]]; }
 
@@ -233,7 +246,7 @@ install_ubuntu(){
     log_info "DKMS: модуль собирается под ${KERNELS[*]}"
     # Headers first: the DKMS postinst builds for every kernel that has them.
     apt_retry apt-get "${APT_OPTS[@]}" install "${HEADERS[@]}"
-    apt_retry apt-get "${APT_OPTS[@]}" install "nvidia-dkms-${BRANCH}${sfx}" "$driver"
+    dkms_install "nvidia-dkms-${BRANCH}${sfx}" "$driver"
 }
 
 # --- Debian -------------------------------------------------------------------
@@ -286,7 +299,7 @@ EOF
 
     headers_for_kernels
     apt_retry apt-get "${APT_OPTS[@]}" install "${HEADERS[@]}"
-    apt_retry apt-get "${APT_OPTS[@]}" install "$meta"
+    dkms_install "$meta"
 }
 
 # --- run ----------------------------------------------------------------------
