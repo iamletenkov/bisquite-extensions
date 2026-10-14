@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Apply hook of the `can` domain: rewrite /etc/modules-load.d/can.conf and
+# load the listed modules now. Non-blocking: `bisquite-conf set` may run
+# inside cloud-final.
+set -uo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+
+changed="$("$HERE/render-modules-load.sh")" || exit 1
+[[ "$changed" == changed ]] || { >&2 echo "can: автозагрузка не изменилась"; exit 0; }
+
+# A module missing for the running kernel is a warning, not a refusal: the
+# file is for the next boot, and the kernel of the image may differ.
+modules="$(sed -e '/^#/d' -e '/^$/d' "${BISQUITE_CONF_ROOT:-}/etc/modules-load.d/can.conf" 2>/dev/null || true)"
+for m in $modules; do
+    modinfo -n "$m" >/dev/null 2>&1 || >&2 echo "can: модуля $m нет для ядра $(uname -r) — проверьте имя"
+done
+# Removed modules stay loaded until reboot or `modprobe -r`: unloading under
+# a running candump would be a surprise.
+systemctl --no-block restart systemd-modules-load.service \
+    && >&2 echo "can: systemd-modules-load поставлен в очередь (загрузит новые модули)"
