@@ -14,7 +14,7 @@
 | Фаза | Что |
 |---|---|
 | build | `rustdesk-<версия>-x86_64.deb` (sha256 сверяется до установки, зависимости — apt); юнит `/usr/lib/systemd/system/rustdesk.service` (postinst пакета кладёт его только когда PID 1 — systemd, в appliance сборки — нет); `configure-rustdesk.service`; обе службы включены; удаляются `RustDesk*.toml` у `/root`, `/etc/skel` и пользователей с UID ≥ 1000 — **сборка отказывает**, если они остались |
-| каждая загрузка | `configure-rustdesk.service` (после cloud-init, **до** `rustdesk.service`) пишет `[options]` в `RustDesk2.toml` |
+| каждая загрузка | `configure-rustdesk.service` (после cloud-init, **до** `rustdesk.service`) пишет `[options]` в `RustDesk2.toml`; пока RustDesk не запускался у кого-то из пользователей (нет `RustDesk.toml`) или значения пришлось вернуть — повторная сверка через минуту, не больше 10 раз (первый запуск RustDesk на свежей машине переписывал `RustDesk2.toml` своими умолчаниями) |
 
 Что пишется, если значение задано:
 

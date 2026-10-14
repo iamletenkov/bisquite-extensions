@@ -74,11 +74,16 @@ render_for(){
     fi
 }
 
+# Accounts where RustDesk has not run yet (no RustDesk.toml): see the
+# follow-up at the end.
+first_run=0
 render_for root /root || { log "/root/.config/rustdesk/RustDesk2.toml не записан"; rc=1; }
+[[ -e "$ROOT/root/.config/rustdesk/RustDesk.toml" ]] || first_run=1
 while IFS=: read -r name _ uid _ _ home _; do
     (( uid >= 1000 && uid < 65534 )) || continue
     [[ -n "$home" && -d "$ROOT$home" && "$home" != / ]] || continue
     render_for "$name" "$home" || { log "$home/.config/rustdesk/RustDesk2.toml ($name) не записан"; rc=1; }
+    [[ -e "$ROOT$home/.config/rustdesk/RustDesk.toml" ]] || first_run=1
 done < <(getent passwd)
 
 install -d -m 0755 "$STATE_DIR"
@@ -95,5 +100,25 @@ if (( changed )); then
     fi
 else
     log "RustDesk2.toml уже соответствуют /etc/bisquite/rustdesk/config"
+fi
+
+# The first start of RustDesk on a machine (the service for root, the session
+# process for a user) may write RustDesk2.toml back from its own state AFTER
+# this render — seen on the first boot of a fresh image: the ID server gone
+# from root's file, all four options from the user's, until the next boot.
+# While some account has not run RustDesk yet, or this run had to restore
+# something, check again a minute later — at most 10 times per chain. The
+# render is idempotent; a restored value restarts the service, and RustDesk
+# that already has its files keeps them.
+step="${BISQUITE_RUSTDESK_FOLLOWUP:-0}"
+[[ "$step" =~ ^[0-9]+$ ]] || step=0
+if [[ -z "$ROOT" && -d /run/systemd/system ]] && (( (first_run || changed) && step < 10 )) \
+    && command -v systemd-run >/dev/null 2>&1; then
+    next=$((step + 1))
+    systemd-run --quiet --no-block --on-active=60 \
+        --unit="configure-rustdesk-followup-$next-$$" \
+        --setenv=BISQUITE_RUSTDESK_FOLLOWUP="$next" \
+        /bin/bash "$SCRIPT_DIR/configure.sh" >/dev/null 2>&1 \
+        && log "повторная сверка через минуту (${next}/10): RustDesk ещё не запускался у всех или значения пришлось вернуть"
 fi
 exit "$rc"
