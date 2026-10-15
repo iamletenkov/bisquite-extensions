@@ -5,9 +5,17 @@
 # The kernel that matters is the one installed in the image (/lib/modules/*),
 # not `uname -r`: inside the virt-customize appliance `uname -r` is the
 # appliance's own kernel. Every module the robot needs is checked with
-# `modinfo -k <image kernel>`; on Ubuntu the missing ones come from
-# linux-modules-extra-<kernel>, on Debian they are part of linux-image and a
-# miss is a refusal (a cloud kernel without CAN drivers).
+# `modinfo -k <image kernel>` (built-in ones through modules.builtin); on
+# Ubuntu the missing ones come from linux-modules-extra-<kernel>, on Debian
+# they are part of linux-image and a miss is a refusal (a cloud kernel without
+# CAN drivers).
+#
+# L4T (Jetson, kernel <version>-tegra): there is no linux-modules-extra; the
+# modules ship in nvidia-l4t-kernel (+ nvidia-l4t-kernel-oot-modules for the
+# native mttcan). The stock r36 kernel is built without slcan, gs_usb and
+# peak_usb (CONFIG_CAN_SLCAN/GS_USB/PEAK_USB not set), and no package brings
+# them: for such a kernel they are a loud warning, not a refusal — unless
+# CAN_MODULES_LOAD names them, then they are required as everywhere.
 #
 # Parameters (environment, from VMFILE) — the `can` domain, schema in knobs:
 #   CAN_MODULES_LOAD   "can can_raw vcan"   modules for autoload
@@ -28,6 +36,8 @@ source "$SCRIPT_DIR/lib/bisquite-conf"
 # Modules the robot's checklist asks for (modinfo -n vcan gs_usb peak_usb slcan)
 # plus the core of the stack. The autoload list is checked on top of these.
 REQUIRED_MODULES=(can can_raw can_dev vcan slcan gs_usb peak_usb)
+# Not built in the stock L4T kernel (checked on r36.4.3, 5.15.148-tegra).
+L4T_OPTIONAL_MODULES=(slcan gs_usb peak_usb)
 
 apt_retry(){
     local i
@@ -68,19 +78,62 @@ fi
 log_info "ядра образа: ${KERNELS[*]} (uname -r appliance: $(uname -r) — не используется)"
 
 # shellcheck disable=SC2206  # word splitting is the format of the knob
-WANTED=("${REQUIRED_MODULES[@]}" $CAN_MODULES_LOAD)
+AUTOLOAD=($CAN_MODULES_LOAD)
+
+is_l4t_kernel(){ [[ "$1" == *-tegra ]]; }
+
+in_list(){
+    local x="$1" y; shift
+    for y in "$@"; do [[ "$x" == "$y" ]] && return 0; done
+    return 1
+}
+
+# Modules a kernel must have: an L4T kernel is let off the optional ones
+# unless the autoload list asks for them.
+wanted_for(){
+    local k="$1" m
+    for m in "${REQUIRED_MODULES[@]}" "${AUTOLOAD[@]}"; do
+        if is_l4t_kernel "$k" && in_list "$m" "${L4T_OPTIONAL_MODULES[@]}"            && ! in_list "$m" "${AUTOLOAD[@]}"; then
+            continue
+        fi
+        echo "$m"
+    done | sort -u
+}
+
+# modinfo -k reads modules.builtin.modinfo too; modules.builtin is the
+# fallback for a kmod that does not (names there use either - or _).
+have_module(){
+    local k="$1" m="$2"
+    modinfo -k "$k" -n "$m" >/dev/null 2>&1 && return 0
+    grep -qE "/${m//[-_]/[-_]}\.ko(\.[a-z]+)?$" "/lib/modules/$k/modules.builtin" 2>/dev/null
+}
 
 missing_for(){
     local k="$1" m
-    for m in "${WANTED[@]}"; do
-        modinfo -k "$k" -n "$m" >/dev/null 2>&1 || echo "$m"
-    done | sort -u
+    while read -r m; do
+        have_module "$k" "$m" || echo "$m"
+    done < <(wanted_for "$k")
 }
 
 . /etc/os-release
 rc=0
 for k in "${KERNELS[@]}"; do
     mapfile -t miss < <(missing_for "$k")
+    if is_l4t_kernel "$k"; then
+        # No linux-modules-extra for L4T: what nvidia-l4t-kernel lacks
+        # needs a rebuilt kernel, not a package.
+        for m in "${L4T_OPTIONAL_MODULES[@]}"; do
+            in_list "$m" "${AUTOLOAD[@]}" && continue
+            have_module "$k" "$m" || log_warn "$k (L4T): модуля $m нет — штатное ядро L4T собрано без него (USB/serial-адаптеры CAN не заработают; нужно ядро с CONFIG_CAN_${m^^}=m)"
+        done
+        if (( ${#miss[@]} )); then
+            log_error "$k (L4T): модулей ${miss[*]} нет (modinfo -k $k) — linux-modules-extra для L4T не существует, они должны прийти с nvidia-l4t-kernel"
+            rc=1
+            continue
+        fi
+        log_info "$k (L4T): $(wanted_for "$k" | tr '\n' ' ')— есть"
+        continue
+    fi
     if (( ${#miss[@]} )) && [[ "${ID:-}" == ubuntu ]]; then
         log_info "$k: нет ${miss[*]} — ставлю linux-modules-extra-$k"
         apt_retry apt-get install -y -q --no-install-recommends "linux-modules-extra-$k" \
@@ -93,14 +146,17 @@ for k in "${KERNELS[@]}"; do
         rc=1
         continue
     fi
-    log_info "$k: ${WANTED[*]} — есть"
+    log_info "$k: $(wanted_for "$k" | tr '\n' ' ')— есть"
 done
 (( rc == 0 )) || exit 1
 
 # Ubuntu: a future kernel brings linux-modules-extra only through the generic
 # metapackage. linux-image-virtual alone updates the kernel without them, and
 # CAN would vanish after the first `apt upgrade` on the device.
-if [[ "${ID:-}" == ubuntu ]] \
+# L4T kernels come from nvidia-l4t-kernel, so the warning is not about them.
+generic_kernels=0
+for k in "${KERNELS[@]}"; do is_l4t_kernel "$k" || generic_kernels=1; done
+if [[ "${ID:-}" == ubuntu ]] && (( generic_kernels )) \
    && ! dpkg-query -W -f='${Status}\n' 'linux-image-generic*' 2>/dev/null | grep -q '^install ok installed'; then
     log_warn "метапакета linux-image-generic в образе нет: новое ядро на устройстве придёт без linux-modules-extra"
     log_warn "и без vcan/gs_usb/peak_usb/slcan; надёжнее база с linux-generic (INSTALL linux-image-extra-virtual)"
