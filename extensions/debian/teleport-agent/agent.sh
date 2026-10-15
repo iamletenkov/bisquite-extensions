@@ -6,7 +6,7 @@
 # https://github.com/iamletenkov/bisquite-teleport-agent
 #
 # Parameters (environment):
-#   AGENT_VERSION        3.0.1     package version
+#   AGENT_VERSION        3.1.0     package version
 #   AGENT_SHA256         (pinned)  sha256 of the .deb; the pin below covers
 #                                  the default version, any other needs it
 #   AGENT_SHA256_<ARCH>  (empty)   per dpkg architecture (AMD64, ARM64),
