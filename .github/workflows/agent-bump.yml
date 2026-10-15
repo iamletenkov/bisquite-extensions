@@ -1,0 +1,196 @@
+name: Agent Bump
+
+# Поднимает пин пакета bisquite-teleport-agent в расширении teleport-agent
+# до релиза агента и открывает PR.
+#
+# Кто запускает: релиз bisquite-teleport-agent (его ci-release.yml делает
+# `gh workflow run agent-bump.yml -f tag=<тег>` токеном
+# EXTENSIONS_DISPATCH_TOKEN — fine-grained PAT только на этот репозиторий
+# с правом Actions: Read and write) либо человек руками. Без `tag` берётся
+# последний релиз агента.
+#
+# Правки делает tools/agent-bump.sh (его же гоняют руками): версия и sha256
+# по умолчанию, версия расширения (= версии агента, если та выше; иначе
+# minor-подъём) со строкой истории, README,
+# пример в update.sh, фикстуры tools/test-teleport-agent.sh. Сумма берётся
+# из SHA256SUMS релиза; tools/check.sh гоняется до коммита — PR с красным
+# пином не открывается. Коммит `feat(teleport-agent): …` — чтобы после
+# слияния вышел релиз расширений, а он уже сам поднимет их в bisquite.
+#
+# PR открывает GITHUB_TOKEN, а события от него (push ветки, открытие PR)
+# другие workflow не запускают — ограничение GitHub. Поэтому проверки
+# запускаются явно: `gh workflow run ci-release.yml --ref <ветка>`
+# (workflow_dispatch — единственное событие, которое GITHUB_TOKEN запустить
+# может). Прогон привязан к head-коммиту ветки и виден в PR. Для открытия
+# PR в настройках репозитория включено «Allow GitHub Actions to create and
+# approve pull requests».
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Тег релиза bisquite-teleport-agent (vX.Y.Z). Пусто — последний релиз.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+# Два запуска на один тег не должны гоняться за одну ветку.
+concurrency:
+  group: agent-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bump teleport-agent pin
+    runs-on: ubuntu-latest
+    env:
+      AGENT_REPO: iamletenkov/bisquite-teleport-agent
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: main
+
+      - name: Resolve tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ]; then
+            tag="$(gh release view -R "$AGENT_REPO" --json tagName --jq .tagName)"
+            echo "Тег не задан — последний релиз агента: $tag"
+          fi
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Тег должен иметь вид vX.Y.Z, получено: '$tag'"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "branch=chore/agent-$tag" >> "$GITHUB_OUTPUT"
+
+      # Открытый PR или ветка на этот тег уже есть — второй не открываем.
+      # Влитый PR сюда не доходит: пин уже на этой версии, шаг bump выйдет сам.
+      - name: Check for an existing bump
+        id: existing
+        env:
+          BRANCH: ${{ steps.tag.outputs.branch }}
+        run: |
+          set -euo pipefail
+          pr="$(gh pr list -R "$GITHUB_REPOSITORY" --head "$BRANCH" --state open \
+            --json url --jq '.[0].url // empty')"
+          if [ -n "$pr" ]; then
+            echo "::notice::PR на эту версию уже есть: $pr"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$(git ls-remote --heads origin "refs/heads/$BRANCH")" ]; then
+            echo "Ветка $BRANCH уже есть, PR нет — открою PR по ней"
+            echo "branch_exists=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      # Релиз должен быть опубликован и уже нести сам .deb: пин на сумму
+      # файла, которого нет, сломал бы сборку образа у всех. SHA256SUMS —
+      # из того же релиза (репозиторий агента публичный).
+      - name: Fetch release checksums
+        id: release
+        if: steps.existing.outputs.skip == 'false' && steps.existing.outputs.branch_exists != 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          deb="bisquite-teleport-agent_${TAG#v}_all.deb"
+          info="$(gh release view "$TAG" -R "$AGENT_REPO" --json isDraft,assets)"
+          if [ "$(jq -r .isDraft <<<"$info")" != "false" ]; then
+            echo "::error::Релиз $TAG агента не опубликован"
+            exit 1
+          fi
+          for f in "$deb" SHA256SUMS; do
+            if ! jq -e --arg f "$f" 'any(.assets[]; .name == $f)' <<<"$info" >/dev/null; then
+              echo "::error::В релизе $TAG агента нет файла $f"
+              exit 1
+            fi
+          done
+          dir="$RUNNER_TEMP/agent-release"
+          mkdir -p "$dir"
+          gh release download "$TAG" -R "$AGENT_REPO" -p SHA256SUMS -D "$dir" --clobber
+          echo "sums=$dir/SHA256SUMS" >> "$GITHUB_OUTPUT"
+
+      - name: Bump pin
+        id: bump
+        if: steps.release.outcome == 'success'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          SUMS: ${{ steps.release.outputs.sums }}
+        run: |
+          set -euo pipefail
+          tools/agent-bump.sh "$TAG" "$SUMS" | tee -a "$GITHUB_OUTPUT"
+
+      # Те же проверки, что в ci-release.yml, — до коммита.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        if: steps.bump.outputs.changed == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Run repository checks
+        if: steps.bump.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check pyyaml
+          tools/check.sh
+
+      - name: Commit and push branch
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          BRANCH: ${{ steps.tag.outputs.branch }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          SHA256: ${{ steps.bump.outputs.sha256 }}
+          EXT_VERSION: ${{ steps.bump.outputs.ext_version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add -- extensions/debian/teleport-agent tools/test-teleport-agent.sh
+          # Локальные хуки здесь не нужны: commitlint и прочие проверки
+          # гоняет CI на PR (как в extensions-bump.yml bisquite).
+          git -c core.hooksPath=/dev/null commit -m "feat(teleport-agent): пин агента $VERSION" \
+            -m "Пакет bisquite-teleport-agent $VERSION (релиз $TAG), sha256 из SHA256SUMS релиза:" \
+            -m "$SHA256" \
+            -m "Версия расширения teleport-agent — $EXT_VERSION."
+          git -c core.hooksPath=/dev/null push origin "refs/heads/$BRANCH"
+
+      - name: Open pull request and run checks
+        if: >-
+          steps.bump.outputs.changed == 'true' ||
+          steps.existing.outputs.branch_exists == 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          BRANCH: ${{ steps.tag.outputs.branch }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          body="$(mktemp)"
+          cat > "$body" <<EOF
+          Пин пакета \`bisquite-teleport-agent\` в расширении \`teleport-agent\` — $version:
+          версия и sha256 по умолчанию (\`agent.sh\`), версия расширения,
+          README, пример в \`update.sh\`, фикстуры \`tools/test-teleport-agent.sh\`.
+          Сумма — из \`SHA256SUMS\` релиза.
+
+          Релиз агента: https://github.com/$AGENT_REPO/releases/tag/$TAG
+
+          PR открыт workflow \`agent-bump.yml\` токеном GITHUB_TOKEN; такие события
+          проверки сами не запускают, поэтому workflow запустил \`ci-release.yml\`
+          на ветке вручную — его прогон виден в проверках PR. Если проверок нет:
+          Actions → CI and Release → Run workflow → ветка \`$BRANCH\`, либо закрыть
+          и снова открыть PR, либо пустой коммит владельцем.
+          EOF
+          gh pr create -R "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+            --title "feat(teleport-agent): пин агента $version" --body-file "$body"
+          gh workflow run ci-release.yml -R "$GITHUB_REPOSITORY" --ref "$BRANCH"

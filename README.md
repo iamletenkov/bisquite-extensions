@@ -148,6 +148,7 @@ conflicts: []
 tools/check.sh                # все проверки (сегодня — валидация манифестов)
 tools/validate-extensions.py  # только манифесты (нужен python3 + PyYAML)
 tools/new-extension.sh <имя>  # каркас нового расширения
+tools/agent-bump.sh <тег> <SHA256SUMS>  # пин пакета агента в teleport-agent (его зовёт agent-bump.yml)
 ```
 
 Валидатор проверяет, что у каждого каталога с `install.sh` есть манифест, что
@@ -290,6 +291,10 @@ Workflow `CI and Release`, конфиг — `.github/release_please/`:
    `BISQUITE_DISPATCH_TOKEN` этого репозитория: fine-grained PAT только на
    bisquite с правом Actions: Read and write, действует до 16.10.2027 —
    до этой даты перевыпустить, иначе job релиза покраснеет.
+
+Пин агента в `teleport-agent` руками не поднимают: релиз `bisquite-teleport-agent`
+запускает здесь `agent-bump.yml` (правки — `tools/agent-bump.sh`), и тот открывает PR
+`feat(teleport-agent): пин агента X.Y.Z` с суммой из `SHA256SUMS` релиза.
 
 `ref: main` неподвижной точкой не является: ветка мутабельна, а git-тег
 переставляется `git tag -f`. Что фактически легло в кеш, записывает
