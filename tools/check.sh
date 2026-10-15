@@ -33,6 +33,9 @@ echo "== test-l4t-kernel-kvm =="
 echo "== test-firewall =="
 "$HERE/test-firewall.sh" || rc=1
 
+echo "== test-can-usb =="
+"$HERE/test-can-usb.sh" || rc=1
+
 echo
 if (( rc )); then
     echo "проверки не прошли" >&2
