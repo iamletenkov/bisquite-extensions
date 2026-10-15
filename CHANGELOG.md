@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.3.0](https://github.com/iamletenkov/bisquite-extensions/compare/v3.2.0...v3.3.0) (2026-10-15)
+
+
+### Добавлено
+
+* **can-usb:** модули gs_usb, peak_usb и slcan для ядра Sensing на AGX Orin ([89ec546](https://github.com/iamletenkov/bisquite-extensions/commit/89ec546d866809dca39da28c5d0db91e26851ba2))
+* **can-usb:** модули gs_usb, peak_usb и slcan для ядра Sensing на AGX Orin ([da67136](https://github.com/iamletenkov/bisquite-extensions/commit/da671366f58463a20120f06300941c6cd0c1fe45))
+
 ## [3.2.0](https://github.com/iamletenkov/bisquite-extensions/compare/v3.1.0...v3.2.0) (2026-10-15)
 
 
