@@ -30,6 +30,9 @@ echo "== test-sensing-gmsl2-camera =="
 echo "== test-l4t-kernel-kvm =="
 "$HERE/test-l4t-kernel-kvm.sh" || rc=1
 
+echo "== test-firewall =="
+"$HERE/test-firewall.sh" || rc=1
+
 echo
 if (( rc )); then
     echo "проверки не прошли" >&2

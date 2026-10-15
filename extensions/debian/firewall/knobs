@@ -1,6 +1,8 @@
 # Настройки файрвола — /etc/bisquite/firewall/config. Читает configure.sh
 # (ExecStart bisquite-firewall.service) на каждой загрузке. Сами правила —
-# файлы *.nft в /etc/bisquite/firewall/rules.d/, не ключи этого файла.
+# файлы в /etc/bisquite/firewall/rules.d/ (*.nft для nftables, *.rules и
+# *.rules6 для iptables), не ключи этого файла.
 #
 # ключ              тип     умолчание  описание
-FIREWALL_ENABLE     bool    1          1 — таблица inet bisquite применяется (входящее, кроме разрешённого, отбрасывается); 0 — таблица снимается, входящее не фильтруется
+FIREWALL_ENABLE     bool    1          1 — правила применяются (входящее, кроме разрешённого, отбрасывается); 0 — таблица и цепочки снимаются, входящее не фильтруется
+FIREWALL_BACKEND    enum:auto,nft,iptables  auto  чем фильтровать: auto — nftables, если в ядре есть nf_tables и nft_ct, иначе iptables-legacy (цепочка BISQUITE-INPUT, файлы *.rules/*.rules6); nft, iptables — явно

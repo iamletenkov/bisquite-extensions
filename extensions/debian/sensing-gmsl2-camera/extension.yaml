@@ -1,5 +1,8 @@
 name: sensing-gmsl2-camera
-version: 4.0.0
+version: 4.1.0
+# 4.1.0: ядро закрепляется при сборке — apt-mark hold пакетов nvidia-l4t-kernel*,
+#        -dtbs, -oot-modules, -initrd и привязанных к ним точной версией
+#        (kernel-hold.sh): в suite r36.4 репозитория NVIDIA уже есть 36.4.7.
 # 4.0.0: libnvisppg.so из оверлея камер NVIDIA 36.4.3 — скачивание со сверкой
 #        закреплённой sha256 и подмена через dpkg-divert (раньше это делала
 #        станция прошивки); отказ на любом L4T, кроме 36.4.3.

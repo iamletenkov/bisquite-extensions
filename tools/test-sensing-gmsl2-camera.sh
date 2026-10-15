@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Тесты расширения sensing-gmsl2-camera — то, что проверяется без платы:
 # опознание релиза L4T, скачивание оверлея камер со сверкой sha256, подмена
-# libnvisppg.so через dpkg-divert на подменённом корне, закрепления в install.sh.
+# libnvisppg.so через dpkg-divert на подменённом корне, закрепления в install.sh,
+# apt-mark hold пакетов ядра L4T на подставных dpkg-query и apt-mark.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 X="$HERE/../extensions/debian/sensing-gmsl2-camera"
@@ -90,8 +91,67 @@ check   "подмена — после скачивания"            test "$(
 check   "nvisppg.sh в списке обязательных"      grep -qE '^for f in .*nvisppg\.sh' "$I"
 refuses "ни одной ссылки на удалённый шаг 02"   grep -rq '02-fetch-camera-drivers' "$X"
 
+echo "== закрепление ядра (apt-mark hold) на подставных командах =="
+# Fake dpkg-query and apt-mark: FAKE_INSTALLED lists installed packages,
+# FAKE_HOLD is the hold state file, FAKE_HOLD_FAIL=1 breaks `apt-mark hold`,
+# FAKE_HOLD_DROP names a package `hold` silently does not pin.
+mkdir -p "$T/bin"
+cat > "$T/bin/dpkg-query" <<'FAKE'
+#!/usr/bin/env bash
+p="${!#}"
+if grep -qxF "$p" <<<"${FAKE_INSTALLED// /$'\n'}"; then printf installed; else exit 1; fi
+FAKE
+cat > "$T/bin/apt-mark" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+    hold)
+        [ "${FAKE_HOLD_FAIL:-0}" = 1 ] && exit 100
+        shift; printf '%s\n' "$*" >> "$FAKE_HOLD.calls"
+        for p in "$@"; do [ "$p" = "${FAKE_HOLD_DROP:-}" ] || echo "$p" >> "$FAKE_HOLD"; done ;;
+    showhold) [ -f "$FAKE_HOLD" ] && sort -u "$FAKE_HOLD"; exit 0 ;;
+    *) exit 2 ;;
+esac
+FAKE
+chmod +x "$T/bin/dpkg-query" "$T/bin/apt-mark"
+ALL="nvidia-l4t-kernel nvidia-l4t-kernel-dtbs nvidia-l4t-kernel-oot-modules nvidia-l4t-initrd nvidia-l4t-kernel-headers nvidia-l4t-kernel-oot-headers nvidia-l4t-display-kernel"
+kh() { PATH="$T/bin:$PATH" bash -c 'set -uo pipefail; . "$0/kernel-hold.sh"; sensing_kernel_hold' "$X"; }
+held() { sort -u "$1" | tr '\n' ' ' | sed 's/ $//'; }
+sorted() { tr ' ' '\n' <<<"$1" | sort -u | tr '\n' ' ' | sed 's/ $//'; }
+
+export FAKE_HOLD="$T/h1" FAKE_INSTALLED="$ALL"
+check   "все семь установлены — закреплены все"      kh
+check   "…apt-mark hold получил ровно семь"          test "$(held "$T/h1")" = "$(sorted "$ALL")"
+check   "…одним вызовом"                             test "$(wc -l < "$T/h1.calls")" -eq 1
+check   "повторный прогон — снова успех"             kh
+
+export FAKE_HOLD="$T/h2" FAKE_INSTALLED="nvidia-l4t-kernel nvidia-l4t-kernel-dtbs nvidia-l4t-kernel-oot-modules nvidia-l4t-initrd"
+check   "без заголовков и display-kernel — успех"    kh
+check   "…закреплены только установленные"           test "$(held "$T/h2")" = "$(sorted "$FAKE_INSTALLED")"
+check   "…о пропущенных — предупреждение"            bash -c "$(declare -f kh); T='$T' X='$X' kh 2>&1 | grep -q 'не установлены, закреплять нечего: nvidia-l4t-kernel-headers'"
+
+export FAKE_HOLD="$T/h3" FAKE_INSTALLED=""
+check   "ядра L4T в dpkg нет — не отказ"             kh
+refuses "…и apt-mark hold не звался"                 test -e "$T/h3.calls"
+
+export FAKE_HOLD="$T/h4" FAKE_INSTALLED="$ALL" FAKE_HOLD_FAIL=1
+refuses "apt-mark hold упал — отказ"                 kh
+unset FAKE_HOLD_FAIL
+export FAKE_HOLD="$T/h5" FAKE_HOLD_DROP=nvidia-l4t-kernel-oot-modules
+refuses "hold не закрепил oot-modules — отказ"       kh
+unset FAKE_HOLD_DROP FAKE_HOLD FAKE_INSTALLED
+
+check   "install.sh: kernel-hold.sh в обязательных"  grep -qE '^for f in .*kernel-hold\.sh' "$I"
+check   "install.sh: hold — после замены Image"      test "$(line '^cp -f "\$PKG/boot/Image"')" -lt "$(line '^sensing_kernel_hold ')"
+check   "install.sh: hold — после depmod"            test "$(line '^if ! depmod ')" -lt "$(line '^sensing_kernel_hold ')"
+check   "install.sh: hold — до apt-get install"      test "$(line '^sensing_kernel_hold ')" -lt "$(line 'apt-get install')"
+check   "install.sh: отказ hold роняет сборку"       grep -qx 'sensing_kernel_hold || exit 1' "$I"
+for p in $ALL; do
+    check "README называет $p"                       grep -qF "\`$p\`" "$X/README.md"
+done
+check   "README: как снять (apt-mark unhold)"        grep -qF 'sudo apt-mark unhold nvidia-l4t-kernel ' "$X/README.md"
+
 if command -v shellcheck >/dev/null 2>&1; then
-    check "shellcheck -S warning" shellcheck -S warning -x "$X/install.sh" "$X/nvisppg.sh" "$X/bisquite-sensing-camera-ctl" "$X/knobs.apply" "$0"
+    check "shellcheck -S warning" shellcheck -S warning -x "$X/install.sh" "$X/nvisppg.sh" "$X/kernel-hold.sh" "$X/bisquite-sensing-camera-ctl" "$X/knobs.apply" "$0"
 else
     echo "  SKIP shellcheck: нет в PATH"
 fi

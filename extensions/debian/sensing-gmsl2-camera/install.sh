@@ -63,13 +63,15 @@ if [[ ! "$SENSING_GMSLMODE" =~ ^[012](,[012]){7}$ ]]; then
     exit 1
 fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-for f in knobs knobs.apply bisquite-sensing-camera-ctl nvisppg.sh lib/bisquite-conf; do
+for f in knobs knobs.apply bisquite-sensing-camera-ctl nvisppg.sh kernel-hold.sh lib/bisquite-conf; do
     [[ -f "$SCRIPT_DIR/$f" ]] || { log_error "рядом нет $f"; exit 1; }
 done
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/lib/bisquite-conf"
 # shellcheck source=nvisppg.sh
 source "$SCRIPT_DIR/nvisppg.sh"
+# shellcheck source=kernel-hold.sh
+source "$SCRIPT_DIR/kernel-hold.sh"
 
 # --- 1. Опознать плату ------------------------------------------------------
 #
@@ -214,6 +216,14 @@ shopt -s nullglob
 installed_ko=("$MODDIR_I2C"/*.ko "$MODDIR_PWM"/*.ko)
 shopt -u nullglob
 log_info "модули: ${#installed_ko[@]} файлов, depmod прошёл"
+
+# --- 4a. Закрепить ядро от apt ------------------------------------------------
+#
+# Ядро Sensing лежит поверх файлов пакетов nvidia-l4t-kernel*, и в репозитории
+# NVIDIA (suite r36.4) уже есть 36.4.4 и 36.4.7: первый же `apt upgrade` на
+# роботе вернул бы штатные Image, DTB, initrd и модули камер. Сразу после
+# подмены — и до любого apt-get ниже. Состав и причины — kernel-hold.sh.
+sensing_kernel_hold || exit 1
 
 # --- 5. DTB-оверлей -----------------------------------------------------------
 shopt -s nullglob

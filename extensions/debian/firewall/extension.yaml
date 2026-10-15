@@ -1,22 +1,27 @@
 name: firewall
-version: 1.1.0
+version: 1.2.0
+# 1.2.0: бэкенд iptables-legacy (своя цепочка BISQUITE-INPUT, файлы *.rules и
+# *.rules6) для ядер без nft_ct — штатного L4T r36.4.3; выбор бэкенда при
+# сборке и на каждой загрузке по спискам модулей ядра, FIREWALL_BACKEND=auto|nft|iptables.
+# Отказ сборки остаётся для ядра, где нет ни nft_ct, ни модулей iptables-legacy.
 layout: 2
 family: deb
-# 1.1.0: install.sh проверяет nf_tables и nft_ct для ядра ОБРАЗА и отказывает
-# без них: штатное ядро L4T r36.4.3 собрано без CONFIG_NFT_CT, и правила
-# с `ct state` на Jetson не загрузились бы — машина осталась бы открытой.
-# Остальное — apt-пакет nftables и скрипты: архитектура не участвует.
-# Проверено в контейнерах ubuntu:24.04 и debian:12 (amd64); arm64 —
-# ubuntu:22.04 с раскладкой ядра L4T r36.4.3 (отказ по nft_ct).
+# 1.1.0: install.sh проверял nf_tables и nft_ct для ядра ОБРАЗА и отказывал
+# без них (штатное ядро L4T r36.4.3 собрано без CONFIG_NFT_CT).
+# Остальное — apt-пакеты nftables, iptables и скрипты: архитектура не участвует.
+# Проверено в systemd-контейнерах: amd64 с ядром хоста (nft_ct есть → nftables);
+# arm64 ubuntu:22.04 со списками модулей ядра L4T r36.4.3 → iptables-legacy.
 arch: [amd64, arm64]
-# build     — install.sh ставит nftables, правила по умолчанию в
+# build     — install.sh выбирает бэкенд по ядру образа, ставит nftables и
+#             iptables, правила по умолчанию обоих бэкендов в
 #             /etc/bisquite/firewall/rules.d/ и включает bisquite-firewall.service;
 # firstboot — configure.sh (ExecStart службы) собирает и применяет правила
 #             на КАЖДОЙ загрузке и по `systemctl restart bisquite-firewall`.
 phase: [build, firstboot]
-# host-firewall — своя таблица `inet bisquite` с цепочкой input (policy drop).
-# Docker не задевается: его цепочки iptables-nft живут в других таблицах,
-# проброс портов идёт через forward, а не input.
+# host-firewall — своя таблица `inet bisquite` с цепочкой input (policy drop)
+# или своя цепочка BISQUITE-INPUT (iptables-legacy, переход первым в INPUT).
+# Docker не задевается: его цепочки (DOCKER, DOCKER-USER, FORWARD, nat) не
+# трогаются и не сбрасываются, проброс портов идёт через forward, а не input.
 provides: [host-firewall]
 requires: []
 conflicts: []

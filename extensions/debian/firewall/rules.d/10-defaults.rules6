@@ -1,0 +1,22 @@
+# Правила по умолчанию расширения firewall (bisquite), бэкенд iptables, IPv6.
+#
+# То же, что 10-defaults.rules, для ip6tables-legacy-restore: файлы *.rules6
+# собираются по алфавиту в одну транзакцию для цепочки BISQUITE-INPUT таблицы
+# filter IPv6. Формат и правила — в 10-defaults.rules.
+
+# Петля.
+-i lo -j ACCEPT
+
+# Ответы на исходящие соединения.
+-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-m conntrack --ctstate INVALID -j DROP
+
+# IPv6 без обнаружения соседей не работает вовсе (и исходящее тоже):
+# NS/NA/RA приходят не ответом на соединение, conntrack их не видит.
+# Проверки hop limit 255 здесь нет: её делает само ядро (RFC 4861), а модуль
+# xt_hl для этого не нужен.
+-p ipv6-icmp -m icmp6 --icmpv6-type neighbour-solicitation -j ACCEPT
+-p ipv6-icmp -m icmp6 --icmpv6-type neighbour-advertisement -j ACCEPT
+-p ipv6-icmp -m icmp6 --icmpv6-type router-advertisement -j ACCEPT
+
+# Всё остальное входящее отбрасывается последним правилом цепочки (DROP).

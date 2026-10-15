@@ -14,6 +14,11 @@ p3701-0000, носитель p3737-0000) с адаптером **SG8A-AGON-G2Y-A
 > `developer.nvidia.com`, и расширение **отказывает на любом L4T, кроме
 > 36.4.3** — раньше оно проверяло только плату.
 
+> **С 4.1.0 — ядро закреплено от apt.** Установка делает `apt-mark hold`
+> пакетов ядра L4T (список и причины — «Обновления apt»): в репозитории
+> NVIDIA уже лежат 36.4.4 и 36.4.7, и `apt upgrade` вернул бы штатное ядро
+> без драйверов Sensing.
+
 > **С 2.1.0 — раскладка 2.** Манифест объявляет `layout: 2`: каталог расширения
 > в госте — `/opt/bisquite/sensing-gmsl2-camera/` (был `/opt/vmsetup/sensing-gmsl2-camera/`). Путей гостя
 > расширение не прибивает, поэтому версия минорная; нужен bisquite
@@ -61,7 +66,9 @@ Jetson вообще. Образ из BSP (`jetson-orin-bsp`) остаётся о
    пакет `..._GMSL2x8_...` (не `_YUV_` — разбор ниже, «Почему пакет GMSL2x8»).
 4. Бэкапит штатное ядро в `/boot/Image.backup` (идемпотентно — `cp -n`),
    заменяет `/boot/Image` на ядро Sensing; кладёт `.ko`-модули в
-   `/lib/modules/5.15.148-tegra/updates/...`, снимает штатный `max96712.ko`.
+   `/lib/modules/5.15.148-tegra/updates/...`, снимает штатный `max96712.ko`,
+   и сразу закрепляет пакеты ядра L4T от apt (`apt-mark hold`, раздел
+   «Обновления apt»).
 5. Копирует DTB-оверлей в `/boot/`.
 6. Кладёт весь пакет драйверов в `/opt/sensing` — для диагностики
    и ручного `quick_bring_up.sh`, если понадобится другой профиль.
@@ -177,13 +184,52 @@ sudo reboot
 
 ## Обновления apt
 
-`libnvisppg.so` от `apt upgrade` защищена отведением dpkg, ядро — нет:
-обновление `nvidia-l4t-kernel*` перепишет `/boot/Image` ядром без драйверов
-Sensing. Закрепить (перенесено из README станции прошивки):
+**С 4.1.0 ядро закрепляется само**, при сборке, сразу после подмены:
+`apt-mark hold` каждого установленного пакета из списка ниже
+(`kernel-hold.sh`), затем сверка с `apt-mark showhold` — не закрепилось
+хоть что-то из установленного — отказ сборки. Руками больше ничего делать
+не нужно.
+
+Зачем: suite `r36.4` репозитория NVIDIA, прописанный в L4T, несёт не только
+36.4.3 — в индексе 2026-10-15 у `nvidia-l4t-kernel` есть 36.4.0, 36.4.3,
+36.4.4 и 36.4.7. Первый же `apt upgrade` на роботе поставил бы 36.4.7.
+`libnvisppg.so` защищена отведением dpkg, ядро — только этим закреплением.
+
+| Пакет | Почему закреплён |
+|---|---|
+| `nvidia-l4t-kernel` | `/boot/Image` (штатный, без драйверов Sensing), `modules.dep` ядра — затёр бы наш `depmod`; postinst зовёт `nv-update-extlinux` |
+| `nvidia-l4t-kernel-dtbs` | `/boot/dtb/kernel_*.dtb` — FDT записи `JetsonIO`, к нему применяется оверлей камер |
+| `nvidia-l4t-kernel-oot-modules` | владеет `updates/…/tegra-camera.ko`, `nvhost-nvcsi-t194.ko` и штатным `max96712.ko` — ровно теми файлами, что заменены или удалены |
+| `nvidia-l4t-initrd` | `/boot/initrd` обеих загрузочных записей |
+| `nvidia-l4t-kernel-headers`, `nvidia-l4t-kernel-oot-headers` | `Depends: nvidia-l4t-kernel (= …)`; заголовки штатного ядра — сборка модулей не под то дерево |
+| `nvidia-l4t-display-kernel` | `Depends: nvidia-l4t-kernel (= …)`; `nvidia.ko`, собранный под штатное ядро |
+
+Три последних apt и так держал бы точной зависимостью; закрепление говорит
+это прямо вместо списка «kept back». Не установленный пакет не закрепляется
+(`apt-mark hold` неизвестного пакета — предупреждение dpkg, а не запрет), об
+этом пишется строка в журнал сборки.
+
+Побочное следствие, и оно желаемое: `nvidia-l4t-kernel` зависит от
+`nvidia-l4t-tools (= 36.4.3-…)`, на котором точной версией висят
+`nvidia-l4t-bootloader` и `nvidia-l4t-xusb-firmware`, — `apt upgrade` держит
+и их. BSP на роботе обновляется перепрошивкой, не apt.
+
+Проверить и снять:
 
 ```bash
-sudo apt-mark hold nvidia-l4t-kernel nvidia-l4t-kernel-dtbs nvidia-l4t-initrd
+apt-mark showhold                      # список закреплённых
+sudo apt-mark unhold nvidia-l4t-kernel nvidia-l4t-kernel-dtbs nvidia-l4t-kernel-oot-modules \
+    nvidia-l4t-initrd nvidia-l4t-kernel-headers nvidia-l4t-kernel-oot-headers nvidia-l4t-display-kernel
 ```
+
+Когда снимать: **на роботе — практически никогда.** Снятие с последующим
+`apt upgrade` — это ровно замена ядра Sensing штатным: камеры пропадут,
+загрузка пойдёт в запись `JetsonIO` с чужими `Image` и модулями. Переход на
+другой релиз L4T делается новой сборкой образа под новый пакет Sensing (и
+новой версией этого расширения, закреплённой на тот релиз), а не apt на
+месте. Снять осознанно имеет смысл только на стенде, где плата уходит со
+штатным ядром NVIDIA и без камер — тогда заодно выбрать в загрузочном меню
+запись `backup`.
 
 ## Диагностика на плате
 
