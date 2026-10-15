@@ -1004,7 +1004,7 @@ tools/test-conf.sh            # lib/bisquite-conf и домены на подм�
 в репозиторий. Проверка, которую надо не забыть запустить, — не проверка.
 
 Теперь `tools/check.sh` гоняет GitHub Actions: `.github/workflows/ci-release.yml`,
-на каждый push в любую ветку и на каждый pull request в `main`. Один job, одна
+на каждый pull request в `main` и на каждый push в `main`. Один job, одна
 команда — та же, что запускают руками, чтобы CI и локальный прогон не
 разъезжались.
 

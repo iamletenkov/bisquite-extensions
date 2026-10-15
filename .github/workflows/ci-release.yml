@@ -21,12 +21,14 @@ name: CI and Release
 # репозитория может не оказаться, не падает, а висит в очереди навсегда — это
 # хуже красного CI. Появится свой раннер — меняется одна строка.
 
+# Ветки проверяются на pull_request (результат слияния с main), push — только
+# main: там релиз. push во все ветки вместе с pull_request гонял CI дважды на
+# каждый коммит PR. Ветку без PR — черновым PR или вручную (workflow_dispatch).
 on:
   pull_request:
     branches: [main]
   push:
-    branches:
-      - "**"
+    branches: [main]
   workflow_dispatch:
 
 # По умолчанию — только чтение; запись — только у job'а release-please.
