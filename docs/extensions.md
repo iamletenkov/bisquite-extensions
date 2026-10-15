@@ -778,6 +778,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `gpu-driver-nvidia` | `nvidia` | драйвер NVIDIA под ядро образа (2.0.0: `NVIDIA_DRIVER_VERSION`, `NVIDIA_KERNEL_MODULES=open\|proprietary`, `NVIDIA_SOURCE=archive\|ppa`) + blacklist nouveau |
 | `nvidia-container-runtime` | `nvidia-container-toolkit` | `nvidia-container-toolkit` из `nvidia.github.io/libnvidia-container`, `nvidia-ctk runtime configure --runtime=docker` без смены `default-runtime` |
 | `can-bus` | `can` | `can-utils`, `iproute2`; модули `can can_raw can_dev vcan slcan gs_usb peak_usb` проверены `modinfo -k <ядро образа>` (ядро L4T `*-tegra`: без `slcan gs_usb peak_usb` — предупреждение); `/etc/modules-load.d/can.conf` |
+| `can-usb-adapters` | `can-usb` | `gs_usb`, `peak_usb`, `slcan` для ядра Sensing 5.15.148-tegra (AGX Orin, L4T 36.4.3): собраны при сборке образа из исходников Jetson Linux R36.4.3 против `nvidia-l4t-kernel-headers`, `/lib/modules/<ядро>/updates/can-usb`, `depmod` |
 | `host-firewall` | `firewall` | таблица nftables `inet bisquite` (input — `policy drop`) или цепочка iptables-legacy `BISQUITE-INPUT` — бэкенд по модулям ядра при сборке и на каждой загрузке (`FIREWALL_BACKEND`); штатное L4T r36 без `nft_ct` — iptables; ядро без обоих — отказ; цепочки Docker не трогает |
 | `system-locale` | `locale` | `locale-gen`, `/etc/default/locale`, `/etc/default/keyboard`, `xorg.conf.d/00-keyboard.conf`, умолчания GNOME input-sources (dconf) |
 | `remote-support` | `rustdesk` | `.deb` RustDesk (x86_64 / aarch64) по версии и sha256 своей архитектуры, включённый `rustdesk.service`; адреса сервера — `RustDesk2.toml` из домена `rustdesk` |
@@ -807,6 +808,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `selkies` | `x11-server`, `display-manager` | `run-selkies.sh` снимает экран существующего X-дисплея и ждёт сессию пользователя; без автологина показывать нечего |
 | `l4t-pytorch` | `cuda` | `install.sh` отказывает без `/usr/local/cuda/bin/nvcc`: им собирается torchvision с `FORCE_CUDA=1`; сам torch грузит `libcublas`, `libcufft` и прочие библиотеки тулкита. На R32 (Nano) не проверяется: torch и CUDA 10.2 уже в образе |
 | `l4t-tensorflow` | `cuda` | `install.sh` отказывает без `/usr/local/cuda/lib64`: TF грузит библиотеки тулкита |
+| `can-usb` | `gmsl2-camera` | `install.sh` отказывает, если `/boot/Image` — не ядро Sensing закреплённой сборки: модули собираются под него, а кладёт его `sensing-gmsl2-camera` — в VMFILE раньше `can-usb` |
 | `nvidia-container-toolkit` | `gpu-driver-nvidia`, `container-runtime` | `nvidia-ctk runtime configure --runtime=docker` правит `/etc/docker/daemon.json`; без драйвера среда `nvidia` бесполезна |
 | остальные | — | ничего не требуют по коду |
 

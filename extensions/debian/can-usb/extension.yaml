@@ -1,0 +1,17 @@
+name: can-usb
+version: 1.0.0
+layout: 2
+family: deb
+# Только Jetson AGX Orin на L4T 36.4.3 с ядром Sensing: модули собираются под
+# одну сборку ядра; install.sh отказывает на другой плате, релизе или ядре.
+arch: [arm64]
+# Только build: модули собираются и кладутся в образ, весь флот получает один
+# бинарь; на устройстве им нужен только udev (загрузка по modalias адаптера).
+phase: build
+# can-usb-adapters — gs_usb, peak_usb, slcan в /lib/modules/<ядро>/updates/can-usb
+# с depmod для ядра образа.
+provides: [can-usb-adapters]
+# install.sh отказывает без ядра Sensing на /boot/Image, а его кладёт
+# sensing-gmsl2-camera (способность gmsl2-camera): в VMFILE — раньше can-usb.
+requires: [gmsl2-camera]
+conflicts: []

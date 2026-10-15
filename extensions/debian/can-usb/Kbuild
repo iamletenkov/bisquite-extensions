@@ -1,0 +1,8 @@
+# Out-of-tree build of the USB/serial CAN adapters missing from the Sensing
+# kernel (CONFIG_CAN_GS_USB, CONFIG_CAN_PEAK_USB, CONFIG_CAN_SLCAN not set).
+# Same objects as drivers/net/can/usb/Makefile, drivers/net/can/usb/peak_usb/
+# Makefile and drivers/net/can/Makefile of the 5.15 tree, without the CONFIG_
+# gates. Copied next to the sources by install.sh (canusb_prepare).
+obj-m := gs_usb.o peak_usb.o slcan.o
+peak_usb-y := peak_usb/pcan_usb_core.o peak_usb/pcan_usb.o \
+              peak_usb/pcan_usb_pro.o peak_usb/pcan_usb_fd.o
