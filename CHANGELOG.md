@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.0](https://github.com/iamletenkov/bisquite-extensions/compare/v3.1.0...v3.2.0) (2026-10-15)
+
+
+### Добавлено
+
+* **firewall:** iptables-legacy backend for kernels without nft_ct ([46e6876](https://github.com/iamletenkov/bisquite-extensions/commit/46e6876837b50de0d4a3489ddad58f60aaec2223))
+* **sensing-gmsl2-camera:** pin the L4T kernel packages at build time ([2372fba](https://github.com/iamletenkov/bisquite-extensions/commit/2372fba17c3608d80fad289f3a34558ed889d0e9))
+
 ## [3.1.0](https://github.com/iamletenkov/bisquite-extensions/compare/v3.0.0...v3.1.0) (2026-10-15)
 
 
