@@ -282,6 +282,12 @@ Workflow `CI and Release`, конфиг — `.github/release_please/`:
 3. Владелец сливает этот PR — release-please создаёт тег `vX.Y.Z` и
    опубликованный релиз с заметками. Файлов к релизу нет: потребителю нужен
    только тег.
+4. Тот же прогон запускает в `iamletenkov/bisquite` workflow `extensions-bump.yml`
+   (job `dispatch-bisquite`): там открывается PR, поднимающий подмодуль и
+   `EXT_VERSION`/`ref` в примерах до нового тега. Токен — секрет
+   `BISQUITE_DISPATCH_TOKEN` этого репозитория: fine-grained PAT только на
+   bisquite с правом Actions: Read and write, действует до 16.10.2027 —
+   до этой даты перевыпустить, иначе job релиза покраснеет.
 
 `ref: main` неподвижной точкой не является: ветка мутабельна, а git-тег
 переставляется `git tag -f`. Что фактически легло в кеш, записывает

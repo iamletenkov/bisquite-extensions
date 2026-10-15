@@ -72,10 +72,58 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - name: Release Please
+        id: release
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
           config-file: .github/release_please/release-please-config.json
           manifest-file: .github/release_please/.release-please-manifest.json
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Релиз сам поднимает расширения в bisquite: запускает там
+  # extensions-bump.yml, который ставит указатель подмодуля и версию
+  # в примерах на этот тег и открывает PR.
+  #
+  # Токен — BISQUITE_DISPATCH_TOKEN: fine-grained PAT только на
+  # iamletenkov/bisquite с правом Actions: Read and write. Код он пушить
+  # не может — ветку и PR в bisquite делает уже GITHUB_TOKEN того workflow.
+  # GITHUB_TOKEN этого репозитория чужой workflow запустить не может.
+  #
+  # Только push в main: на pull_request секретов нет, а pull_request_target
+  # здесь не нужен и опасен. Без секрета (форк, чужой клон) шаг пропускается
+  # с предупреждением; в iamletenkov/bisquite-extensions это отказ.
+  dispatch-bisquite:
+    name: Bump extensions in bisquite
+    needs: release-please
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Dispatch extensions-bump.yml
+        env:
+          GH_TOKEN: ${{ secrets.BISQUITE_DISPATCH_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TARGET_REPO: iamletenkov/bisquite
+          HOME_REPO: iamletenkov/bisquite-extensions
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Тег релиза должен иметь вид vX.Y.Z, получено: '$TAG'"
+            exit 1
+          fi
+          if [ -z "$GH_TOKEN" ]; then
+            if [ "$GITHUB_REPOSITORY" = "$HOME_REPO" ]; then
+              echo "::error::Нет секрета BISQUITE_DISPATCH_TOKEN — bisquite не узнает о $TAG"
+              exit 1
+            fi
+            echo "::warning::Нет секрета BISQUITE_DISPATCH_TOKEN — подъём в bisquite пропущен"
+            exit 0
+          fi
+          gh workflow run extensions-bump.yml -R "$TARGET_REPO" --ref main -f tag="$TAG"
+          echo "Запущен extensions-bump.yml в $TARGET_REPO для $TAG"
