@@ -34,6 +34,40 @@ apt_retry(){
     return 1
 }
 
+# --- the image kernel: the rules need conntrack inside nf_tables ------------
+# Checked first, before apt: nothing to install if the kernel cannot run it.
+# The defaults and the fallback set of configure.sh both match `ct state`, so
+# nft_ct must exist for the IMAGE kernel (/lib/modules/*, not the appliance's
+# `uname -r`). The stock L4T r36 kernel (5.15.148-tegra) is built without
+# CONFIG_NFT_CT: on the device both sets would fail to load and incoming
+# traffic would stay unfiltered — a refusal here, not a quiet open robot.
+kernel_has(){  # <kernel> <module>: a loadable module (modules.dep) or built in
+    local d="/lib/modules/$1" re="/$2\.ko(\.[a-z]+)?"
+    grep -qE "$re:" "$d/modules.dep" 2>/dev/null || grep -qE "$re\$" "$d/modules.builtin" 2>/dev/null
+}
+kernels=()
+for d in /lib/modules/*/; do
+    d="${d%/}"
+    [[ -f "$d/modules.order" ]] && kernels+=("${d##*/}")
+done
+if (( ${#kernels[@]} == 0 )); then
+    log_warn "в образе нет ядра (/lib/modules/*/modules.order) — модули nftables для него не проверены"
+else
+    krc=0
+    for k in "${kernels[@]}"; do
+        miss=()
+        for m in nf_tables nft_ct; do kernel_has "$k" "$m" || miss+=("$m"); done
+        if (( ${#miss[@]} )); then
+            log_error "$k: нет модулей ${miss[*]} — правила с ct state (и запасной набор) на устройстве не загрузятся, входящее останется открытым"
+            [[ "$k" == *-tegra ]] && log_error "$k: штатное ядро L4T собрано без CONFIG_NFT_CT; нужно ядро с CONFIG_NFT_CT=m, иначе firewall на Jetson не ставится"
+            krc=1
+        else
+            log_info "$k: nf_tables, nft_ct — есть"
+        fi
+    done
+    (( krc == 0 )) || exit 1
+fi
+
 export DEBIAN_FRONTEND=noninteractive
 apt_retry apt-get update -q || { log_error "apt-get update не прошёл"; exit 1; }
 apt_retry apt-get install -y -q --no-install-recommends nftables \
