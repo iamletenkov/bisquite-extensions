@@ -777,10 +777,10 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `web-ide` | `code-server` | code-server на порту `CODE_SERVER_PORT` домена `code-server` (умолчание 9001) |
 | `gpu-driver-nvidia` | `nvidia` | драйвер NVIDIA под ядро образа (2.0.0: `NVIDIA_DRIVER_VERSION`, `NVIDIA_KERNEL_MODULES=open\|proprietary`, `NVIDIA_SOURCE=archive\|ppa`) + blacklist nouveau |
 | `nvidia-container-runtime` | `nvidia-container-toolkit` | `nvidia-container-toolkit` из `nvidia.github.io/libnvidia-container`, `nvidia-ctk runtime configure --runtime=docker` без смены `default-runtime` |
-| `can-bus` | `can` | `can-utils`, `iproute2`; модули `can can_raw can_dev vcan slcan gs_usb peak_usb` проверены `modinfo -k <ядро образа>`; `/etc/modules-load.d/can.conf` |
-| `host-firewall` | `firewall` | таблица nftables `inet bisquite` (input — `policy drop`), `bisquite-firewall.service` на каждой загрузке; цепочки Docker не трогает |
+| `can-bus` | `can` | `can-utils`, `iproute2`; модули `can can_raw can_dev vcan slcan gs_usb peak_usb` проверены `modinfo -k <ядро образа>` (ядро L4T `*-tegra`: без `slcan gs_usb peak_usb` — предупреждение); `/etc/modules-load.d/can.conf` |
+| `host-firewall` | `firewall` | таблица nftables `inet bisquite` (input — `policy drop`), `bisquite-firewall.service` на каждой загрузке; цепочки Docker не трогает; ядру образа нужен `nft_ct` (штатное L4T r36 — без него, отказ) |
 | `system-locale` | `locale` | `locale-gen`, `/etc/default/locale`, `/etc/default/keyboard`, `xorg.conf.d/00-keyboard.conf`, умолчания GNOME input-sources (dconf) |
-| `remote-support` | `rustdesk` | `.deb` RustDesk по версии и sha256, включённый `rustdesk.service`; адреса сервера — `RustDesk2.toml` из домена `rustdesk` |
+| `remote-support` | `rustdesk` | `.deb` RustDesk (x86_64 / aarch64) по версии и sha256 своей архитектуры, включённый `rustdesk.service`; адреса сервера — `RustDesk2.toml` из домена `rustdesk` |
 | `nocloud-cidata-seed` | `nocloud-cidata` | `/etc/cloud/cloud.cfg.d/zz-bisquite-nocloud.cfg` с `fs_label: cidata` |
 | `network-manager` | `network-manager` | пакеты `network-manager` и `wpasupplicant`, включённый `NetworkManager.service` |
 | `jetson-monitor` | `jetson-stats` | `jtop` из PyPI плюс `jtop.service`; данные идут из `tegrastats` и sysfs Tegra, а не из NVML |

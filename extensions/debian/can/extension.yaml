@@ -1,17 +1,21 @@
 name: can
-version: 1.0.0
+version: 1.1.0
 layout: 2
 family: deb
-# Пакеты can-utils и iproute2 есть в обоих архивах, но модули ядра проверены
-# только на amd64 (linux-modules-extra Ubuntu 24.04, linux-image Debian 12):
-# объявить arm64 значило бы пообещать модули ядра, которых никто не искал.
-arch: [amd64]
+# 1.1.0: arm64. Модули ядра проверены на amd64 (linux-modules-extra Ubuntu
+# 24.04, linux-image Debian 12) и на составе ядра L4T r36.4.3
+# (5.15.148-tegra, nvidia-l4t-kernel + nvidia-l4t-kernel-oot-modules): там
+# linux-modules-extra нет, can/can_raw/can_dev/vcan/mttcan — модулями, а
+# slcan/gs_usb/peak_usb штатное ядро не собирает вовсе — для ядра *-tegra
+# они предупреждение, а не отказ (README, «Jetson / L4T»).
+arch: [amd64, arm64]
 # Только build: модули и автозагрузка кладутся в образ. Правка списка
 # автозагрузки на устройстве — хук knobs.apply домена `can`, а не служба
 # первой загрузки.
 phase: build
 # can-bus — модули can, can_raw, can_dev, vcan, slcan, gs_usb, peak_usb есть
-# для ядра образа (install.sh проверяет modinfo -k), утилиты candump/cansend.
+# для ядра образа (install.sh проверяет modinfo -k), утилиты candump/cansend;
+# на L4T — can, can_raw, can_dev, vcan и модули из CAN_MODULES_LOAD.
 provides: [can-bus]
 requires: []
 conflicts: []

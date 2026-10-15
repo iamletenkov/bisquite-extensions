@@ -9,8 +9,14 @@
 #
 # Parameters (environment, from VMFILE):
 #   RUSTDESK_VERSION   1.5.0           release tag on github.com/rustdesk/rustdesk
-#   RUSTDESK_SHA256    pin of 1.5.0    sha256 of rustdesk-<version>-x86_64.deb;
-#                                      required for any other version
+#   RUSTDESK_SHA256_<ARCH>  pin of 1.5.0  sha256 of the package for this dpkg
+#                                      architecture (RUSTDESK_SHA256_AMD64 —
+#                                      rustdesk-<version>-x86_64.deb,
+#                                      RUSTDESK_SHA256_ARM64 — …-aarch64.deb)
+#   RUSTDESK_SHA256    (empty)         the same for whatever architecture the
+#                                      image is; the per-arch variable wins.
+#                                      One of them is required for any version
+#                                      other than the pinned one
 #   RUSTDESK_URL       (empty)         full URL of the .deb (a mirror); empty —
 #                                      the GitHub release asset
 #   RUSTDESK_ID_SERVER, RUSTDESK_RELAY_SERVER, RUSTDESK_API_SERVER, RUSTDESK_KEY
@@ -31,23 +37,33 @@ done
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/lib/bisquite-conf"
 
-# Pins: version -> sha256 of the x86_64 package (GitHub release asset digest,
-# checked against the downloaded file 2026-10-14).
+# Pins: version + dpkg architecture -> sha256 of the release asset (GitHub
+# release asset digest, checked against the downloaded file: x86_64
+# 2026-10-14, aarch64 2026-10-15).
 DEFAULT_VERSION=1.5.0
 pinned_sha256(){
+    case "$1/$2" in
+        1.5.0/amd64) echo 4e2b9701d25a7ef373f3d09bda584a37d6902f97a6ab15f2e86d4a5783e2a0ec ;;
+        1.5.0/arm64) echo 1f2fc9be8321c10347aa33cb13198c6a956aec272c5e58ac81f4c0ef04037df3 ;;
+    esac
+}
+# dpkg architecture -> the suffix of the release asset.
+asset_arch(){
     case "$1" in
-        1.5.0) echo 4e2b9701d25a7ef373f3d09bda584a37d6902f97a6ab15f2e86d4a5783e2a0ec ;;
+        amd64) echo x86_64 ;;
+        arm64) echo aarch64 ;;
+        *) return 1 ;;
     esac
 }
 
-version="${RUSTDESK_VERSION:-$DEFAULT_VERSION}"
-sha256="${RUSTDESK_SHA256:-$(pinned_sha256 "$version")}"
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { log_error "RUSTDESK_VERSION='$version': ожидали X.Y.Z"; exit 1; }
-[[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || { log_error "для RustDesk $version нет sha256 — задайте RUSTDESK_SHA256 (digest файла rustdesk-$version-x86_64.deb на странице релиза)"; exit 1; }
-
 arch="$(dpkg --print-architecture)"
-[[ "$arch" == amd64 ]] || { log_error "архитектура $arch: закреплён и проверен только x86_64-пакет"; exit 1; }
-file="rustdesk-$version-x86_64.deb"
+rarch="$(asset_arch "$arch")" || { log_error "архитектура $arch: пакеты есть только для amd64 (x86_64) и arm64 (aarch64)"; exit 1; }
+version="${RUSTDESK_VERSION:-$DEFAULT_VERSION}"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { log_error "RUSTDESK_VERSION='$version': ожидали X.Y.Z"; exit 1; }
+file="rustdesk-$version-$rarch.deb"
+arch_var="RUSTDESK_SHA256_${arch^^}"
+sha256="${!arch_var:-${RUSTDESK_SHA256:-$(pinned_sha256 "$version" "$arch")}}"
+[[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || { log_error "для RustDesk $version ($arch) нет sha256 — задайте $arch_var (digest файла $file на странице релиза)"; exit 1; }
 url="${RUSTDESK_URL:-https://github.com/rustdesk/rustdesk/releases/download/$version/$file}"
 [[ "$url" =~ ^https?://[A-Za-z0-9.:/_~%+-]+$ ]] || { log_error "RUSTDESK_URL='$url': ожидали URL"; exit 1; }
 

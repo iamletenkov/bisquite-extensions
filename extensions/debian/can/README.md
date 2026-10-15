@@ -9,7 +9,7 @@
 | Что | Откуда |
 |---|---|
 | `can-utils`, `iproute2`, `kmod` | apt дистрибутива |
-| модули `can`, `can_raw`, `can_dev`, `vcan`, `slcan`, `gs_usb`, `peak_usb` | Ubuntu — `linux-modules-extra-<ядро>`, если их нет в образе; Debian — уже в `linux-image-*` |
+| модули `can`, `can_raw`, `can_dev`, `vcan`, `slcan`, `gs_usb`, `peak_usb` | Ubuntu — `linux-modules-extra-<ядро>`, если их нет в образе; Debian — уже в `linux-image-*`; L4T — `nvidia-l4t-kernel`, без `slcan`/`gs_usb`/`peak_usb` (см. «Jetson / L4T») |
 | `/etc/modules-load.d/can.conf` | из настройки `CAN_MODULES_LOAD` (по умолчанию `can`, `can_raw`, `vcan`) |
 
 **Ядро — образа, а не `uname -r`.** Внутри appliance `virt-customize`
@@ -25,6 +25,47 @@
 `apt upgrade` придёт без `linux-modules-extra`, и CAN после перезагрузки
 пропадёт. Образ рабочей машины на `linux-generic` (Ubuntu Desktop) этого
 не касается.
+
+## Jetson / L4T
+
+Ядро L4T (`<версия>-tegra`, например `5.15.148-tegra` у r36.4.3 / JetPack 6.2)
+ставится пакетами NVIDIA, `linux-modules-extra` для него нет — `install.sh`
+его и не ищет: проверяет модули для ядра образа (`modinfo -k`, встроенные —
+ещё и по `modules.builtin`) и не трогает apt ядра.
+
+Фактический состав ядра r36.4.3 (`nvidia-l4t-kernel` и
+`nvidia-l4t-kernel-oot-modules` 5.15.148-tegra-36.4.3, конфиг — встроенный
+в `Image`):
+
+| Модуль | В ядре L4T r36.4.3 |
+|---|---|
+| `can`, `can_raw`, `can_dev`, `vcan` | модули (`kernel/net/can/`, `kernel/drivers/net/can/`) |
+| `mttcan` — родной контроллер CAN Orin | модуль вне дерева: `updates/drivers/net/can/mttcan/` (`nvidia-l4t-kernel-oot-modules`), зависит от `can_dev` |
+| `slcan`, `gs_usb`, `peak_usb` | **нет**: `CONFIG_CAN_SLCAN`, `CONFIG_CAN_GS_USB`, `CONFIG_CAN_PEAK_USB` не заданы, ни встроенными, ни модулями |
+
+Поэтому для ядра `*-tegra`:
+
+- `can`, `can_raw`, `can_dev`, `vcan` и всё из `CAN_MODULES_LOAD` —
+  обязательны, как везде: нет — **отказ сборки**;
+- `slcan`, `gs_usb`, `peak_usb` — **громкое предупреждение**, а не отказ.
+  Ни один пакет их не доставит: нужно ядро, пересобранное с этими опциями.
+  Отказ сделал бы расширение непригодным на любом Jetson, хотя основной
+  интерфейс платы — `mttcan`, а USB/serial-адаптеры (`gs_usb` —
+  candleLight/CANable, `peak_usb` — PCAN-USB, `slcan` — адаптеры с
+  последовательным протоколом) — дополнительный. Нужен такой адаптер —
+  впишите его модуль в `CAN_MODULES_LOAD`: тогда отсутствие станет отказом,
+  а не предупреждением. Пункт `modinfo -n vcan gs_usb peak_usb slcan` из
+  чек-листа рабочей машины на штатном ядре L4T не пройдёт.
+
+Рекомендованный список автозагрузки для Jetson (не умолчание —
+умолчание общее для всех платформ):
+
+```vmfile
+EXTENSION can CAN_MODULES_LOAD="can can_raw vcan mttcan"
+```
+
+`mttcan` — драйвер контроллеров CAN самого SoC (интерфейсы `can0`, `can1`;
+трансивер на шину — внешний).
 
 ## Настройки
 
@@ -80,3 +121,14 @@ candump vcan0 &  cansend vcan0 123#DEADBEEF   # кадр виден в candump
 
 Проверено в контейнерах `ubuntu:24.04` (ядро 6.8.0-147-generic, модули
 доставлены `linux-modules-extra`) и `debian:12` (6.1.0-53-amd64).
+
+arm64 / L4T (1.1.0, 2026-10-15) — контейнер `ubuntu:22.04` arm64 (qemu-user)
+с раскладкой ядра L4T r36.4.3: `/lib/modules/5.15.148-tegra` из
+`nvidia-l4t-kernel` плюс `updates/` из `nvidia-l4t-kernel-oot-modules`
+(`modules.dep` пакета уже знает `mttcan`). Умолчание — успех, три
+предупреждения (`slcan`, `gs_usb`, `peak_usb`), `linux-modules-extra` не
+ставится, `can.conf` = `can can_raw vcan`; `CAN_MODULES_LOAD` с `mttcan` —
+успех; с `gs_usb` — отказ; `can_raw`, перенесённый во встроенные
+(`modules.builtin`, без файла `.ko`), — найден; удалённый `vcan` — отказ.
+Повтор на amd64: `debian:12` с ядрами 6.1.0-52/53 — без изменений; `mttcan`
+в `CAN_MODULES_LOAD` на amd64 — отказ. На самой плате не запускалось.

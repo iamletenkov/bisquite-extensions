@@ -76,6 +76,23 @@ EXTENSION firewall FIREWALL_ENABLE=0      # образ загрузится с �
 Свои файлы правил в образ — `COPY_IN`/`UPLOAD` в
 `/etc/bisquite/firewall/rules.d/` после `EXTENSION firewall`.
 
+### Ядро образа: нужен `nft_ct`
+
+И правила по умолчанию, и запасной набор `configure.sh` сверяют
+`ct state`, а это выражение живёт в модуле `nft_ct` (`CONFIG_NFT_CT`).
+Без него на устройстве не загрузится ни один набор, и входящее останется
+**нефильтрованным**. Поэтому `install.sh` первым делом, до apt, проверяет
+`nf_tables` и `nft_ct` для каждого ядра образа (`/lib/modules/*/` с
+`modules.order`; по `modules.dep` и `modules.builtin`, не `uname -r` —
+в appliance это его собственное ядро) и при отсутствии **отказывает**.
+Ядра в образе нет вовсе (контейнер) — предупреждение.
+
+**Jetson / L4T: штатное ядро r36.4.3 (`5.15.148-tegra`) собрано без
+`CONFIG_NFT_CT`** (а также без `NFT_REJECT`, `NFT_COUNTER`, `NFT_COMPAT`;
+`nf_tables` — модулем, конфиг — встроенный в `Image` из
+`nvidia-l4t-kernel`). На таком образе `EXTENSION firewall` отказывает.
+Варианты — ядро L4T с `CONFIG_NFT_CT=m` или образ без этого расширения.
+
 ## Манифест записи / развёртывания
 
 `write_files` cloud-init, если манифест его даёт, или строкой первой
@@ -121,3 +138,8 @@ docker run --rm alpine wget -qO- http://deb.debian.org >/dev/null && echo ok
 `systemctl restart bisquite-firewall` и после перезапуска dockerd; свой файл
 открывает порт; битый файл — запасной набор и `failed`;
 `FIREWALL_ENABLE=0/1` через `bisquite-conf`; таблица поднимается при загрузке.
+
+Проверка ядра (1.1.0, 2026-10-15): `ubuntu:22.04` arm64 с раскладкой ядра
+L4T r36.4.3 — отказ по `nft_ct` до apt; `debian:12` с ядрами
+6.1.0-52/53-amd64 — `nf_tables`, `nft_ct` найдены; `ubuntu:24.04` без ядра —
+предупреждение и установка дальше.

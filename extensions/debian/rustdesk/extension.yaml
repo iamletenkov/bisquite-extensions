@@ -1,11 +1,12 @@
 name: rustdesk
-version: 1.0.0
+version: 1.1.0
 layout: 2
 family: deb
-# Закреплены sha256 только x86_64-пакета (rustdesk-<версия>-x86_64.deb) и
-# проверен только он. Релиз публикует и aarch64, но его сумма не закреплена
-# и запуск не проверялся.
-arch: [amd64]
+# 1.1.0: arm64 — пакет rustdesk-<версия>-aarch64.deb со своей закреплённой
+# sha256 (RUSTDESK_SHA256_ARM64), выбор по dpkg --print-architecture.
+# На каждую архитектуру — свой ассет релиза и своя сумма; armhf (armv7-sciter)
+# не объявлен: другой клиент (Sciter), его никто не проверял.
+arch: [amd64, arm64]
 # build     — install.sh ставит .deb по версии и sha256, кладёт юнит rustdesk
 #             (postinst пакета делает это только под systemd) и включает его;
 #             чистит RustDesk.toml, чтобы ID у каждого устройства был свой;
