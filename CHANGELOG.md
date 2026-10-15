@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.1.0](https://github.com/iamletenkov/bisquite-extensions/compare/v3.0.0...v3.1.0) (2026-10-15)
+
+
+### Добавлено
+
+* **can:** arm64 and L4T kernels are checked without linux-modules-extra ([390643d](https://github.com/iamletenkov/bisquite-extensions/commit/390643d0df657fc58c414f74cc97dfb4ed93b695))
+* **rustdesk:** arm64 installs the aarch64 release package with its own pinned sha256 ([58ddcfa](https://github.com/iamletenkov/bisquite-extensions/commit/58ddcfa2eae9a3f4e43d24bc3f6cd820510978e6))
+
+
+### Исправлено
+
+* **firewall:** refuse an image kernel without nft_ct instead of booting unfiltered ([1b79f87](https://github.com/iamletenkov/bisquite-extensions/commit/1b79f87fe1e2764c6599dc082e3a3e970f9ca281))
+
 ## [3.0.0](https://github.com/iamletenkov/bisquite-extensions/compare/v2.0.0...v3.0.0) (2026-10-14)
 
 
