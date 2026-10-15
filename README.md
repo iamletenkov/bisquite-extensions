@@ -318,7 +318,8 @@ Workflow `CI and Release`, конфиг — `.github/release_please/`:
   `gpu-driver-nvidia` и `container-runtime`, регистрирует среду `nvidia`
   в Docker без смены `default-runtime`;
 - рабочая машина робота: `can` (модули CAN под ядро образа, `can-bus`),
-  `firewall` (своя таблица nftables `inet bisquite`, Docker не задевает,
+  `firewall` (своя таблица nftables `inet bisquite` или цепочка iptables-legacy
+  `BISQUITE-INPUT` на ядрах без `nft_ct`, Docker не задевает,
   `host-firewall`), `locale` (локаль и раскладки, `system-locale`), `rustdesk`
   (`.deb` по sha256, адреса своего сервера — на устройстве, `remote-support`);
   ничего не требуют и ни с чем не конфликтуют;

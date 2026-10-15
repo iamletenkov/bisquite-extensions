@@ -313,7 +313,7 @@ echo 'пароль' | sudo bisquite-conf set x11vnc X11VNC_PASSWORD=-   # сек
 | `kiosk` | `/etc/bisquite/kiosk/config` | `kiosk` | `configure.sh`, `run-kiosk.sh` | перезапуск `configure-kiosk` |
 | `chromium-kiosk` | `/etc/bisquite/chromium-kiosk/config` | `chromium-kiosk` | `configure.sh` → `/etc/chromium-kiosk/config.yml` | перезапуск `configure-chromium-kiosk` |
 | `can` | `/etc/bisquite/can/config` | `can` | `render-modules-load.sh` → `/etc/modules-load.d/can.conf` | переписать `can.conf` + перезапуск `systemd-modules-load` |
-| `firewall` | `/etc/bisquite/firewall/config` (правила — `rules.d/*.nft` рядом) | `firewall` | `bisquite-firewall.service` на каждой загрузке | перезапуск `bisquite-firewall` (одна транзакция nft) |
+| `firewall` | `/etc/bisquite/firewall/config` (правила — `rules.d/*.nft` или `*.rules`/`*.rules6` рядом) | `firewall` | `bisquite-firewall.service` на каждой загрузке | перезапуск `bisquite-firewall` (одна транзакция nft или iptables-restore на семейство) |
 | `locale` | `/etc/bisquite/locale/config` | `locale` | `apply.sh` → `/etc/default/{locale,keyboard}`, X11, dconf | `apply.sh` (без `systemctl`) |
 | `rustdesk` | `/etc/bisquite/rustdesk/config` | `rustdesk` | `configure-rustdesk.service` на каждой загрузке → `RustDesk2.toml` root и UID ≥ 1000 | перезапуск `configure-rustdesk` (тот перезапускает `rustdesk`, если файлы изменились) |
 
@@ -778,7 +778,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `gpu-driver-nvidia` | `nvidia` | драйвер NVIDIA под ядро образа (2.0.0: `NVIDIA_DRIVER_VERSION`, `NVIDIA_KERNEL_MODULES=open\|proprietary`, `NVIDIA_SOURCE=archive\|ppa`) + blacklist nouveau |
 | `nvidia-container-runtime` | `nvidia-container-toolkit` | `nvidia-container-toolkit` из `nvidia.github.io/libnvidia-container`, `nvidia-ctk runtime configure --runtime=docker` без смены `default-runtime` |
 | `can-bus` | `can` | `can-utils`, `iproute2`; модули `can can_raw can_dev vcan slcan gs_usb peak_usb` проверены `modinfo -k <ядро образа>` (ядро L4T `*-tegra`: без `slcan gs_usb peak_usb` — предупреждение); `/etc/modules-load.d/can.conf` |
-| `host-firewall` | `firewall` | таблица nftables `inet bisquite` (input — `policy drop`), `bisquite-firewall.service` на каждой загрузке; цепочки Docker не трогает; ядру образа нужен `nft_ct` (штатное L4T r36 — без него, отказ) |
+| `host-firewall` | `firewall` | таблица nftables `inet bisquite` (input — `policy drop`) или цепочка iptables-legacy `BISQUITE-INPUT` — бэкенд по модулям ядра при сборке и на каждой загрузке (`FIREWALL_BACKEND`); штатное L4T r36 без `nft_ct` — iptables; ядро без обоих — отказ; цепочки Docker не трогает |
 | `system-locale` | `locale` | `locale-gen`, `/etc/default/locale`, `/etc/default/keyboard`, `xorg.conf.d/00-keyboard.conf`, умолчания GNOME input-sources (dconf) |
 | `remote-support` | `rustdesk` | `.deb` RustDesk (x86_64 / aarch64) по версии и sha256 своей архитектуры, включённый `rustdesk.service`; адреса сервера — `RustDesk2.toml` из домена `rustdesk` |
 | `nocloud-cidata-seed` | `nocloud-cidata` | `/etc/cloud/cloud.cfg.d/zz-bisquite-nocloud.cfg` с `fs_label: cidata` |
@@ -790,7 +790,7 @@ LightDM он разный, а под самим LightDM зависит от ег
 | `web-browser` | `firefox` | `firefox` из `packages.mozilla.org` с пином 1000 поверх транзитного пакета снапа |
 | `teleport-node` | `teleport-agent` | `/usr/local/bin/teleport`, `teleport.service` из `bisquite-teleport join`; приложения — из `/etc/bisquite/teleport/apps.d` |
 | `l4t-boot-verify` | `l4t-boot-verify` | `bisquite-l4t-boot-verify.service` — `nvbootctrl verify` на каждой загрузке; вендорская `nv-l4t-bootloader-config` заглушена |
-| `gmsl2-camera` | `sensing-gmsl2-camera` | ядро и модули Sensing, DTB-оверлей, запуск камер на каждой загрузке (`modprobe.d`, правило udev, `bisquite-sensing-clock.service`) |
+| `gmsl2-camera` | `sensing-gmsl2-camera` | ядро и модули Sensing (пакеты ядра L4T — `apt-mark hold`), DTB-оверлей, запуск камер на каждой загрузке (`modprobe.d`, правило udev, `bisquite-sensing-clock.service`) |
 | `gstreamer` | `l4t-gstreamer` | `gstreamer1.0-tools` и плагины base/good/bad/ugly/libav, RTSP-сервер, `gstreamer1.0-nice`, `python3-gst-1.0` |
 | `hw-video-codec` | `l4t-gstreamer` | `nvidia-l4t-gstreamer` версии `nvidia-l4t-core`: `nvv4l2h264enc`/`h265enc`/`decoder`, `nvvidconv` |
 | `opencv` | `l4t-opencv` | `libopencv` и `libopencv-python` 4.8.0 от NVIDIA, с GStreamer, без CUDA; на R32 ничего не ставит — сверяет cv2 образа (с CUDA) и пишет `OPENBLAS_CORETYPE` |
