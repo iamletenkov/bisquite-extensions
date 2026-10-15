@@ -277,6 +277,8 @@ Workflow `CI and Release`, конфиг — `.github/release_please/`:
 1. Сливаешь в `main` коммиты по [Conventional Commits](https://www.conventionalcommits.org/ru/):
    `fix:` поднимает patch, `feat:` — minor, `!` или `BREAKING CHANGE:` — major;
    `docs:`, `ci:`, `chore:` версию не трогают.
+   Тип и область — латиницей, текст заголовка и тела — на русском
+   (`feat(rustdesk): пакет для arm64`); подробнее — [CLAUDE.md](CLAUDE.md).
 2. После проверок на `main` release-please открывает (и дальше обновляет)
    PR «chore(main): release X.Y.Z» с секцией `CHANGELOG.md`.
 3. Владелец сливает этот PR — release-please создаёт тег `vX.Y.Z` и
