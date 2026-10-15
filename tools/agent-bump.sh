@@ -10,7 +10,7 @@
 #                     -p SHA256SUMS -D <dir>
 #
 # Edits: the default version and sha256 in agent.sh (and its comments), the
-# extension version (minor bump) with a history line in extension.yaml, the
+# extension version with a history line in extension.yaml, the
 # AGENT_VERSION row of the README, the example in update.sh and the fixtures
 # of tools/test-teleport-agent.sh. Does not commit, does not run the checks —
 # the caller does (tools/check.sh).
@@ -66,8 +66,14 @@ fi
 
 ext_old="$(sed -nE "s/^version: ($SEMVER)$/\1/p" "$MANIFEST")"
 [[ "$ext_old" =~ ^$SEMVER$ ]] || die "no version in $MANIFEST"
-IFS=. read -r major minor _ <<< "$ext_old"
-ext_new="$major.$((minor + 1)).0"
+# The extension follows the agent version (3.0.1 pinned 3.0.1, 3.1.0 — 3.1.0);
+# an extension already ahead by its own changes gets a minor bump instead.
+if [[ "$(printf '%s\n%s\n' "$ext_old" "$new" | sort -V | tail -n 1)" == "$new" && "$new" != "$ext_old" ]]; then
+    ext_new="$new"
+else
+    IFS=. read -r major minor _ <<< "$ext_old"
+    ext_new="$major.$((minor + 1)).0"
+fi
 echo "ext_version=$ext_new"
 
 old_re="${old//./\\.}"
@@ -80,7 +86,7 @@ sed -i -E \
     -e "s/^(#   AGENT_VERSION +)$SEMVER +/\1$(printf '%-10s' "$new")/" \
     "$AGENT_SH"
 
-# extension.yaml: minor bump, the history line on top of the others.
+# extension.yaml: the new version, the history line on top of the others.
 sed -i -E \
     -e "s/^version: $ext_old$/version: $ext_new/" \
     -e "/^layout: /a # $ext_new: пин пакета bisquite-teleport-agent $new." \

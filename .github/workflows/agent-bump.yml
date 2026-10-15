@@ -10,7 +10,8 @@ name: Agent Bump
 # последний релиз агента.
 #
 # Правки делает tools/agent-bump.sh (его же гоняют руками): версия и sha256
-# по умолчанию, minor-подъём версии расширения со строкой истории, README,
+# по умолчанию, версия расширения (= версии агента, если та выше; иначе
+# minor-подъём) со строкой истории, README,
 # пример в update.sh, фикстуры tools/test-teleport-agent.sh. Сумма берётся
 # из SHA256SUMS релиза; tools/check.sh гоняется до коммита — PR с красным
 # пином не открывается. Коммит `feat(teleport-agent): …` — чтобы после
@@ -178,7 +179,7 @@ jobs:
           body="$(mktemp)"
           cat > "$body" <<EOF
           Пин пакета \`bisquite-teleport-agent\` в расширении \`teleport-agent\` — $version:
-          версия и sha256 по умолчанию (\`agent.sh\`), minor-подъём версии расширения,
+          версия и sha256 по умолчанию (\`agent.sh\`), версия расширения,
           README, пример в \`update.sh\`, фикстуры \`tools/test-teleport-agent.sh\`.
           Сумма — из \`SHA256SUMS\` релиза.
 
